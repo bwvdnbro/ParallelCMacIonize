@@ -189,6 +189,24 @@ public:
     }
   }
 
+  void output_intensities(std::ostream &stream){
+    for(int ix = 0; ix < _number_of_cells[0]; ++ix){
+      double pos_x = _anchor[0] + (ix + 0.5) * _cell_size[0];
+      for(int iy = 0; iy < _number_of_cells[1]; ++iy){
+        double pos_y = _anchor[1] + (iy + 0.5) * _cell_size[1];
+        for(int iz = 0; iz < _number_of_cells[2]; ++iz){
+          double pos_z = _anchor[2] + (iz + 0.5) * _cell_size[2];
+          const int three_index[3] = {ix, iy, iz};
+          const int index = get_one_index(three_index);
+          stream.write(reinterpret_cast<char*>(&pos_x), sizeof(double));
+          stream.write(reinterpret_cast<char*>(&pos_y), sizeof(double));
+          stream.write(reinterpret_cast<char*>(&pos_z), sizeof(double));
+          stream.write(reinterpret_cast<char*>(&_intensity_integral[index]), sizeof(double));
+        }
+      }
+    }
+  }
+
 };
 
 #endif  // DENSITYSUBGRID_HPP
