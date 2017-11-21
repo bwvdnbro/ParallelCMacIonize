@@ -1,4 +1,4 @@
-class Photon{
+class Photon {
 public:
   double _position[3];
   double _direction[3];
