@@ -529,53 +529,88 @@ public:
         _inv_cell_size{ncell[0] / box[3], ncell[1] / box[4], ncell[2] / box[5]},
         _number_of_cells{ncell[0], ncell[1], ncell[2], ncell[1] * ncell[2]} {
 
+    // allocate memory for data arrays
     const int tot_ncell = _number_of_cells[3] * ncell[0];
     _number_density = new double[tot_ncell];
     _neutral_fraction = new double[tot_ncell];
     _intensity_integral = new double[tot_ncell];
 
+    // initialize data arrays
     for (int i = 0; i < tot_ncell; ++i) {
+      // initial density (homogeneous density)
       _number_density[i] = 1.e8;
+      // initial neutral fraction (low value, to allow radiation to effectively
+      // cover the entire volume initially)
       _neutral_fraction[i] = 1.e-6;
       _intensity_integral[i] = 0.;
     }
   }
 
-  ~DensitySubGrid() {
+  /**
+   * @brief Destructor.
+   */
+  inline ~DensitySubGrid() {
+    // deallocate data arrays
     delete[] _number_density;
     delete[] _neutral_fraction;
     delete[] _intensity_integral;
   }
 
-  PhotonBuffer &get_input_buffer(int input_direction) {
+  /**
+   * @brief Get a reference to the input buffer for the given direction.
+   *
+   * @param input_direction TravelDirection.
+   * @return Reference to the corresponding input buffer.
+   */
+  inline PhotonBuffer &get_input_buffer(const int input_direction) {
     return _input_buffers[input_direction];
   }
 
-  PhotonBuffer &get_output_buffer(int output_direction) {
+  /**
+   * @brief Get a reference to the output buffer corresponding to the given
+   * direction.
+   *
+   * @param output_direction TravelDirection.
+   * @return Reference to the corresponding output buffer.
+   */
+  inline PhotonBuffer &get_output_buffer(const int output_direction) {
     return _output_buffers[output_direction];
   }
 
-  unsigned int get_neighbour(int output_direction) const {
+  /**
+   * @brief Get the neighbour for the given direction.
+   *
+   * @param output_direction TravelDirection.
+   * @return Index of the neighbouring subgrid for that direction.
+   */
+  inline unsigned int get_neighbour(const int output_direction) const {
     return _ngbs[output_direction];
   }
 
-  void set_neighbour(const int output_direction, const unsigned int ngb) {
+  /**
+   * @brief Set the neighbour for the given direction.
+   *
+   * @param output_direction TravelDirection.
+   * @param ngb Neighbour index.
+   */
+  inline void set_neighbour(const int output_direction,
+                            const unsigned int ngb) {
     _ngbs[output_direction] = ngb;
   }
 
   /**
-   * @brief Let the given Photon travel through the density grid until the given
-   * optical depth is reached.
+   * @brief Let the given Photon travel through the density grid.
    *
    * @param photon Photon.
-   * @param optical_depth Optical depth the photon should travel in total
-   * (dimensionless).
-   * @return DensityGrid::iterator pointing to the cell the photon was last in,
-   * or DensityGrid::end() if the photon left the box.
+   * @param inverse_direction Inverse of the direction vector, pre-computed for
+   * better efficiency (maybe not necessary?).
+   * @param input_direction Direction from which the photon enters the grid.
+   * @return TravelDirection of the photon after it has traversed this grid.
    */
-  int interact(Photon &photon, const double *inverse_direction,
-               const int input_direction) {
+  inline int interact(Photon &photon, const double *inverse_direction,
+                      const int input_direction) {
 
+    // get some photon variables
     const double direction[3] = {photon._direction[0], photon._direction[1],
                                  photon._direction[2]};
     // NOTE: position is relative w.r.t. _anchor!!!
@@ -586,9 +621,10 @@ public:
     const double tau_target = photon._target_optical_depth;
     const double cross_section = photon._photoionization_cross_section;
     const double photon_weight = photon._weight;
+    // get the indices of the first cell on the photons path
     int three_index[3];
     int active_cell = get_start_index(position, input_direction, three_index);
-    // enter while loop. QUESTION: what is condition?
+    // enter photon traversal loop
     // double condition:
     //  - target optical depth not reached (tau_done < tau_target)
     //  - photon still in subgrid: is_inside(three_index)
@@ -617,31 +653,40 @@ public:
       // find the minimum
       double lmin = std::min(l[0], std::min(l[1], l[2]));
       double lminsigma = lmin * cross_section;
+      // compute the corresponding optical depth
       const double tau = lminsigma * _number_density[active_cell] *
                          _neutral_fraction[active_cell];
       tau_done += tau;
+      // check if the target optical depth was reached
       if (tau_done >= tau_target) {
+        // if so: subtract the surplus from the path
         const double correction = (tau_done - tau_target) / tau;
         lmin *= (1. - correction);
         lminsigma = lmin * cross_section;
       } else {
+        // if not: photon leaves cell
         // update three_index
         for (unsigned char idim = 0; idim < 3; ++idim) {
           if (l[idim] == lmin) {
             three_index[idim] += (direction[idim] > 0.) ? 1 : -1;
           }
         }
+        // update the cell index
+        active_cell = get_one_index(three_index);
       }
+      // add the pathlength to the intensity counter
       _intensity_integral[active_cell] += lminsigma * photon_weight;
+      // update the photon position
       position[0] += lmin * direction[0];
       position[1] += lmin * direction[1];
       position[2] += lmin * direction[2];
-      active_cell = get_one_index(three_index);
     }
+    // update photon quantities
     photon._current_optical_depth = tau_done;
     photon._position[0] = position[0] + _anchor[0];
     photon._position[1] = position[1] + _anchor[1];
     photon._position[2] = position[2] + _anchor[2];
+    // get the outgoing direction
     if (tau_done >= tau_target) {
       return TRAVELDIRECTION_INSIDE;
     } else {
@@ -649,13 +694,28 @@ public:
     }
   }
 
-  void compute_neutral_fraction(const unsigned int num_photon) {
+  /**
+   * @brief Update the ionization state for all the cells in this subgrid.
+   *
+   * @param num_photon Total number of photon packets that was used, used to
+   * normalize the intensity estimates.
+   */
+  inline void compute_neutral_fraction(const unsigned int num_photon) {
+    // compute the normalization factor:
+    // constant source luminosity / number of packets / cell volume
+    // if we multiply this with the intensity estimates (unit: m^3), we get a
+    // quantity in s^-1
     const double jfac = 4.26e49 / num_photon * _inv_cell_size[0] *
                         _inv_cell_size[1] * _inv_cell_size[2];
+    // constant recombination rate
     const double alphaH = 4.e-19;
+    // total number of cells in the subgrid
     const int ncell_tot = _number_of_cells[0] * _number_of_cells[3];
+    // compute the balance for each cell
     for (int i = 0; i < ncell_tot; ++i) {
+      // normalize the intensity estimate
       const double jH = jfac * _intensity_integral[i];
+      // if the intensity was non-zero: solve the balance equation
       if (jH > 0.) {
         const double ntot = _number_density[i];
         const double aa = 0.5 * jH / (ntot * alphaH);
@@ -663,13 +723,20 @@ public:
         const double cc = std::sqrt(bb + 1.);
         _neutral_fraction[i] = 1. + aa * (1. - cc);
       } else {
+        // if there was no ionizing radiation, the cell is trivially neutral
         _neutral_fraction[i] = 1.;
       }
+      // reset the intensity for the next loop
       _intensity_integral[i] = 0.;
     }
   }
 
-  void print_intensities(std::ostream &stream) {
+  /**
+   * @brief Print the neutral fractions to the given ASCII stream.
+   *
+   * @param stream std::ostream to write to.
+   */
+  inline void print_intensities(std::ostream &stream) {
     for (int ix = 0; ix < _number_of_cells[0]; ++ix) {
       const double pos_x = _anchor[0] + (ix + 0.5) * _cell_size[0];
       for (int iy = 0; iy < _number_of_cells[1]; ++iy) {
@@ -685,8 +752,14 @@ public:
     }
   }
 
-  void output_intensities(std::ostream &stream) {
+  /**
+   * @brief Print the neutral fractions to the given binary stream.
+   *
+   * @param stream std::ostream to write to.
+   */
+  inline void output_intensities(std::ostream &stream) {
     for (int ix = 0; ix < _number_of_cells[0]; ++ix) {
+      // not const since we cast it to a char* below
       double pos_x = _anchor[0] + (ix + 0.5) * _cell_size[0];
       for (int iy = 0; iy < _number_of_cells[1]; ++iy) {
         double pos_y = _anchor[1] + (iy + 0.5) * _cell_size[1];
@@ -694,10 +767,10 @@ public:
           double pos_z = _anchor[2] + (iz + 0.5) * _cell_size[2];
           const int three_index[3] = {ix, iy, iz};
           const int index = get_one_index(three_index);
-          stream.write(reinterpret_cast< char * >(&pos_x), sizeof(double));
-          stream.write(reinterpret_cast< char * >(&pos_y), sizeof(double));
-          stream.write(reinterpret_cast< char * >(&pos_z), sizeof(double));
-          stream.write(reinterpret_cast< char * >(&_neutral_fraction[index]),
+          stream.write(reinterpret_cast<char *>(&pos_x), sizeof(double));
+          stream.write(reinterpret_cast<char *>(&pos_y), sizeof(double));
+          stream.write(reinterpret_cast<char *>(&pos_z), sizeof(double));
+          stream.write(reinterpret_cast<char *>(&_neutral_fraction[index]),
                        sizeof(double));
         }
       }

@@ -84,17 +84,17 @@ int main(int argc, char **argv) {
   // set up the grid of smaller grids used for the algorithm
   // each smaller grid stores a fraction of the total grid and has its own
   // buffers to store photons
-  std::vector< DensitySubGrid * > gridvec(num_subgrid[0] * num_subgrid[1] *
-                                          num_subgrid[2]);
+  std::vector<DensitySubGrid *> gridvec(num_subgrid[0] * num_subgrid[1] *
+                                        num_subgrid[2]);
   const double subbox_side[3] = {box[3] / num_subgrid[0],
                                  box[4] / num_subgrid[1],
                                  box[5] / num_subgrid[2]};
   const int subbox_ncell[3] = {ncell[0] / num_subgrid[0],
                                ncell[1] / num_subgrid[1],
                                ncell[2] / num_subgrid[2]};
-  for (unsigned int ix = 0; ix < num_subgrid[0]; ++ix) {
-    for (unsigned int iy = 0; iy < num_subgrid[1]; ++iy) {
-      for (unsigned int iz = 0; iz < num_subgrid[2]; ++iz) {
+  for (int ix = 0; ix < num_subgrid[0]; ++ix) {
+    for (int iy = 0; iy < num_subgrid[1]; ++iy) {
+      for (int iz = 0; iz < num_subgrid[2]; ++iz) {
         const unsigned int index =
             ix * num_subgrid[1] * num_subgrid[2] + iy * num_subgrid[2] + iz;
         const double subbox[6] = {box[0] + ix * subbox_side[0],
