@@ -3,6 +3,7 @@
 
 #include <cmath>
 #include <fstream>
+#include <iostream>
 
 int main(int argc, char **argv) {
 
@@ -39,12 +40,51 @@ int main(int argc, char **argv) {
       photon._photoionization_cross_section = 6.3e-22;
     }
 
+    double output[27];
+    for (unsigned int i = 0; i < 27; ++i) {
+      output[i] = 0.;
+    }
     for (unsigned int i = 0; i < num_photon; ++i) {
       const double inverse_direction[3] = {1. / photons[i]._direction[0],
                                            1. / photons[i]._direction[1],
                                            1. / photons[i]._direction[2]};
-      grid.interact(photons[i], inverse_direction);
+      const int result = grid.interact(photons[i], inverse_direction);
+      output[result] += 1.;
     }
+    for (unsigned int i = 0; i < 27; ++i) {
+      output[i] *= 100. / num_photon;
+    }
+
+    std::cout << "Loop " << iloop << ":" << std::endl;
+    std::cout << output[TRAVELDIRECTION_CORNER_NPP] << "\t"
+              << output[TRAVELDIRECTION_EDGE_X_PP] << "\t"
+              << output[TRAVELDIRECTION_CORNER_PPP] << "\n";
+    std::cout << output[TRAVELDIRECTION_EDGE_Y_NP] << "\t"
+              << output[TRAVELDIRECTION_FACE_Z_P] << "\t"
+              << output[TRAVELDIRECTION_EDGE_Y_PP] << "\n";
+    std::cout << output[TRAVELDIRECTION_CORNER_NNP] << "\t"
+              << output[TRAVELDIRECTION_EDGE_X_NP] << "\t"
+              << output[TRAVELDIRECTION_CORNER_PNP] << "\n";
+    std::cout << std::endl;
+    std::cout << output[TRAVELDIRECTION_EDGE_Z_NP] << "\t"
+              << output[TRAVELDIRECTION_FACE_Y_P] << "\t"
+              << output[TRAVELDIRECTION_EDGE_Z_PP] << "\n";
+    std::cout << output[TRAVELDIRECTION_FACE_X_N] << "\t"
+              << output[TRAVELDIRECTION_INSIDE] << "\t"
+              << output[TRAVELDIRECTION_FACE_X_P] << "\n";
+    std::cout << output[TRAVELDIRECTION_EDGE_Z_NN] << "\t"
+              << output[TRAVELDIRECTION_FACE_Y_N] << "\t"
+              << output[TRAVELDIRECTION_EDGE_Z_PN] << "\n";
+    std::cout << std::endl;
+    std::cout << output[TRAVELDIRECTION_CORNER_NPN] << "\t"
+              << output[TRAVELDIRECTION_EDGE_X_PN] << "\t"
+              << output[TRAVELDIRECTION_CORNER_PPN] << "\n";
+    std::cout << output[TRAVELDIRECTION_EDGE_Y_NN] << "\t"
+              << output[TRAVELDIRECTION_FACE_Z_N] << "\t"
+              << output[TRAVELDIRECTION_EDGE_Y_PN] << "\n";
+    std::cout << output[TRAVELDIRECTION_CORNER_NNN] << "\t"
+              << output[TRAVELDIRECTION_EDGE_X_NN] << "\t"
+              << output[TRAVELDIRECTION_CORNER_PNN] << "\n";
 
     grid.compute_neutral_fraction(num_photon);
   }

@@ -34,6 +34,51 @@
 #include <cmath>
 #include <ostream>
 
+/**
+ * @brief Direction of travel of a photon when it enters or leaves the subgrid.
+ *
+ * - INSIDE: Photon is already inside the subgrid (it was (re-)emitted in the
+ *   volume covered by the subgrid).
+ * - CORNER: Photon enters/leaves through a corner. The 8 corners of the cubic
+ *   volume are labelled by the 3 coordinates: P means the upper limit of that
+ *   coordinate, N the lower limit.
+ * - EDGE: Photon enters/leaves through an edge. The 12 edges are labelled by
+ *   the plane in which they make up a square, and the 2 remaining identifying
+ *   coordinates in that square, as above.
+ * - FACE: Photon enters/leaves through a face. The 6 faces are labelled by the
+ *   plane to which they are parallel and the direction of travel perpendicular
+ *   to that plane.
+ */
+enum TravelDirection {
+  TRAVELDIRECTION_INSIDE = 0,
+  TRAVELDIRECTION_CORNER_PPP,
+  TRAVELDIRECTION_CORNER_PPN,
+  TRAVELDIRECTION_CORNER_PNP,
+  TRAVELDIRECTION_CORNER_PNN,
+  TRAVELDIRECTION_CORNER_NPP,
+  TRAVELDIRECTION_CORNER_NPN,
+  TRAVELDIRECTION_CORNER_NNP,
+  TRAVELDIRECTION_CORNER_NNN,
+  TRAVELDIRECTION_EDGE_X_PP,
+  TRAVELDIRECTION_EDGE_X_PN,
+  TRAVELDIRECTION_EDGE_X_NP,
+  TRAVELDIRECTION_EDGE_X_NN,
+  TRAVELDIRECTION_EDGE_Y_PP,
+  TRAVELDIRECTION_EDGE_Y_PN,
+  TRAVELDIRECTION_EDGE_Y_NP,
+  TRAVELDIRECTION_EDGE_Y_NN,
+  TRAVELDIRECTION_EDGE_Z_PP,
+  TRAVELDIRECTION_EDGE_Z_PN,
+  TRAVELDIRECTION_EDGE_Z_NP,
+  TRAVELDIRECTION_EDGE_Z_NN,
+  TRAVELDIRECTION_FACE_X_P,
+  TRAVELDIRECTION_FACE_X_N,
+  TRAVELDIRECTION_FACE_Y_P,
+  TRAVELDIRECTION_FACE_Y_N,
+  TRAVELDIRECTION_FACE_Z_P,
+  TRAVELDIRECTION_FACE_Z_N
+};
+
 class DensitySubGrid {
 private:
   double _anchor[3];
@@ -58,16 +103,208 @@ private:
            three_index[2] < _number_of_cells[2] && three_index[2] >= 0;
   }
 
+  int get_x_index(const double x, const int direction) const {
+    if (direction == TRAVELDIRECTION_INSIDE ||
+        direction == TRAVELDIRECTION_EDGE_X_PP ||
+        direction == TRAVELDIRECTION_EDGE_X_PN ||
+        direction == TRAVELDIRECTION_EDGE_X_NP ||
+        direction == TRAVELDIRECTION_EDGE_X_NN ||
+        direction == TRAVELDIRECTION_FACE_Y_P ||
+        direction == TRAVELDIRECTION_FACE_Y_N ||
+        direction == TRAVELDIRECTION_FACE_Z_P ||
+        direction == TRAVELDIRECTION_FACE_Z_N) {
+      // need to compute the index
+      return x * _inv_cell_size[0];
+    } else if (direction == TRAVELDIRECTION_CORNER_NPP ||
+               direction == TRAVELDIRECTION_CORNER_NPN ||
+               direction == TRAVELDIRECTION_CORNER_NNP ||
+               direction == TRAVELDIRECTION_CORNER_NNN ||
+               direction == TRAVELDIRECTION_EDGE_Y_NP ||
+               direction == TRAVELDIRECTION_EDGE_Y_NN ||
+               direction == TRAVELDIRECTION_EDGE_Z_NP ||
+               direction == TRAVELDIRECTION_EDGE_Z_NN ||
+               direction == TRAVELDIRECTION_FACE_X_N) {
+      // index is lower limit of box
+      return 0;
+    } else if (direction == TRAVELDIRECTION_CORNER_PPP ||
+               direction == TRAVELDIRECTION_CORNER_PPN ||
+               direction == TRAVELDIRECTION_CORNER_PNP ||
+               direction == TRAVELDIRECTION_CORNER_PNN ||
+               direction == TRAVELDIRECTION_EDGE_Y_PP ||
+               direction == TRAVELDIRECTION_EDGE_Y_PN ||
+               direction == TRAVELDIRECTION_EDGE_Z_PP ||
+               direction == TRAVELDIRECTION_EDGE_Z_PN ||
+               direction == TRAVELDIRECTION_FACE_X_P) {
+      // index is upper limit of box
+      return _number_of_cells[0] - 1;
+    } else {
+      // something went wrong
+      return -1;
+    }
+  }
+
+  int get_y_index(const double y, const int direction) const {
+    if (direction == TRAVELDIRECTION_INSIDE ||
+        direction == TRAVELDIRECTION_EDGE_Y_PP ||
+        direction == TRAVELDIRECTION_EDGE_Y_PN ||
+        direction == TRAVELDIRECTION_EDGE_Y_NP ||
+        direction == TRAVELDIRECTION_EDGE_Y_NN ||
+        direction == TRAVELDIRECTION_FACE_X_P ||
+        direction == TRAVELDIRECTION_FACE_X_N ||
+        direction == TRAVELDIRECTION_FACE_Z_P ||
+        direction == TRAVELDIRECTION_FACE_Z_N) {
+      // need to compute the index
+      return y * _inv_cell_size[1];
+    } else if (direction == TRAVELDIRECTION_CORNER_PNP ||
+               direction == TRAVELDIRECTION_CORNER_PNN ||
+               direction == TRAVELDIRECTION_CORNER_NNP ||
+               direction == TRAVELDIRECTION_CORNER_NNN ||
+               direction == TRAVELDIRECTION_EDGE_X_NP ||
+               direction == TRAVELDIRECTION_EDGE_X_NN ||
+               direction == TRAVELDIRECTION_EDGE_Z_NP ||
+               direction == TRAVELDIRECTION_EDGE_Z_NN ||
+               direction == TRAVELDIRECTION_FACE_Y_N) {
+      // index is lower limit of box
+      return 0;
+    } else if (direction == TRAVELDIRECTION_CORNER_PNP ||
+               direction == TRAVELDIRECTION_CORNER_PNN ||
+               direction == TRAVELDIRECTION_CORNER_NNP ||
+               direction == TRAVELDIRECTION_CORNER_NNN ||
+               direction == TRAVELDIRECTION_EDGE_X_PP ||
+               direction == TRAVELDIRECTION_EDGE_X_PN ||
+               direction == TRAVELDIRECTION_EDGE_Z_PP ||
+               direction == TRAVELDIRECTION_EDGE_Z_PN ||
+               direction == TRAVELDIRECTION_FACE_Y_P) {
+      // index is upper limit of box
+      return _number_of_cells[1] - 1;
+    } else {
+      // something went wrong
+      return -1;
+    }
+  }
+
+  int get_z_index(const double z, const int direction) const {
+    if (direction == TRAVELDIRECTION_INSIDE ||
+        direction == TRAVELDIRECTION_EDGE_Z_PP ||
+        direction == TRAVELDIRECTION_EDGE_Z_PN ||
+        direction == TRAVELDIRECTION_EDGE_Z_NP ||
+        direction == TRAVELDIRECTION_EDGE_Z_NN ||
+        direction == TRAVELDIRECTION_FACE_X_P ||
+        direction == TRAVELDIRECTION_FACE_X_N ||
+        direction == TRAVELDIRECTION_FACE_Y_P ||
+        direction == TRAVELDIRECTION_FACE_Y_N) {
+      // need to compute the index
+      return z * _inv_cell_size[2];
+    } else if (direction == TRAVELDIRECTION_CORNER_PPN ||
+               direction == TRAVELDIRECTION_CORNER_PNN ||
+               direction == TRAVELDIRECTION_CORNER_NPN ||
+               direction == TRAVELDIRECTION_CORNER_NNN ||
+               direction == TRAVELDIRECTION_EDGE_X_PN ||
+               direction == TRAVELDIRECTION_EDGE_X_NN ||
+               direction == TRAVELDIRECTION_EDGE_Y_PN ||
+               direction == TRAVELDIRECTION_EDGE_Y_NN ||
+               direction == TRAVELDIRECTION_FACE_Z_N) {
+      // index is lower limit of box
+      return 0;
+    } else if (direction == TRAVELDIRECTION_CORNER_PPP ||
+               direction == TRAVELDIRECTION_CORNER_PNP ||
+               direction == TRAVELDIRECTION_CORNER_NPP ||
+               direction == TRAVELDIRECTION_CORNER_NNP ||
+               direction == TRAVELDIRECTION_EDGE_X_PP ||
+               direction == TRAVELDIRECTION_EDGE_X_NP ||
+               direction == TRAVELDIRECTION_EDGE_Y_PP ||
+               direction == TRAVELDIRECTION_EDGE_Y_NP ||
+               direction == TRAVELDIRECTION_FACE_Z_P) {
+      // index is upper limit of box
+      return _number_of_cells[2] - 1;
+    } else {
+      // something went wrong
+      return -1;
+    }
+  }
+
   int get_start_index(const double *position, const int input_direction,
                       int *three_index) {
-    three_index[0] = position[0] * _inv_cell_size[0];
-    three_index[1] = position[1] * _inv_cell_size[1];
-    three_index[2] = position[2] * _inv_cell_size[2];
+    three_index[0] = get_x_index(position[0], input_direction);
+    three_index[1] = get_y_index(position[1], input_direction);
+    three_index[2] = get_z_index(position[2], input_direction);
     assert(is_inside(three_index));
     return get_one_index(three_index);
   }
 
-  int get_output_direction(const int *three_index) { return -1; }
+  int get_output_direction(const int *three_index) {
+    const bool x_low = three_index[0] < 0;
+    // this is a non-conditional check to see if
+    // three_index[0] == _number_of_cells[0], and should therefore be more
+    // efficient (no idea if it actually is)
+    const bool x_high = three_index[0] / _number_of_cells[0];
+    const bool y_low = three_index[1] < 0;
+    const bool y_high = three_index[1] / _number_of_cells[1];
+    const bool z_low = three_index[2] < 0;
+    const bool z_high = three_index[2] / _number_of_cells[2];
+    const int mask = (x_high << 5) | (x_low << 4) | (y_high << 3) |
+                     (y_low << 2) | (z_high << 1) | z_low;
+    // we now have a mask that combines the info on the 6 checks we have to do
+    switch (mask) {
+    case 0:
+      return TRAVELDIRECTION_INSIDE;
+    case 1:
+      return TRAVELDIRECTION_FACE_Z_N;
+    case 2:
+      return TRAVELDIRECTION_FACE_Z_P;
+    case 4:
+      return TRAVELDIRECTION_FACE_Y_N;
+    case 8:
+      return TRAVELDIRECTION_FACE_Y_P;
+    case 16:
+      return TRAVELDIRECTION_FACE_X_N;
+    case 32:
+      return TRAVELDIRECTION_FACE_X_P;
+    case 5:
+      return TRAVELDIRECTION_EDGE_X_NN;
+    case 6:
+      return TRAVELDIRECTION_EDGE_X_NP;
+    case 9:
+      return TRAVELDIRECTION_EDGE_X_PN;
+    case 10:
+      return TRAVELDIRECTION_EDGE_X_PP;
+    case 17:
+      return TRAVELDIRECTION_EDGE_Y_NN;
+    case 18:
+      return TRAVELDIRECTION_EDGE_Y_NP;
+    case 33:
+      return TRAVELDIRECTION_EDGE_Y_PN;
+    case 34:
+      return TRAVELDIRECTION_EDGE_Y_PP;
+    case 20:
+      return TRAVELDIRECTION_EDGE_Z_NN;
+    case 24:
+      return TRAVELDIRECTION_EDGE_Z_NP;
+    case 36:
+      return TRAVELDIRECTION_EDGE_Z_PN;
+    case 40:
+      return TRAVELDIRECTION_EDGE_Z_PP;
+    case 21:
+      return TRAVELDIRECTION_CORNER_NNN;
+    case 22:
+      return TRAVELDIRECTION_CORNER_NNP;
+    case 25:
+      return TRAVELDIRECTION_CORNER_NPN;
+    case 26:
+      return TRAVELDIRECTION_CORNER_NPP;
+    case 37:
+      return TRAVELDIRECTION_CORNER_PNN;
+    case 38:
+      return TRAVELDIRECTION_CORNER_PNP;
+    case 41:
+      return TRAVELDIRECTION_CORNER_PPN;
+    case 42:
+      return TRAVELDIRECTION_CORNER_PPP;
+    default:
+      // something went wrong
+      return -1;
+    }
+  }
 
 public:
   DensitySubGrid(const double *box, const int *ncell)
@@ -117,7 +354,8 @@ public:
     const double cross_section = photon._photoionization_cross_section;
     const double photon_weight = photon._weight;
     int three_index[3];
-    int active_cell = get_start_index(position, 0, three_index);
+    int active_cell =
+        get_start_index(position, TRAVELDIRECTION_INSIDE, three_index);
     // enter while loop. QUESTION: what is condition?
     // double condition:
     //  - target optical depth not reached (tau_done < tau_target)
@@ -173,7 +411,7 @@ public:
     photon._position[1] = position[1] + _anchor[1];
     photon._position[2] = position[2] + _anchor[2];
     if (tau_done >= tau_target) {
-      return -2;
+      return TRAVELDIRECTION_INSIDE;
     } else {
       return get_output_direction(three_index);
     }
