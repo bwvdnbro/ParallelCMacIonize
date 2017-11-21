@@ -2,7 +2,7 @@ import numpy as np
 import pylab as pl
 import scipy.stats as stats
 
-ncell = 64
+ncell = 60
 nbin = 100
 
 alphaH = 4.e-19 # m^3 s^-1
@@ -34,6 +34,7 @@ Isigma = np.sqrt(I2bin - Ibin**2)
 pl.plot(rbin_mid / pc, Ibin)
 pl.fill_between(rbin_mid / pc, Ibin - Isigma, Ibin + Isigma, alpha = 0.5)
 pl.gca().axvline(x = Rs, linestyle = "--", color = "k", linewidth = 0.8)
+pl.gca().set_yscale("log", nonposy = "clip")
 pl.xlabel("radius (pc)")
 pl.ylabel("neutral fraction")
 pl.tight_layout()

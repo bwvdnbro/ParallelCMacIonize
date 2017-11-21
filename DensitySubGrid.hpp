@@ -1,6 +1,6 @@
 /*******************************************************************************
  * This file is part of CMacIonize
- * Copyright (C) 2016 Bert Vandenbroucke (bert.vandenbroucke@gmail.com)
+ * Copyright (C) 2017 Bert Vandenbroucke (bert.vandenbroucke@gmail.com)
  *
  * CMacIonize is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as published by
@@ -17,22 +17,48 @@
  ******************************************************************************/
 
 /**
- * @file CartesianDensityGrid.cpp
+ * @file DensitySubGrid.hpp
  *
- * @brief Cartesian density grid: implementation.
+ * @brief Small portion of the density grid that acts as an individual density
+ * grid.
  *
  * @author Bert Vandenbroucke (bv7@st-andrews.ac.uk)
  */
 #ifndef DENSITYSUBGRID_HPP
 #define DENSITYSUBGRID_HPP
 
+// local includes
 #include "Photon.hpp"
+#include "PhotonBuffer.hpp"
 
+// standard library includes
 #include <algorithm>
-#include <cassert>
 #include <cfloat>
 #include <cmath>
+#include <iostream>
 #include <ostream>
+
+/**
+ * @brief Custom assertion macro that supports extra output.
+ *
+ * @param condition Condition to check.
+ * @param message Message to print if the assertion fails.
+ */
+#define myassert(condition, message)                                           \
+  if (!(condition)) {                                                          \
+    std::cerr << "Assertion failed: " #condition << std::endl;                 \
+    std::cerr << message << std::endl;                                         \
+    abort();                                                                   \
+  }
+
+/**
+ * @brief Custom abort macro that prints a message before aborting.
+ *
+ * @param message Message to print.
+ */
+#define myabort(message)                                                       \
+  std::cerr << message << std::endl;                                           \
+  abort();
 
 /**
  * @brief Direction of travel of a photon when it enters or leaves the subgrid.
@@ -79,31 +105,166 @@ enum TravelDirection {
   TRAVELDIRECTION_FACE_Z_N
 };
 
+/**
+ * @brief Convert an outgoing direction into an ingoing direction, using the
+ * fact that what goes out through one corner of a cube has to come in through
+ * the opposite corner of the neighbouring cube.
+ *
+ * @param output_direction Outward TravelDirection.
+ * @return Inward TravelDirection.
+ */
+inline static int output_to_input_direction(const int output_direction) {
+  switch (output_direction) {
+  case TRAVELDIRECTION_INSIDE:
+    return TRAVELDIRECTION_INSIDE;
+  case TRAVELDIRECTION_CORNER_PPP:
+    return TRAVELDIRECTION_CORNER_NNN;
+  case TRAVELDIRECTION_CORNER_PPN:
+    return TRAVELDIRECTION_CORNER_NNP;
+  case TRAVELDIRECTION_CORNER_PNP:
+    return TRAVELDIRECTION_CORNER_NPN;
+  case TRAVELDIRECTION_CORNER_PNN:
+    return TRAVELDIRECTION_CORNER_NPP;
+  case TRAVELDIRECTION_CORNER_NPP:
+    return TRAVELDIRECTION_CORNER_PNN;
+  case TRAVELDIRECTION_CORNER_NPN:
+    return TRAVELDIRECTION_CORNER_PNP;
+  case TRAVELDIRECTION_CORNER_NNP:
+    return TRAVELDIRECTION_CORNER_PPN;
+  case TRAVELDIRECTION_CORNER_NNN:
+    return TRAVELDIRECTION_CORNER_PPP;
+  case TRAVELDIRECTION_EDGE_X_PP:
+    return TRAVELDIRECTION_EDGE_X_NN;
+  case TRAVELDIRECTION_EDGE_X_PN:
+    return TRAVELDIRECTION_EDGE_X_NP;
+  case TRAVELDIRECTION_EDGE_X_NP:
+    return TRAVELDIRECTION_EDGE_X_PN;
+  case TRAVELDIRECTION_EDGE_X_NN:
+    return TRAVELDIRECTION_EDGE_X_PP;
+  case TRAVELDIRECTION_EDGE_Y_PP:
+    return TRAVELDIRECTION_EDGE_Y_NN;
+  case TRAVELDIRECTION_EDGE_Y_PN:
+    return TRAVELDIRECTION_EDGE_Y_NP;
+  case TRAVELDIRECTION_EDGE_Y_NP:
+    return TRAVELDIRECTION_EDGE_Y_PN;
+  case TRAVELDIRECTION_EDGE_Y_NN:
+    return TRAVELDIRECTION_EDGE_Y_PP;
+  case TRAVELDIRECTION_EDGE_Z_PP:
+    return TRAVELDIRECTION_EDGE_Z_NN;
+  case TRAVELDIRECTION_EDGE_Z_PN:
+    return TRAVELDIRECTION_EDGE_Z_NP;
+  case TRAVELDIRECTION_EDGE_Z_NP:
+    return TRAVELDIRECTION_EDGE_Z_PN;
+  case TRAVELDIRECTION_EDGE_Z_NN:
+    return TRAVELDIRECTION_EDGE_Z_PP;
+  case TRAVELDIRECTION_FACE_X_P:
+    return TRAVELDIRECTION_FACE_X_N;
+  case TRAVELDIRECTION_FACE_X_N:
+    return TRAVELDIRECTION_FACE_X_P;
+  case TRAVELDIRECTION_FACE_Y_P:
+    return TRAVELDIRECTION_FACE_Y_N;
+  case TRAVELDIRECTION_FACE_Y_N:
+    return TRAVELDIRECTION_FACE_Y_P;
+  case TRAVELDIRECTION_FACE_Z_P:
+    return TRAVELDIRECTION_FACE_Z_N;
+  case TRAVELDIRECTION_FACE_Z_N:
+    return TRAVELDIRECTION_FACE_Z_P;
+  default:
+    // something went wrong
+    myabort("Unknown output direction: " << output_direction);
+    return -1;
+  }
+}
+
+/**
+ * @brief Small fraction of a density grid that acts as an individual density
+ * grid.
+ */
 class DensitySubGrid {
 private:
+  /*! @brief Lower front left corner of the box that contains the subgrid (in
+   *  m). */
   double _anchor[3];
+
+  /*! @brief Dimensions of a single cell of the subgrid (in m). */
   double _cell_size[3];
+  /**
+   * @brief Inverse dimensions of a single cell of the subgrid (in m^-1).
+   *
+   * Used to convert positions into grid indices.
+   */
   double _inv_cell_size[3];
 
-  int _number_of_cells[4]; // = {num cell x, num cell y, num cell z, num cell y
-                           // * num cell z}
+  /**
+   * @brief Number of cells in each grid dimension (and commonly used
+   * combinations).
+   *
+   * The first 3 elements are just the number of elements in the 3 coordinate
+   * directions. The fourth element is the product of the second and the third,
+   * so that the single index of a cell with three indices `ix`, `iy` and `iz`
+   * is simply given by
+   * ```
+   *  index = ix * _number_of_cells[3] + iy * _number_of_cells[2] + iz;
+   * ```
+   */
+  int _number_of_cells[4];
 
+  /*! @brief Indices of the neighbouring subgrids. */
+  unsigned int _ngbs[27];
+
+  /*! @brief Input buffers. Contain the photons that should be propagated
+   *  through this subgrid. */
+  PhotonBuffer _input_buffers[27];
+
+  /*! @brief Output buffers. Contain the photons that have been propagated
+   *  through this subgrid. */
+  PhotonBuffer _output_buffers[27];
+
+  /*! @brief Number density for each cell (in m^-3). */
   double *_number_density;
+
+  /*! @brief Neutral fraction of hydrogen for each cell. */
   double *_neutral_fraction;
+
+  /*! @brief Ionizing intensity estimate for each cell (in m^3). */
   double *_intensity_integral;
 
-  int get_one_index(const int *three_index) const {
+  /**
+   * @brief Convert the given 3 indices to a single index.
+   *
+   * The single index can be used to access elements of the internal data
+   * arrays.
+   *
+   * @param three_index 3 indices of a cell.
+   * @return Single index of that same cell.
+   */
+  inline int get_one_index(const int *three_index) const {
     return three_index[0] * _number_of_cells[3] +
            three_index[1] * _number_of_cells[2] + three_index[2];
   }
 
-  bool is_inside(const int *three_index) const {
+  /**
+   * @brief Check if the given three_index still points to an internal cell.
+   *
+   * @param three_index 3 indices of a cell.
+   * @return True if the 3 indices match a cell in this grid.
+   */
+  inline bool is_inside(const int *three_index) const {
     return three_index[0] < _number_of_cells[0] && three_index[0] >= 0 &&
            three_index[1] < _number_of_cells[1] && three_index[1] >= 0 &&
            three_index[2] < _number_of_cells[2] && three_index[2] >= 0;
   }
 
-  int get_x_index(const double x, const int direction) const {
+  /**
+   * @brief Get the x 3 index corresponding to the given coordinate and incoming
+   * direction.
+   *
+   * @param x X coordinate (in m).
+   * @param direction Incoming direction.
+   * @return x component of the 3 index of the cell that contains the given
+   * position.
+   */
+  inline int get_x_index(const double x, const int direction) const {
     if (direction == TRAVELDIRECTION_INSIDE ||
         direction == TRAVELDIRECTION_EDGE_X_PP ||
         direction == TRAVELDIRECTION_EDGE_X_PN ||
@@ -139,11 +300,21 @@ private:
       return _number_of_cells[0] - 1;
     } else {
       // something went wrong
+      myabort("Unknown incoming x direction: " << direction);
       return -1;
     }
   }
 
-  int get_y_index(const double y, const int direction) const {
+  /**
+   * @brief Get the y 3 index corresponding to the given coordinate and incoming
+   * direction.
+   *
+   * @param y Y coordinate (in m).
+   * @param direction Incoming direction.
+   * @return y component of the 3 index of the cell that contains the given
+   * position.
+   */
+  inline int get_y_index(const double y, const int direction) const {
     if (direction == TRAVELDIRECTION_INSIDE ||
         direction == TRAVELDIRECTION_EDGE_Y_PP ||
         direction == TRAVELDIRECTION_EDGE_Y_PN ||
@@ -161,7 +332,7 @@ private:
                direction == TRAVELDIRECTION_CORNER_NNN ||
                direction == TRAVELDIRECTION_EDGE_X_NP ||
                direction == TRAVELDIRECTION_EDGE_X_NN ||
-               direction == TRAVELDIRECTION_EDGE_Z_NP ||
+               direction == TRAVELDIRECTION_EDGE_Z_PN ||
                direction == TRAVELDIRECTION_EDGE_Z_NN ||
                direction == TRAVELDIRECTION_FACE_Y_N) {
       // index is lower limit of box
@@ -173,17 +344,27 @@ private:
                direction == TRAVELDIRECTION_EDGE_X_PP ||
                direction == TRAVELDIRECTION_EDGE_X_PN ||
                direction == TRAVELDIRECTION_EDGE_Z_PP ||
-               direction == TRAVELDIRECTION_EDGE_Z_PN ||
+               direction == TRAVELDIRECTION_EDGE_Z_NP ||
                direction == TRAVELDIRECTION_FACE_Y_P) {
       // index is upper limit of box
       return _number_of_cells[1] - 1;
     } else {
       // something went wrong
+      myabort("Unknown incoming y direction: " << direction);
       return -1;
     }
   }
 
-  int get_z_index(const double z, const int direction) const {
+  /**
+   * @brief Get the z 3 index corresponding to the given coordinate and incoming
+   * direction.
+   *
+   * @param z Z coordinate (in m).
+   * @param direction Incoming direction.
+   * @return z component of the 3 index of the cell that contains the given
+   * position.
+   */
+  inline int get_z_index(const double z, const int direction) const {
     if (direction == TRAVELDIRECTION_INSIDE ||
         direction == TRAVELDIRECTION_EDGE_Z_PP ||
         direction == TRAVELDIRECTION_EDGE_Z_PN ||
@@ -219,20 +400,47 @@ private:
       return _number_of_cells[2] - 1;
     } else {
       // something went wrong
+      myabort("Unknown incoming z direction: " << direction);
       return -1;
     }
   }
 
-  int get_start_index(const double *position, const int input_direction,
-                      int *three_index) {
+  /**
+   * @brief Get the index (and 3 index) of the cell containing the given
+   * incoming position, with the given incoming direction.
+   *
+   * @param position Incoming position (in m).
+   * @param input_direction Incoming direction.
+   * @param three_index 3 index (output variable).
+   * @return Single index of the cell.
+   */
+  inline int get_start_index(const double *position, const int input_direction,
+                             int *three_index) const {
     three_index[0] = get_x_index(position[0], input_direction);
     three_index[1] = get_y_index(position[1], input_direction);
     three_index[2] = get_z_index(position[2], input_direction);
-    assert(is_inside(three_index));
+    myassert(is_inside(three_index),
+             "position: " << position[0] << " " << position[1] << " "
+                          << position[2] << "\nbox:\t" << _anchor[0] << " "
+                          << _anchor[1] << " " << _anchor[2] << "\n\t"
+                          << _cell_size[0] * _number_of_cells[0] << " "
+                          << _cell_size[1] * _number_of_cells[1] << " "
+                          << _cell_size[2] * _number_of_cells[2]);
     return get_one_index(three_index);
   }
 
-  int get_output_direction(const int *three_index) {
+public:
+  /**
+   * @brief Get the outgoing direction corresponding to the given 3 index.
+   *
+   * Public because the subgrid setup routine uses this routine.
+   *
+   * @param three_index 3 index of a cell, possibly no longer inside this grid.
+   * @return Outgoing direction corresponding to that 3 index.
+   */
+  inline int get_output_direction(const int *three_index) const {
+    // this is hopefully compiled into a bitwise operation rather than an
+    // actual condition
     const bool x_low = three_index[0] < 0;
     // this is a non-conditional check to see if
     // three_index[0] == _number_of_cells[0], and should therefore be more
@@ -302,12 +510,20 @@ private:
       return TRAVELDIRECTION_CORNER_PPP;
     default:
       // something went wrong
+      myabort("Unknown outgoing check mask: " << mask);
       return -1;
     }
   }
 
-public:
-  DensitySubGrid(const double *box, const int *ncell)
+  /**
+   * @brief Constructor.
+   *
+   * @param box Dimensions of the box that contains the grid (in m; first 3
+   * elements are the anchor of the box, 3 last elements are the side lengths
+   * of the box).
+   * @param ncell Number of cells in each dimension.
+   */
+  inline DensitySubGrid(const double *box, const int *ncell)
       : _anchor{box[0], box[1], box[2]},
         _cell_size{box[3] / ncell[0], box[4] / ncell[1], box[5] / ncell[2]},
         _inv_cell_size{ncell[0] / box[3], ncell[1] / box[4], ncell[2] / box[5]},
@@ -331,6 +547,22 @@ public:
     delete[] _intensity_integral;
   }
 
+  PhotonBuffer &get_input_buffer(int input_direction) {
+    return _input_buffers[input_direction];
+  }
+
+  PhotonBuffer &get_output_buffer(int output_direction) {
+    return _output_buffers[output_direction];
+  }
+
+  unsigned int get_neighbour(int output_direction) const {
+    return _ngbs[output_direction];
+  }
+
+  void set_neighbour(const int output_direction, const unsigned int ngb) {
+    _ngbs[output_direction] = ngb;
+  }
+
   /**
    * @brief Let the given Photon travel through the density grid until the given
    * optical depth is reached.
@@ -341,7 +573,8 @@ public:
    * @return DensityGrid::iterator pointing to the cell the photon was last in,
    * or DensityGrid::end() if the photon left the box.
    */
-  int interact(Photon &photon, const double *inverse_direction) {
+  int interact(Photon &photon, const double *inverse_direction,
+               const int input_direction) {
 
     const double direction[3] = {photon._direction[0], photon._direction[1],
                                  photon._direction[2]};
@@ -354,8 +587,7 @@ public:
     const double cross_section = photon._photoionization_cross_section;
     const double photon_weight = photon._weight;
     int three_index[3];
-    int active_cell =
-        get_start_index(position, TRAVELDIRECTION_INSIDE, three_index);
+    int active_cell = get_start_index(position, input_direction, three_index);
     // enter while loop. QUESTION: what is condition?
     // double condition:
     //  - target optical depth not reached (tau_done < tau_target)

@@ -1,3 +1,6 @@
+#ifndef PHOTON_HPP
+#define PHOTON_HPP
+
 class Photon {
 public:
   double _position[3];
@@ -7,3 +10,5 @@ public:
   double _photoionization_cross_section;
   double _weight;
 };
+
+#endif // PHOTON_HPP
