@@ -40,6 +40,9 @@
  */
 class PhotonBuffer {
 public:
+  /*! @brief Subgrid with which this buffer is associated. */
+  unsigned int _sub_grid_index;
+
   /*! @brief TravelDirection of the photons in the buffer. */
   int _direction;
 

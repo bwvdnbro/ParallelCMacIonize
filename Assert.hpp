@@ -27,7 +27,7 @@
 #define ASSERT_HPP
 
 /*! @brief Uncomment this to enable assertions. */
-//#define DO_ASSERTS
+#define DO_ASSERTS
 
 #include <cstdlib>
 #include <iostream>

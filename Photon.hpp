@@ -39,6 +39,10 @@ public:
   /*! @brief Propagation direction of the photon packet. */
   double _direction[3];
 
+  /*! @brief Inverse of the propagation direction (used to avoid expensive
+   *  divisions in the photon packet traversal algorithm). */
+  double _inverse_direction[3];
+
   /*! @brief Current optical depth of the photon packet. */
   double _current_optical_depth;
 

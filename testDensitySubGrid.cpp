@@ -42,6 +42,9 @@
 /*! @brief Activate this to check the subgrid geometry. */
 //#define CHECK_GRID
 
+/*! @brief Activate this to unit test the directional algorithms. */
+//#define TEST_DIRECTIONS
+
 /**
  * @brief Write a message to the log with the given log level.
  *
@@ -199,12 +202,14 @@ int main(int argc, char **argv) {
   // buffers to store photons
   std::vector< DensitySubGrid * > gridvec(num_subgrid[0] * num_subgrid[1] *
                                           num_subgrid[2]);
+  std::vector< PhotonBuffer > photon_buffers(54 * gridvec.size());
   const double subbox_side[3] = {box[3] / num_subgrid[0],
                                  box[4] / num_subgrid[1],
                                  box[5] / num_subgrid[2]};
   const int subbox_ncell[3] = {ncell[0] / num_subgrid[0],
                                ncell[1] / num_subgrid[1],
                                ncell[2] / num_subgrid[2]};
+  unsigned int buffer_index = 0;
   for (int ix = 0; ix < num_subgrid[0]; ++ix) {
     for (int iy = 0; iy < num_subgrid[1]; ++iy) {
       for (int iz = 0; iz < num_subgrid[2]; ++iz) {
@@ -223,15 +228,16 @@ int main(int argc, char **argv) {
         // by default, all buffers are outside the box (we will set the buffers
         // that are not to the correct value below)
         for (int i = 0; i < 27; ++i) {
-          PhotonBuffer &input_buffer = this_grid.get_input_buffer(i);
-          input_buffer._direction = i;
-          input_buffer._is_inside_box = false;
-          input_buffer._actual_size = 0;
-          PhotonBuffer &output_buffer = this_grid.get_output_buffer(i);
-          output_buffer._direction = i;
-          output_buffer._is_inside_box = false;
-          output_buffer._actual_size = 0;
+          this_grid.set_input_buffer(i, 2 * buffer_index);
+          this_grid.set_output_buffer(i, 2 * buffer_index + 1);
+          photon_buffers[2 * buffer_index]._direction = i;
+          photon_buffers[2 * buffer_index]._is_inside_box = false;
+          photon_buffers[2 * buffer_index]._actual_size = 0;
+          photon_buffers[2 * buffer_index + 1]._direction = i;
+          photon_buffers[2 * buffer_index + 1]._is_inside_box = false;
+          photon_buffers[2 * buffer_index + 1]._actual_size = 0;
           this_grid.set_neighbour(i, 9999);
+          ++buffer_index;
         }
         // now set up the correct neighbour relations and flag the buffers that
         // are really inside the box
@@ -262,10 +268,12 @@ int main(int argc, char **argv) {
                     ciy * num_subgrid[2] + ciz;
                 this_grid.set_neighbour(ngbi, ngb_index);
                 // set the corresponding buffers to inside
-                PhotonBuffer &input_buffer = this_grid.get_input_buffer(ngbi);
-                input_buffer._is_inside_box = true;
-                PhotonBuffer &output_buffer = this_grid.get_output_buffer(ngbi);
-                output_buffer._is_inside_box = true;
+                const unsigned int input_index =
+                    this_grid.get_input_buffer(ngbi);
+                photon_buffers[input_index]._is_inside_box = true;
+                const unsigned int output_index =
+                    this_grid.get_output_buffer(ngbi);
+                photon_buffers[output_index]._is_inside_box = true;
               }
             }
           }
@@ -305,7 +313,8 @@ int main(int argc, char **argv) {
       (num_subgrid[1] >> 1) * num_subgrid[2] + (num_subgrid[2] >> 1);
   myassert(central_index == 13, "central_index: " << central_index);
   PhotonBuffer &input_buffer =
-      gridvec[central_index]->get_input_buffer(TRAVELDIRECTION_INSIDE);
+      photon_buffers[gridvec[central_index]->get_input_buffer(
+          TRAVELDIRECTION_INSIDE)];
 
   // set up the random number generator
   RandomGenerator random_generator;
@@ -357,6 +366,9 @@ int main(int argc, char **argv) {
           photon._direction[0] = sint * cosp;
           photon._direction[1] = sint * sinp;
           photon._direction[2] = cost;
+          photon._inverse_direction[0] = 1. / photon._direction[0];
+          photon._inverse_direction[1] = 1. / photon._direction[1];
+          photon._inverse_direction[2] = 1. / photon._direction[2];
           // we currently assume equal weight for all photons
           photon._weight = 1.;
           photon._current_optical_depth = 0.;
@@ -373,20 +385,18 @@ int main(int argc, char **argv) {
         DensitySubGrid &this_grid = *gridvec[igrid];
         // loop over all 27 input buffers
         for (int ibuffer = 0; ibuffer < 27; ++ibuffer) {
-          PhotonBuffer &buffer = this_grid.get_input_buffer(ibuffer);
+          PhotonBuffer &buffer =
+              photon_buffers[this_grid.get_input_buffer(ibuffer)];
           myassert(ibuffer == buffer._direction, "fail");
           // only process input buffers that are inside the box
           if (buffer._is_inside_box) {
             for (unsigned int i = 0; i < buffer._actual_size; ++i) {
               // shoot the photon through the subgrid
               Photon &photon = buffer._photons[i];
-              const double inverse_direction[3] = {1. / photon._direction[0],
-                                                   1. / photon._direction[1],
-                                                   1. / photon._direction[2]};
-              const int result = this_grid.interact(photon, inverse_direction,
-                                                    buffer._direction);
+              const int result = this_grid.interact(photon, buffer._direction);
               myassert(result >= 0 && result < 27, "fail");
-              PhotonBuffer &output_buffer = this_grid.get_output_buffer(result);
+              PhotonBuffer &output_buffer =
+                  photon_buffers[this_grid.get_output_buffer(result)];
               // add the photon to the correct output buffer
               const unsigned int index = output_buffer._actual_size;
               output_buffer._photons[index] = photon;
@@ -408,13 +418,15 @@ int main(int argc, char **argv) {
         }
       }
 
-      // STEP 3: move photons from selected output buffers to input buffers of
-      //  other subgrids
+// STEP 3: move photons from selected output buffers to input buffers of
+//  other subgrids
+#ifdef OLD_CODE
       for (unsigned int igrid = 0; igrid < gridvec.size(); ++igrid) {
         DensitySubGrid &this_grid = *gridvec[igrid];
         // loop over all output buffers of the subgrid
         for (int ibuffer = 0; ibuffer < 27; ++ibuffer) {
-          PhotonBuffer &output_buffer = this_grid.get_output_buffer(ibuffer);
+          PhotonBuffer &output_buffer =
+              photon_buffers[this_grid.get_output_buffer(ibuffer)];
           // if the output buffer is not the internal buffer of the subgrid, and
           // corresponds to an existing subgrid neighbour, then add all photons
           // to the matching input buffer of that neighbour
@@ -426,7 +438,8 @@ int main(int argc, char **argv) {
             // through the opposite corner)
             const int i_input = output_to_input_direction(ibuffer);
             myassert(gridvec[ngb]->get_neighbour(i_input) == igrid, "fail");
-            PhotonBuffer &ngbbuffer = gridvec[ngb]->get_input_buffer(i_input);
+            PhotonBuffer &ngbbuffer =
+                photon_buffers[gridvec[ngb]->get_input_buffer(i_input)];
             myassert(ngbbuffer._direction == i_input, "fail");
             myassert(ngbbuffer._is_inside_box, "fail");
             // copy the photons
@@ -446,6 +459,44 @@ int main(int argc, char **argv) {
             }
           }
           output_buffer._actual_size = 0;
+        }
+      }
+#endif
+      for (unsigned int igrid = 0; igrid < gridvec.size(); ++igrid) {
+        for (int ibuffer = 0; ibuffer < 27; ++ibuffer) {
+          const unsigned int old_this_output =
+              gridvec[igrid]->get_output_buffer(ibuffer);
+          if (ibuffer > 0 && photon_buffers[old_this_output]._is_inside_box) {
+            const unsigned int ngb = gridvec[igrid]->get_neighbour(ibuffer);
+            // we only swap once
+            if (ngb > igrid) {
+              // find out what the corresponding entry in the neighbour is
+              const int i_input = output_to_input_direction(ibuffer);
+              // get the input and output buffer indices before we change them
+              const unsigned int old_ngb_input =
+                  gridvec[ngb]->get_input_buffer(i_input);
+              const unsigned int old_ngb_output =
+                  gridvec[ngb]->get_output_buffer(i_input);
+              const unsigned int old_this_input =
+                  gridvec[igrid]->get_input_buffer(ibuffer);
+              // swap input and output buffers:
+              //  - the output buffers become the new input buffer of the ngb
+              //  - the old input buffers become the new output buffers
+              gridvec[ngb]->set_input_buffer(i_input, old_this_output);
+              gridvec[ngb]->set_output_buffer(i_input, old_ngb_input);
+              gridvec[igrid]->set_input_buffer(ibuffer, old_ngb_output);
+              gridvec[igrid]->set_output_buffer(ibuffer, old_this_input);
+              // the old inputs become the new (empty) outputs: clean them up
+              photon_buffers[old_ngb_input]._actual_size = 0;
+              photon_buffers[old_this_input]._actual_size = 0;
+              // the new inputs need the right directional information
+              photon_buffers[old_this_output]._direction = i_input;
+              photon_buffers[old_ngb_output]._direction = ibuffer;
+            }
+          } else {
+            // clean up the output
+            photon_buffers[old_this_output]._actual_size = 0;
+          }
         }
       }
     }

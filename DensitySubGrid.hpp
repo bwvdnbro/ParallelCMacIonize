@@ -30,7 +30,6 @@
 // local includes
 #include "Assert.hpp"
 #include "Photon.hpp"
-#include "PhotonBuffer.hpp"
 
 // standard library includes
 #include <algorithm>
@@ -350,11 +349,11 @@ private:
 
   /*! @brief Input buffers. Contain the photons that should be propagated
    *  through this subgrid. */
-  PhotonBuffer _input_buffers[27];
+  unsigned int _input_buffers[27];
 
   /*! @brief Output buffers. Contain the photons that have been propagated
    *  through this subgrid. */
-  PhotonBuffer _output_buffers[27];
+  unsigned int _output_buffers[27];
 
   /*! @brief Number density for each cell (in m^-3). */
   double *_number_density;
@@ -779,28 +778,50 @@ public:
   }
 
   /**
-   * @brief Get a reference to the input buffer for the given direction.
+   * @brief Get the index of the input buffer for the given direction.
    *
    * @param input_direction TravelDirection.
-   * @return Reference to the corresponding input buffer.
+   * @return Index of the corresponding input buffer.
    */
-  inline PhotonBuffer &get_input_buffer(const int input_direction) {
+  inline unsigned int get_input_buffer(const int input_direction) const {
     myassert(input_direction >= 0 && input_direction < 27,
              "input_direction: " << input_direction);
     return _input_buffers[input_direction];
   }
 
   /**
-   * @brief Get a reference to the output buffer corresponding to the given
+   * @brief Set the index of the input buffer for the given direction.
+   *
+   * @param input_direction TravelDirection.
+   * @param index Index of the corresponding buffer.
+   */
+  inline void set_input_buffer(const int input_direction,
+                               const unsigned int index) {
+    _input_buffers[input_direction] = index;
+  }
+
+  /**
+   * @brief Get the index of the output buffer corresponding to the given
    * direction.
    *
    * @param output_direction TravelDirection.
-   * @return Reference to the corresponding output buffer.
+   * @return Index of the corresponding output buffer.
    */
-  inline PhotonBuffer &get_output_buffer(const int output_direction) {
+  inline unsigned int get_output_buffer(const int output_direction) const {
     myassert(output_direction >= 0 && output_direction < 27,
              "output_direction: " << output_direction);
     return _output_buffers[output_direction];
+  }
+
+  /**
+   * @brief Set the index of the output buffer for the given direction.
+   *
+   * @param output_direction TravelDirection.
+   * @param index Index of the corresponding buffer.
+   */
+  inline void set_output_buffer(const int output_direction,
+                                const unsigned int index) {
+    _output_buffers[output_direction] = index;
   }
 
   /**
@@ -862,13 +883,10 @@ public:
    * @brief Let the given Photon travel through the density grid.
    *
    * @param photon Photon.
-   * @param inverse_direction Inverse of the direction vector, pre-computed for
-   * better efficiency (maybe not necessary?).
    * @param input_direction Direction from which the photon enters the grid.
    * @return TravelDirection of the photon after it has traversed this grid.
    */
-  inline int interact(Photon &photon, const double *inverse_direction,
-                      const int input_direction) {
+  inline int interact(Photon &photon, const int input_direction) {
 
     myassert(input_direction >= 0 && input_direction < 27,
              "input_direction: " << input_direction);
@@ -877,6 +895,9 @@ public:
     const double direction[3] = {photon._direction[0], photon._direction[1],
                                  photon._direction[2]};
     myassert(is_compatible_input_direction(direction, input_direction), "fail");
+    const double inverse_direction[3] = {photon._inverse_direction[0],
+                                         photon._inverse_direction[1],
+                                         photon._inverse_direction[2]};
     // NOTE: position is relative w.r.t. _anchor!!!
     double position[3] = {photon._position[0] - _anchor[0],
                           photon._position[1] - _anchor[1],
@@ -898,9 +919,7 @@ public:
     // double condition:
     //  - target optical depth not reached (tau_done < tau_target)
     //  - photon still in subgrid: is_inside(three_index)
-    unsigned int num_loop = 0;
     while (tau_done < tau_target && is_inside(three_index)) {
-      ++num_loop;
       // get cell boundaries
       const double cell_low[3] = {three_index[0] * _cell_size[0],
                                   three_index[1] * _cell_size[1],
@@ -918,9 +937,8 @@ public:
                    << cell_low[2] << "\ncell_high: " << cell_high[0] << " "
                    << cell_high[1] << " " << cell_high[2]
                    << "\ndirection: " << direction[0] << " " << direction[1]
-                   << " " << direction[2] << "\nnum_loop: " << num_loop
-                   << "\nthree_index: " << three_index[0] << " "
-                   << three_index[1] << " " << three_index[2]);
+                   << " " << direction[2] << "\nthree_index: " << three_index[0]
+                   << " " << three_index[1] << " " << three_index[2]);
 
       // compute cell distances
       double l[3];
