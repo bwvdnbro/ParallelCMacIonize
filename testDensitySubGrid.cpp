@@ -39,6 +39,9 @@
  *  the stderr. Comment to disable logging altogether. */
 #define LOG_OUTPUT 1
 
+/*! @brief Activate this to check the subgrid geometry. */
+//#define CHECK_GRID
+
 /**
  * @brief Write a message to the log with the given log level.
  *
@@ -56,6 +59,44 @@
 #endif
 
 /**
+ * @brief Check the get_output_direction method of the given grid with the given
+ * input parameters and expected output.
+ *
+ * @param grid DensitySubGrid to test on.
+ * @param ix x index.
+ * @param iy y index.
+ * @param iz z index.
+ * @param ref Expected output.
+ */
+#define check_direction(grid, ix, iy, iz, ref)                                 \
+  {                                                                            \
+    const int three_index[3] = {ix, iy, iz};                                   \
+    const int result = grid.get_output_direction(three_index);                 \
+    if (result != ref) {                                                       \
+      std::cerr << "Wrong output direction!" << std::endl;                     \
+      std::cerr << "Three index: " << ix << " " << iy << " " << iz             \
+                << std::endl;                                                  \
+      std::cerr << "Expected: " << ref << ", got: " << result << std::endl;    \
+      return 1;                                                                \
+    }                                                                          \
+  }
+
+#define check_input(grid, position, input_direction, rx, ry, rz)               \
+  {                                                                            \
+    int three_index[3];                                                        \
+    grid.get_start_index(position, input_direction, three_index);              \
+    if (!(three_index[0] == rx && three_index[1] == ry &&                      \
+          three_index[2] == rz)) {                                             \
+      std::cerr << "Wrong input three index!" << std::endl;                    \
+      std::cerr << "Input direction: " << input_direction << std::endl;        \
+      std::cerr << "Expected: " << rx << " " << ry << " " << rz << std::endl;  \
+      std::cerr << "Got: " << three_index[0] << " " << three_index[1] << " "   \
+                << three_index[2] << std::endl;                                \
+      return 1;                                                                \
+    }                                                                          \
+  }
+
+/**
  * @brief Unit test for the DensitySubGrid class.
  *
  * Runs a simple Stromgren sphere test with a homogeneous density field, a
@@ -67,6 +108,78 @@
  * @return Exit code: 0 on success.
  */
 int main(int argc, char **argv) {
+
+#ifdef TEST_DIRECTIONS
+  /// test directional routines
+  {
+    const double testbox[6] = {0., 0., 0., 1., 1., 1.};
+    const int testncell[3] = {10, 10, 10};
+    DensitySubGrid test_grid(testbox, testncell);
+
+    check_direction(test_grid, 4, 5, 3, TRAVELDIRECTION_INSIDE);
+
+    check_direction(test_grid, -1, 5, 3, TRAVELDIRECTION_FACE_X_N);
+    check_direction(test_grid, 10, 5, 3, TRAVELDIRECTION_FACE_X_P);
+    check_direction(test_grid, 4, -1, 3, TRAVELDIRECTION_FACE_Y_N);
+    check_direction(test_grid, 4, 10, 3, TRAVELDIRECTION_FACE_Y_P);
+    check_direction(test_grid, 4, 5, -1, TRAVELDIRECTION_FACE_Z_N);
+    check_direction(test_grid, 4, 5, 10, TRAVELDIRECTION_FACE_Z_P);
+
+    check_direction(test_grid, -1, -1, 3, TRAVELDIRECTION_EDGE_Z_NN);
+    check_direction(test_grid, -1, 10, 3, TRAVELDIRECTION_EDGE_Z_NP);
+    check_direction(test_grid, 10, -1, 3, TRAVELDIRECTION_EDGE_Z_PN);
+    check_direction(test_grid, 10, 10, 3, TRAVELDIRECTION_EDGE_Z_PP);
+    check_direction(test_grid, -1, 5, -1, TRAVELDIRECTION_EDGE_Y_NN);
+    check_direction(test_grid, -1, 5, 10, TRAVELDIRECTION_EDGE_Y_NP);
+    check_direction(test_grid, 10, 5, -1, TRAVELDIRECTION_EDGE_Y_PN);
+    check_direction(test_grid, 10, 5, 10, TRAVELDIRECTION_EDGE_Y_PP);
+    check_direction(test_grid, 4, -1, -1, TRAVELDIRECTION_EDGE_X_NN);
+    check_direction(test_grid, 4, -1, 10, TRAVELDIRECTION_EDGE_X_NP);
+    check_direction(test_grid, 4, 10, -1, TRAVELDIRECTION_EDGE_X_PN);
+    check_direction(test_grid, 4, 10, 10, TRAVELDIRECTION_EDGE_X_PP);
+
+    check_direction(test_grid, -1, -1, -1, TRAVELDIRECTION_CORNER_NNN);
+    check_direction(test_grid, -1, -1, 10, TRAVELDIRECTION_CORNER_NNP);
+    check_direction(test_grid, -1, 10, -1, TRAVELDIRECTION_CORNER_NPN);
+    check_direction(test_grid, -1, 10, 10, TRAVELDIRECTION_CORNER_NPP);
+    check_direction(test_grid, 10, -1, -1, TRAVELDIRECTION_CORNER_PNN);
+    check_direction(test_grid, 10, -1, 10, TRAVELDIRECTION_CORNER_PNP);
+    check_direction(test_grid, 10, 10, -1, TRAVELDIRECTION_CORNER_PPN);
+    check_direction(test_grid, 10, 10, 10, TRAVELDIRECTION_CORNER_PPP);
+
+    const double position[3] = {0.5, 0.5, 0.5};
+    check_input(test_grid, position, TRAVELDIRECTION_INSIDE, 5, 5, 5);
+
+    check_input(test_grid, position, TRAVELDIRECTION_FACE_X_N, 0, 5, 5);
+    check_input(test_grid, position, TRAVELDIRECTION_FACE_X_P, 9, 5, 5);
+    check_input(test_grid, position, TRAVELDIRECTION_FACE_Y_N, 5, 0, 5);
+    check_input(test_grid, position, TRAVELDIRECTION_FACE_Y_P, 5, 9, 5);
+    check_input(test_grid, position, TRAVELDIRECTION_FACE_Z_N, 5, 5, 0);
+    check_input(test_grid, position, TRAVELDIRECTION_FACE_Z_P, 5, 5, 9);
+
+    check_input(test_grid, position, TRAVELDIRECTION_EDGE_X_NN, 5, 0, 0);
+    check_input(test_grid, position, TRAVELDIRECTION_EDGE_X_NP, 5, 0, 9);
+    check_input(test_grid, position, TRAVELDIRECTION_EDGE_X_PN, 5, 9, 0);
+    check_input(test_grid, position, TRAVELDIRECTION_EDGE_X_PP, 5, 9, 9);
+    check_input(test_grid, position, TRAVELDIRECTION_EDGE_Y_NN, 0, 5, 0);
+    check_input(test_grid, position, TRAVELDIRECTION_EDGE_Y_NP, 0, 5, 9);
+    check_input(test_grid, position, TRAVELDIRECTION_EDGE_Y_PN, 9, 5, 0);
+    check_input(test_grid, position, TRAVELDIRECTION_EDGE_Y_PP, 9, 5, 9);
+    check_input(test_grid, position, TRAVELDIRECTION_EDGE_Z_NN, 0, 0, 5);
+    check_input(test_grid, position, TRAVELDIRECTION_EDGE_Z_NP, 0, 9, 5);
+    check_input(test_grid, position, TRAVELDIRECTION_EDGE_Z_PN, 9, 0, 5);
+    check_input(test_grid, position, TRAVELDIRECTION_EDGE_Z_PP, 9, 9, 5);
+
+    check_input(test_grid, position, TRAVELDIRECTION_CORNER_NNN, 0, 0, 0);
+    check_input(test_grid, position, TRAVELDIRECTION_CORNER_NNP, 0, 0, 9);
+    check_input(test_grid, position, TRAVELDIRECTION_CORNER_NPN, 0, 9, 0);
+    check_input(test_grid, position, TRAVELDIRECTION_CORNER_NPP, 0, 9, 9);
+    check_input(test_grid, position, TRAVELDIRECTION_CORNER_PNN, 9, 0, 0);
+    check_input(test_grid, position, TRAVELDIRECTION_CORNER_PNP, 9, 0, 9);
+    check_input(test_grid, position, TRAVELDIRECTION_CORNER_PPN, 9, 9, 0);
+    check_input(test_grid, position, TRAVELDIRECTION_CORNER_PPP, 9, 9, 9);
+  }
+#endif
 
   /// Main simulation parameters
   // size of the box (corresponds to a -5 pc -> 5 pc cube)
@@ -84,8 +197,8 @@ int main(int argc, char **argv) {
   // set up the grid of smaller grids used for the algorithm
   // each smaller grid stores a fraction of the total grid and has its own
   // buffers to store photons
-  std::vector<DensitySubGrid *> gridvec(num_subgrid[0] * num_subgrid[1] *
-                                        num_subgrid[2]);
+  std::vector< DensitySubGrid * > gridvec(num_subgrid[0] * num_subgrid[1] *
+                                          num_subgrid[2]);
   const double subbox_side[3] = {box[3] / num_subgrid[0],
                                  box[4] / num_subgrid[1],
                                  box[5] / num_subgrid[2]};
@@ -104,22 +217,21 @@ int main(int argc, char **argv) {
                                   subbox_side[1],
                                   subbox_side[2]};
         gridvec[index] = new DensitySubGrid(subbox, subbox_ncell);
-        DensitySubGrid &grid = *gridvec[index];
+        DensitySubGrid &this_grid = *gridvec[index];
         // set up the buffers
         // make sure all buffers are empty (_actual_size == 0)
         // by default, all buffers are outside the box (we will set the buffers
         // that are not to the correct value below)
         for (int i = 0; i < 27; ++i) {
-          PhotonBuffer &buffer = grid.get_input_buffer(i);
-          buffer._direction = i;
-          buffer._is_inside_box = false;
-          buffer._actual_size = 0;
-        }
-        for (int i = 0; i < 27; ++i) {
-          PhotonBuffer &buffer = grid.get_output_buffer(i);
-          buffer._direction = i;
-          buffer._is_inside_box = false;
-          buffer._actual_size = 0;
+          PhotonBuffer &input_buffer = this_grid.get_input_buffer(i);
+          input_buffer._direction = i;
+          input_buffer._is_inside_box = false;
+          input_buffer._actual_size = 0;
+          PhotonBuffer &output_buffer = this_grid.get_output_buffer(i);
+          output_buffer._direction = i;
+          output_buffer._is_inside_box = false;
+          output_buffer._actual_size = 0;
+          this_grid.set_neighbour(i, 9999);
         }
         // now set up the correct neighbour relations and flag the buffers that
         // are really inside the box
@@ -143,16 +255,16 @@ int main(int argc, char **argv) {
                 const int three_index[3] = {nix * subbox_ncell[0],
                                             niy * subbox_ncell[1],
                                             niz * subbox_ncell[2]};
-                const int ngbi = grid.get_output_direction(three_index);
+                const int ngbi = this_grid.get_output_direction(three_index);
                 // now get the actual ngb index
                 const unsigned int ngb_index =
                     cix * num_subgrid[1] * num_subgrid[2] +
                     ciy * num_subgrid[2] + ciz;
-                grid.set_neighbour(ngbi, ngb_index);
+                this_grid.set_neighbour(ngbi, ngb_index);
                 // set the corresponding buffers to inside
-                PhotonBuffer &input_buffer = grid.get_input_buffer(ngbi);
+                PhotonBuffer &input_buffer = this_grid.get_input_buffer(ngbi);
                 input_buffer._is_inside_box = true;
-                PhotonBuffer &output_buffer = grid.get_output_buffer(ngbi);
+                PhotonBuffer &output_buffer = this_grid.get_output_buffer(ngbi);
                 output_buffer._is_inside_box = true;
               }
             }
@@ -161,12 +273,39 @@ int main(int argc, char **argv) {
       }
     }
   }
+
+#ifdef CHECK_GRID
+  // inspect the generated grids
+  std::ofstream gfile("grids.txt");
+  for (unsigned int i = 0; i < gridvec.size(); ++i) {
+    DensitySubGrid &this_grid = *gridvec[i];
+    gfile << "subgrid " << i << "\n";
+    double box[6];
+    this_grid.get_grid_box(box);
+    gfile << "box: " << box[0] << " " << box[1] << " " << box[2] << ", "
+          << box[3] << " " << box[4] << " " << box[5] << "\n";
+    gfile << "ngbs:\n";
+    for (int j = 0; j < 27; ++j) {
+      const unsigned int ngb = this_grid.get_neighbour(j);
+      gfile << j << ": " << ngb << "\n";
+      if (ngb < 9999) {
+        const int i_input = output_to_input_direction(j);
+        myassert(gridvec[ngb]->get_neighbour(i_input) == i, "fail");
+      }
+    }
+    gfile << "\n";
+  }
+  gfile.close();
+#endif
+
   // get a reference to the central buffer, as this is where our source is
   // located
-  DensitySubGrid &grid =
-      *gridvec[(num_subgrid[0] >> 1) * num_subgrid[1] * num_subgrid[2] +
-               (num_subgrid[1] >> 1) * num_subgrid[2] + (num_subgrid[2] >> 1)];
-  PhotonBuffer &input_buffer = grid.get_input_buffer(TRAVELDIRECTION_INSIDE);
+  const unsigned int central_index =
+      (num_subgrid[0] >> 1) * num_subgrid[1] * num_subgrid[2] +
+      (num_subgrid[1] >> 1) * num_subgrid[2] + (num_subgrid[2] >> 1);
+  myassert(central_index == 13, "central_index: " << central_index);
+  PhotonBuffer &input_buffer =
+      gridvec[central_index]->get_input_buffer(TRAVELDIRECTION_INSIDE);
 
   // set up the random number generator
   RandomGenerator random_generator;
@@ -176,7 +315,7 @@ int main(int argc, char **argv) {
   //  - computes the ionization equilibrium
   for (unsigned int iloop = 0; iloop < number_of_iterations; ++iloop) {
     // STEP 0: log output
-    logmessage("Loop 1", 0);
+    logmessage("Loop " << iloop + 1, 0);
 
     // STEP 1: photon shooting
     unsigned int num_photon_done = 0;
@@ -235,6 +374,7 @@ int main(int argc, char **argv) {
         // loop over all 27 input buffers
         for (int ibuffer = 0; ibuffer < 27; ++ibuffer) {
           PhotonBuffer &buffer = this_grid.get_input_buffer(ibuffer);
+          myassert(ibuffer == buffer._direction, "fail");
           // only process input buffers that are inside the box
           if (buffer._is_inside_box) {
             for (unsigned int i = 0; i < buffer._actual_size; ++i) {
@@ -245,12 +385,25 @@ int main(int argc, char **argv) {
                                                    1. / photon._direction[2]};
               const int result = this_grid.interact(photon, inverse_direction,
                                                     buffer._direction);
-              PhotonBuffer &output_buffer = grid.get_output_buffer(result);
+              myassert(result >= 0 && result < 27, "fail");
+              PhotonBuffer &output_buffer = this_grid.get_output_buffer(result);
               // add the photon to the correct output buffer
               const unsigned int index = output_buffer._actual_size;
               output_buffer._photons[index] = photon;
+              myassert(output_buffer._photons[index]._position[0] ==
+                               photon._position[0] &&
+                           output_buffer._photons[index]._position[1] ==
+                               photon._position[1] &&
+                           output_buffer._photons[index]._position[2] ==
+                               photon._position[2],
+                       "fail");
+
               ++output_buffer._actual_size;
+              myassert(output_buffer._actual_size < PHOTONBUFFER_SIZE,
+                       "output buffer size: " << output_buffer._actual_size);
             }
+            // make sure the buffer is empty for the next iteration
+            buffer._actual_size = 0;
           }
         }
       }
@@ -272,13 +425,24 @@ int main(int argc, char **argv) {
             // buffer (what goes in through one corner, enters the neighbour
             // through the opposite corner)
             const int i_input = output_to_input_direction(ibuffer);
-            PhotonBuffer &input_buffer =
-                gridvec[ngb]->get_input_buffer(i_input);
+            myassert(gridvec[ngb]->get_neighbour(i_input) == igrid, "fail");
+            PhotonBuffer &ngbbuffer = gridvec[ngb]->get_input_buffer(i_input);
+            myassert(ngbbuffer._direction == i_input, "fail");
+            myassert(ngbbuffer._is_inside_box, "fail");
             // copy the photons
-            input_buffer._actual_size = output_buffer._actual_size;
+            ngbbuffer._actual_size = output_buffer._actual_size;
             num_active_photons += output_buffer._actual_size;
             for (unsigned int i = 0; i < output_buffer._actual_size; ++i) {
-              input_buffer._photons[i] = output_buffer._photons[i];
+              myassert(is_compatible_output_direction(
+                           output_buffer._photons[i]._direction, ibuffer),
+                       "fail");
+              myassert(is_compatible_input_direction(
+                           output_buffer._photons[i]._direction, i_input),
+                       "fail");
+              myassert(
+                  gridvec[ngb]->is_in_box(output_buffer._photons[i]._position),
+                  "fail");
+              ngbbuffer._photons[i] = output_buffer._photons[i];
             }
           }
           output_buffer._actual_size = 0;
@@ -295,11 +459,15 @@ int main(int argc, char **argv) {
   // OUTPUT:
   //  - ASCII output (for the VisIt plot script)
   std::ofstream ofile("intensities.txt");
-  grid.print_intensities(ofile);
+  for (unsigned int igrid = 0; igrid < gridvec.size(); ++igrid) {
+    gridvec[igrid]->print_intensities(ofile);
+  }
   ofile.close();
   //  - binary output (for the Python plot script)
   std::ofstream bfile("intensities.dat");
-  grid.output_intensities(bfile);
+  for (unsigned int igrid = 0; igrid < gridvec.size(); ++igrid) {
+    gridvec[igrid]->output_intensities(bfile);
+  }
   bfile.close();
 
   // garbage collection
