@@ -52,9 +52,8 @@ public:
   /*! @brief Actual photon buffer. */
   Photon _photons[PHOTONBUFFER_SIZE];
 
-  /*! @brief Flag indicating if this buffer covers a region inside the
-   *  simulation box. */
-  bool _is_inside_box;
+  /*! @brief Flag indicating if this buffer acts as input buffer. */
+  bool _is_input;
 };
 
 #endif // PHOTONBUFFER_HPP

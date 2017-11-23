@@ -78,4 +78,4 @@ pl.xlabel("radius (pc)")
 pl.ylabel("neutral fraction")
 # clean up margins and show the plot
 pl.tight_layout()
-pl.show()
+pl.savefig("stromgren.png")

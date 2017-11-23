@@ -347,14 +347,6 @@ private:
   /*! @brief Indices of the neighbouring subgrids. */
   unsigned int _ngbs[27];
 
-  /*! @brief Input buffers. Contain the photons that should be propagated
-   *  through this subgrid. */
-  unsigned int _input_buffers[27];
-
-  /*! @brief Output buffers. Contain the photons that have been propagated
-   *  through this subgrid. */
-  unsigned int _output_buffers[27];
-
   /*! @brief Number density for each cell (in m^-3). */
   double *_number_density;
 
@@ -775,53 +767,6 @@ public:
     delete[] _number_density;
     delete[] _neutral_fraction;
     delete[] _intensity_integral;
-  }
-
-  /**
-   * @brief Get the index of the input buffer for the given direction.
-   *
-   * @param input_direction TravelDirection.
-   * @return Index of the corresponding input buffer.
-   */
-  inline unsigned int get_input_buffer(const int input_direction) const {
-    myassert(input_direction >= 0 && input_direction < 27,
-             "input_direction: " << input_direction);
-    return _input_buffers[input_direction];
-  }
-
-  /**
-   * @brief Set the index of the input buffer for the given direction.
-   *
-   * @param input_direction TravelDirection.
-   * @param index Index of the corresponding buffer.
-   */
-  inline void set_input_buffer(const int input_direction,
-                               const unsigned int index) {
-    _input_buffers[input_direction] = index;
-  }
-
-  /**
-   * @brief Get the index of the output buffer corresponding to the given
-   * direction.
-   *
-   * @param output_direction TravelDirection.
-   * @return Index of the corresponding output buffer.
-   */
-  inline unsigned int get_output_buffer(const int output_direction) const {
-    myassert(output_direction >= 0 && output_direction < 27,
-             "output_direction: " << output_direction);
-    return _output_buffers[output_direction];
-  }
-
-  /**
-   * @brief Set the index of the output buffer for the given direction.
-   *
-   * @param output_direction TravelDirection.
-   * @param index Index of the corresponding buffer.
-   */
-  inline void set_output_buffer(const int output_direction,
-                                const unsigned int index) {
-    _output_buffers[output_direction] = index;
   }
 
   /**
