@@ -28,6 +28,7 @@
 import numpy as np
 import pylab as pl
 import scipy.stats as stats
+import sys
 
 ## run parameters
 # number of cells in one coordinate dimension
@@ -40,9 +41,12 @@ nbin = 100
 alphaH = 4.e-19 # m^3 s^-1
 nH = 1.e8 # m^-3
 Q = 4.26e49 # s^-1
+PR = 0.
+if len(sys.argv) > 1:
+  PR = float(sys.argv[1])
 
 # compute the Stromgren radius (in m)
-Rs = (0.75 * Q / (np.pi * nH**2 * alphaH))**(1. / 3.)
+Rs = (0.75 * Q / (1. - PR) / (np.pi * nH**2 * alphaH))**(1. / 3.)
 
 # output distances in pc
 pc = 3.086e16 # m

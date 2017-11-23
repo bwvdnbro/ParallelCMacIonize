@@ -38,6 +38,9 @@
 #include <iostream>
 #include <ostream>
 
+/*! @brief Special neighbour index marking a neighbour that does not exist. */
+#define NEIGHBOUR_OUTSIDE 0xffffffff
+
 /**
  * @brief Custom abort macro that prints a message before aborting.
  *

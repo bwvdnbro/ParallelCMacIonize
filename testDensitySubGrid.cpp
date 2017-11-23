@@ -39,9 +39,6 @@
  *  the stderr. Comment to disable logging altogether. */
 #define LOG_OUTPUT 1
 
-/*! @brief Activate this to check the subgrid geometry. */
-//#define CHECK_GRID
-
 /*! @brief Activate this to unit test the directional algorithms. */
 //#define TEST_DIRECTIONS
 
@@ -84,6 +81,17 @@
     }                                                                          \
   }
 
+/**
+ * @brief Check the get_start_index function of the given grid againts the given
+ * reference output.
+ *
+ * @param grid DensitySubGrid to test.
+ * @param position Input position (in m).
+ * @param input_direction Input TravelDirection.
+ * @param rx Expected x index output.
+ * @param ry Expected y index output.
+ * @param rz Expected z index output.
+ */
 #define check_input(grid, position, input_direction, rx, ry, rz)               \
   {                                                                            \
     int three_index[3];                                                        \
@@ -98,6 +106,29 @@
       return 1;                                                                \
     }                                                                          \
   }
+
+/**
+ * @brief Draw a random direction.
+ *
+ * @param random_generator Random number generator to use.
+ * @param direction Random direction (output).
+ * @param inverse_direction Inverse random direction (output).
+ */
+inline static void get_random_direction(RandomGenerator &random_generator,
+                                        double *direction,
+                                        double *inverse_direction) {
+  const double cost = 2. * random_generator.get_uniform_random_double() - 1.;
+  const double sint = std::sqrt(std::max(1. - cost * cost, 0.));
+  const double phi = 2. * M_PI * random_generator.get_uniform_random_double();
+  const double cosp = std::cos(phi);
+  const double sinp = std::sin(phi);
+  direction[0] = sint * cosp;
+  direction[1] = sint * sinp;
+  direction[2] = cost;
+  inverse_direction[0] = 1. / direction[0];
+  inverse_direction[1] = 1. / direction[1];
+  inverse_direction[2] = 1. / direction[2];
+}
 
 /**
  * @brief Unit test for the DensitySubGrid class.
@@ -196,10 +227,17 @@ int main(int argc, char **argv) {
   const unsigned int number_of_iterations = 10;
   // number of subgrids: 3^3
   const int num_subgrid[3] = {3, 5, 4};
+  // number of photon buffers to use
+  // this number of buffers is pre-allocated and the photon traversal routine
+  // arbitrarily uses them to store photons
+  const unsigned int number_of_buffers = 2000;
+  // reemission probability
+  const double reemission_probability = 0.364;
+  //  const double reemission_probability = 0.;
 
   // set up the grid of smaller grids used for the algorithm
-  // each smaller grid stores a fraction of the total grid and has its own
-  // buffers to store photons
+  // each smaller grid stores a fraction of the total grid and has information
+  // about the neighbouring subgrids
   std::vector< DensitySubGrid * > gridvec(num_subgrid[0] * num_subgrid[1] *
                                           num_subgrid[2]);
   const double subbox_side[3] = {box[3] / num_subgrid[0],
@@ -208,7 +246,7 @@ int main(int argc, char **argv) {
   const int subbox_ncell[3] = {ncell[0] / num_subgrid[0],
                                ncell[1] / num_subgrid[1],
                                ncell[2] / num_subgrid[2]};
-  unsigned int num_existing_buffer = 0;
+  // set up the subgrids
   for (int ix = 0; ix < num_subgrid[0]; ++ix) {
     for (int iy = 0; iy < num_subgrid[1]; ++iy) {
       for (int iz = 0; iz < num_subgrid[2]; ++iz) {
@@ -222,15 +260,13 @@ int main(int argc, char **argv) {
                                   subbox_side[2]};
         gridvec[index] = new DensitySubGrid(subbox, subbox_ncell);
         DensitySubGrid &this_grid = *gridvec[index];
-        // set up the buffers
-        // make sure all buffers are empty (_actual_size == 0)
-        // by default, all buffers are outside the box (we will set the buffers
-        // that are not to the correct value below)
+        // set up neighbouring information. We first make sure all neighbours
+        // are initialized to NEIGHBOUR_OUTSIDE, indicating no neighbour
         for (int i = 0; i < 27; ++i) {
-          this_grid.set_neighbour(i, 9999);
+          this_grid.set_neighbour(i, NEIGHBOUR_OUTSIDE);
         }
-        // now set up the correct neighbour relations and flag the buffers that
-        // are really inside the box
+        // now set up the correct neighbour relations for the neighbours that
+        // exist
         for (int nix = -1; nix < 2; ++nix) {
           for (int niy = -1; niy < 2; ++niy) {
             for (int niz = -1; niz < 2; ++niz) {
@@ -257,7 +293,6 @@ int main(int argc, char **argv) {
                     cix * num_subgrid[1] * num_subgrid[2] +
                     ciy * num_subgrid[2] + ciz;
                 this_grid.set_neighbour(ngbi, ngb_index);
-                ++num_existing_buffer;
               }
             }
           }
@@ -266,41 +301,30 @@ int main(int argc, char **argv) {
     }
   }
 
-  std::cout << "Number of existing buffers: " << num_existing_buffer
-            << std::endl;
-
-  std::vector< PhotonBuffer > flexible_photon_buffers(num_existing_buffer);
-  std::vector< unsigned int > free_photon_buffers(num_existing_buffer, 0);
-  for (unsigned int i = 0; i < num_existing_buffer; ++i) {
+  // set up the photon buffers
+  std::vector< PhotonBuffer > photon_buffers(number_of_buffers);
+  // next_free_buffer always stores the index of the next buffer that is still
+  // available
+  // free_photon_buffers stores, for every buffer, the next free index assuming
+  // that buffer is also free. This way, the free buffers form a linked-list,
+  // which enables obtaining and releasing free buffers:
+  //  - to claim a free buffer, we just use next_free_buffer and set
+  //    next_free_buffer to free_photon_buffers[next_free_buffer]
+  //  - to release a buffer with index ifree, we set
+  //    free_photon_buffers[ifree] = next_free_buffer, and set
+  //    next_free_buffer to ifree
+  // We also need to make sure the buffer._is_input flag is up to date:
+  //  - 'true' means the buffer is claimed and should be processed
+  //  - 'false' means the buffer is free
+  unsigned int next_free_buffer = 0;
+  std::vector< unsigned int > free_photon_buffers(number_of_buffers, 0);
+  // initialize the free_photon_buffers list and mark all buffers as free
+  for (unsigned int i = 0; i < number_of_buffers; ++i) {
     free_photon_buffers[i] = i + 1;
     // disable processing of buffers
-    flexible_photon_buffers[i]._is_input = false;
+    photon_buffers[i]._is_input = false;
   }
-  unsigned int next_free_buffer = 0;
-
-#ifdef CHECK_GRID
-  // inspect the generated grids
-  std::ofstream gfile("grids.txt");
-  for (unsigned int i = 0; i < gridvec.size(); ++i) {
-    DensitySubGrid &this_grid = *gridvec[i];
-    gfile << "subgrid " << i << "\n";
-    double box[6];
-    this_grid.get_grid_box(box);
-    gfile << "box: " << box[0] << " " << box[1] << " " << box[2] << ", "
-          << box[3] << " " << box[4] << " " << box[5] << "\n";
-    gfile << "ngbs:\n";
-    for (int j = 0; j < 27; ++j) {
-      const unsigned int ngb = this_grid.get_neighbour(j);
-      gfile << j << ": " << ngb << "\n";
-      if (ngb < 9999) {
-        const int i_input = output_to_input_direction(j);
-        myassert(gridvec[ngb]->get_neighbour(i_input) == i, "fail");
-      }
-    }
-    gfile << "\n";
-  }
-  gfile.close();
-#endif
+  unsigned int number_of_buffers_used = 0;
 
   // get a reference to the central buffer, as this is where our source is
   // located
@@ -322,15 +346,15 @@ int main(int argc, char **argv) {
     unsigned int num_photon_done = 0;
     unsigned int num_active_photons = 1;
     // this loop is repeated until all photons have been shot. It
-    //  - adds PHOTONBUFFER_SIZE new source photons to the central input buffer
-    //  - shoots all photons in all buffers for all subgrids and creates new
-    //    input buffers on the fly
-    //  - computes the number of photons that are still active
+    //  - creates one new buffer with source photons
+    //  - shoots all photons in all buffers that are claimed and creates new
+    //    buffers with output photons
+    //  - updates the number of photons that are still active
     while (num_active_photons > 0) {
       // STEP 0: log output
       logmessage("Subloop (" << num_active_photons << ")", 1);
 
-      // STEP 1: add new photons to the source input buffer
+      // STEP 1: add new photons from the source
       num_active_photons = 0;
       // we only do this step as long as the source has photons...
       if (num_photon_done < num_photon) {
@@ -339,10 +363,14 @@ int main(int argc, char **argv) {
         const unsigned int num_photon_this_loop =
             std::min(PHOTONBUFFER_SIZE, num_photon - num_photon_done);
         num_photon_done += num_photon_this_loop;
+        // make sure the main loop knows there are more photons coming
         num_active_photons += (num_photon - num_photon_done);
-        PhotonBuffer &input_buffer = flexible_photon_buffers[next_free_buffer];
+        // claim a new buffer and set its properties
+        PhotonBuffer &input_buffer = photon_buffers[next_free_buffer];
         next_free_buffer = free_photon_buffers[next_free_buffer];
-        myassert(next_free_buffer != free_photon_buffers.size(), "overflow!");
+        number_of_buffers_used =
+            std::max(number_of_buffers_used, next_free_buffer);
+        myassert(next_free_buffer != number_of_buffers, "overflow!");
         input_buffer._actual_size = num_photon_this_loop;
         input_buffer._sub_grid_index = central_index;
         input_buffer._direction = TRAVELDIRECTION_INSIDE;
@@ -353,19 +381,8 @@ int main(int argc, char **argv) {
           photon._position[0] = 0.;
           photon._position[1] = 0.;
           photon._position[2] = 0.;
-          const double cost =
-              2. * random_generator.get_uniform_random_double() - 1.;
-          const double sint = std::sqrt(std::max(1. - cost * cost, 0.));
-          const double phi =
-              2. * M_PI * random_generator.get_uniform_random_double();
-          const double cosp = std::cos(phi);
-          const double sinp = std::sin(phi);
-          photon._direction[0] = sint * cosp;
-          photon._direction[1] = sint * sinp;
-          photon._direction[2] = cost;
-          photon._inverse_direction[0] = 1. / photon._direction[0];
-          photon._inverse_direction[1] = 1. / photon._direction[1];
-          photon._inverse_direction[2] = 1. / photon._direction[2];
+          get_random_direction(random_generator, photon._direction,
+                               photon._inverse_direction);
           // we currently assume equal weight for all photons
           photon._weight = 1.;
           photon._current_optical_depth = 0.;
@@ -376,38 +393,57 @@ int main(int argc, char **argv) {
         }
       }
 
-      // STEP 2: shoot photons, by looping over the subgrids and moving all
-      //  photons in a grid's input buffer to one of its output buffers
-      for (unsigned int ibuffer = 0; ibuffer < flexible_photon_buffers.size();
-           ++ibuffer) {
-        PhotonBuffer &buffer = flexible_photon_buffers[ibuffer];
+      // STEP 2: shoot photons, by looping over the buffers and processing all
+      //  active buffer. Each buffer creates new output buffers that might or
+      //  might not be processed, depending on where they are in the list
+      for (unsigned int ibuffer = 0; ibuffer < number_of_buffers; ++ibuffer) {
+        PhotonBuffer &buffer = photon_buffers[ibuffer];
+        // we only process active buffers
         if (buffer._is_input) {
+          // get the subgrid connected to this buffer
           DensitySubGrid &this_grid = *gridvec[buffer._sub_grid_index];
+          // create provisional output buffers
           unsigned int output_indices[27];
-          for (int i = 1; i < 27; ++i) {
+          for (int i = 0; i < 27; ++i) {
             const unsigned int ngb = this_grid.get_neighbour(i);
-            if (ngb < 9999) {
+            // only create buffers that correspond to existing subgrids
+            if (ngb != NEIGHBOUR_OUTSIDE) {
               output_indices[i] = next_free_buffer;
-              flexible_photon_buffers[next_free_buffer]._is_input = true;
-              flexible_photon_buffers[next_free_buffer]._sub_grid_index = ngb;
-              flexible_photon_buffers[next_free_buffer]._direction =
+              photon_buffers[next_free_buffer]._is_input = true;
+              photon_buffers[next_free_buffer]._sub_grid_index = ngb;
+              photon_buffers[next_free_buffer]._direction =
                   output_to_input_direction(i);
-              flexible_photon_buffers[next_free_buffer]._actual_size = 0;
+              photon_buffers[next_free_buffer]._actual_size = 0;
               next_free_buffer = free_photon_buffers[next_free_buffer];
-              myassert(next_free_buffer != free_photon_buffers.size(),
-                       "overflow!");
+              number_of_buffers_used =
+                  std::max(number_of_buffers_used, next_free_buffer);
+              myassert(next_free_buffer != number_of_buffers, "overflow!");
             } else {
-              output_indices[i] = 9999;
+              output_indices[i] = NEIGHBOUR_OUTSIDE;
             }
           }
+          // now do the actual photon traversal
           for (unsigned int i = 0; i < buffer._actual_size; ++i) {
-            // shoot the photon through the subgrid
             Photon &photon = buffer._photons[i];
             const int result = this_grid.interact(photon, buffer._direction);
             myassert(result >= 0 && result < 27, "fail");
-            if (result > 0 && output_indices[result] < 9999) {
+            // check if an absorbed photon needs to be reemitted
+            bool reemit = false;
+            if (result == 0 &&
+                random_generator.get_uniform_random_double() <
+                    reemission_probability) {
+              reemit = true;
+              get_random_direction(random_generator, photon._direction,
+                                   photon._inverse_direction);
+              photon._current_optical_depth = 0.;
+              photon._target_optical_depth =
+                  -std::log(random_generator.get_uniform_random_double());
+            }
+            // add the photon to an output buffer, if it still exists
+            if ((result > 0 && output_indices[result] != NEIGHBOUR_OUTSIDE) ||
+                reemit) {
               PhotonBuffer &output_buffer =
-                  flexible_photon_buffers[output_indices[result]];
+                  photon_buffers[output_indices[result]];
               // add the photon to the correct output buffer
               const unsigned int index = output_buffer._actual_size;
               output_buffer._photons[index] = photon;
@@ -429,10 +465,10 @@ int main(int argc, char **argv) {
           free_photon_buffers[ibuffer] = next_free_buffer;
           next_free_buffer = ibuffer;
           // remove empty output buffers
-          for (unsigned int i = 1; i < 27; ++i) {
-            if (output_indices[i] < 9999 &&
-                flexible_photon_buffers[output_indices[i]]._actual_size == 0) {
-              flexible_photon_buffers[output_indices[i]]._is_input = false;
+          for (unsigned int i = 0; i < 27; ++i) {
+            if (output_indices[i] != NEIGHBOUR_OUTSIDE &&
+                photon_buffers[output_indices[i]]._actual_size == 0) {
+              photon_buffers[output_indices[i]]._is_input = false;
               free_photon_buffers[output_indices[i]] = next_free_buffer;
               next_free_buffer = output_indices[i];
             }
@@ -441,12 +477,11 @@ int main(int argc, char **argv) {
       }   // for flexible_buffer elements
 
       // STEP 3: update the number of active photons counter
-      for (unsigned int ibuffer = 0; ibuffer < flexible_photon_buffers.size();
+      for (unsigned int ibuffer = 0; ibuffer < photon_buffers.size();
            ++ibuffer) {
-        num_active_photons +=
-            (flexible_photon_buffers[ibuffer]._is_input)
-                ? flexible_photon_buffers[ibuffer]._actual_size
-                : 0;
+        num_active_photons += (photon_buffers[ibuffer]._is_input)
+                                  ? photon_buffers[ibuffer]._actual_size
+                                  : 0;
       }
     }
 
@@ -455,6 +490,8 @@ int main(int argc, char **argv) {
       gridvec[igrid]->compute_neutral_fraction(num_photon);
     }
   }
+
+  logmessage("Number of buffers used: " << number_of_buffers_used, 0);
 
   // OUTPUT:
   //  - ASCII output (for the VisIt plot script)
