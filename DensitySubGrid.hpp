@@ -29,6 +29,7 @@
 
 // local includes
 #include "Assert.hpp"
+#include "Atomic.hpp"
 #include "Photon.hpp"
 
 // standard library includes
@@ -320,6 +321,9 @@ inline bool is_compatible_input_direction(const double *direction,
  */
 class DensitySubGrid {
 private:
+  /*! @brief Lock flag that ensures thread safe access to this subgrid. */
+  bool _lock;
+
   /*! @brief Lower front left corner of the box that contains the subgrid (in
    *  m). */
   double _anchor[3];
@@ -771,6 +775,18 @@ public:
     delete[] _neutral_fraction;
     delete[] _intensity_integral;
   }
+
+  /**
+   * @brief Try to lock the cell.
+   *
+   * @return True if the lock succeeded.
+   */
+  inline bool lock() { return atomic_lock(_lock); }
+
+  /**
+   * @brief Unlock the cell.
+   */
+  inline void unlock() { _lock = false; }
 
   /**
    * @brief Get the neighbour for the given direction.

@@ -402,76 +402,82 @@ int main(int argc, char **argv) {
         if (buffer._is_input) {
           // get the subgrid connected to this buffer
           DensitySubGrid &this_grid = *gridvec[buffer._sub_grid_index];
-          // create provisional output buffers
-          unsigned int output_indices[27];
-          for (int i = 0; i < 27; ++i) {
-            const unsigned int ngb = this_grid.get_neighbour(i);
-            // only create buffers that correspond to existing subgrids
-            if (ngb != NEIGHBOUR_OUTSIDE) {
-              output_indices[i] = next_free_buffer;
-              photon_buffers[next_free_buffer]._is_input = true;
-              photon_buffers[next_free_buffer]._sub_grid_index = ngb;
-              photon_buffers[next_free_buffer]._direction =
-                  output_to_input_direction(i);
-              photon_buffers[next_free_buffer]._actual_size = 0;
-              next_free_buffer = free_photon_buffers[next_free_buffer];
-              number_of_buffers_used =
-                  std::max(number_of_buffers_used, next_free_buffer);
-              myassert(next_free_buffer != number_of_buffers, "overflow!");
-            } else {
-              output_indices[i] = NEIGHBOUR_OUTSIDE;
+          // try to set the lock for this region
+          if (this_grid.lock()) {
+            // lock succeeded: do photon traversal
+            // create provisional output buffers
+            unsigned int output_indices[27];
+            for (int i = 0; i < 27; ++i) {
+              const unsigned int ngb = this_grid.get_neighbour(i);
+              // only create buffers that correspond to existing subgrids
+              if (ngb != NEIGHBOUR_OUTSIDE) {
+                output_indices[i] = next_free_buffer;
+                photon_buffers[next_free_buffer]._is_input = true;
+                photon_buffers[next_free_buffer]._sub_grid_index = ngb;
+                photon_buffers[next_free_buffer]._direction =
+                    output_to_input_direction(i);
+                photon_buffers[next_free_buffer]._actual_size = 0;
+                next_free_buffer = free_photon_buffers[next_free_buffer];
+                number_of_buffers_used =
+                    std::max(number_of_buffers_used, next_free_buffer);
+                myassert(next_free_buffer != number_of_buffers, "overflow!");
+              } else {
+                output_indices[i] = NEIGHBOUR_OUTSIDE;
+              }
             }
-          }
-          // now do the actual photon traversal
-          for (unsigned int i = 0; i < buffer._actual_size; ++i) {
-            Photon &photon = buffer._photons[i];
-            const int result = this_grid.interact(photon, buffer._direction);
-            myassert(result >= 0 && result < 27, "fail");
-            // check if an absorbed photon needs to be reemitted
-            bool reemit = false;
-            if (result == 0 &&
-                random_generator.get_uniform_random_double() <
-                    reemission_probability) {
-              reemit = true;
-              get_random_direction(random_generator, photon._direction,
-                                   photon._inverse_direction);
-              photon._current_optical_depth = 0.;
-              photon._target_optical_depth =
-                  -std::log(random_generator.get_uniform_random_double());
-            }
-            // add the photon to an output buffer, if it still exists
-            if ((result > 0 && output_indices[result] != NEIGHBOUR_OUTSIDE) ||
-                reemit) {
-              PhotonBuffer &output_buffer =
-                  photon_buffers[output_indices[result]];
-              // add the photon to the correct output buffer
-              const unsigned int index = output_buffer._actual_size;
-              output_buffer._photons[index] = photon;
-              myassert(output_buffer._photons[index]._position[0] ==
-                               photon._position[0] &&
-                           output_buffer._photons[index]._position[1] ==
-                               photon._position[1] &&
-                           output_buffer._photons[index]._position[2] ==
-                               photon._position[2],
-                       "fail");
+            // now do the actual photon traversal
+            for (unsigned int i = 0; i < buffer._actual_size; ++i) {
+              Photon &photon = buffer._photons[i];
+              const int result = this_grid.interact(photon, buffer._direction);
+              myassert(result >= 0 && result < 27, "fail");
+              // check if an absorbed photon needs to be reemitted
+              bool reemit = false;
+              if (result == 0 &&
+                  random_generator.get_uniform_random_double() <
+                      reemission_probability) {
+                reemit = true;
+                get_random_direction(random_generator, photon._direction,
+                                     photon._inverse_direction);
+                photon._current_optical_depth = 0.;
+                photon._target_optical_depth =
+                    -std::log(random_generator.get_uniform_random_double());
+              }
+              // add the photon to an output buffer, if it still exists
+              if ((result > 0 && output_indices[result] != NEIGHBOUR_OUTSIDE) ||
+                  reemit) {
+                PhotonBuffer &output_buffer =
+                    photon_buffers[output_indices[result]];
+                // add the photon to the correct output buffer
+                const unsigned int index = output_buffer._actual_size;
+                output_buffer._photons[index] = photon;
+                myassert(output_buffer._photons[index]._position[0] ==
+                                 photon._position[0] &&
+                             output_buffer._photons[index]._position[1] ==
+                                 photon._position[1] &&
+                             output_buffer._photons[index]._position[2] ==
+                                 photon._position[2],
+                         "fail");
 
-              ++output_buffer._actual_size;
-              myassert(output_buffer._actual_size < PHOTONBUFFER_SIZE,
-                       "output buffer size: " << output_buffer._actual_size);
+                ++output_buffer._actual_size;
+                myassert(output_buffer._actual_size < PHOTONBUFFER_SIZE,
+                         "output buffer size: " << output_buffer._actual_size);
+              }
             }
-          }
-          // remove the buffer
-          buffer._is_input = false;
-          free_photon_buffers[ibuffer] = next_free_buffer;
-          next_free_buffer = ibuffer;
-          // remove empty output buffers
-          for (unsigned int i = 0; i < 27; ++i) {
-            if (output_indices[i] != NEIGHBOUR_OUTSIDE &&
-                photon_buffers[output_indices[i]]._actual_size == 0) {
-              photon_buffers[output_indices[i]]._is_input = false;
-              free_photon_buffers[output_indices[i]] = next_free_buffer;
-              next_free_buffer = output_indices[i];
+            // remove the buffer
+            buffer._is_input = false;
+            free_photon_buffers[ibuffer] = next_free_buffer;
+            next_free_buffer = ibuffer;
+            // remove empty output buffers
+            for (unsigned int i = 0; i < 27; ++i) {
+              if (output_indices[i] != NEIGHBOUR_OUTSIDE &&
+                  photon_buffers[output_indices[i]]._actual_size == 0) {
+                photon_buffers[output_indices[i]]._is_input = false;
+                free_photon_buffers[output_indices[i]] = next_free_buffer;
+                next_free_buffer = output_indices[i];
+              }
             }
+            // we're done: unlock the subgrid
+            this_grid.unlock();
           }
         } // if input buffer
       }   // for flexible_buffer elements
