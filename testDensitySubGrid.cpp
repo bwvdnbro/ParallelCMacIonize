@@ -367,7 +367,11 @@ int main(int argc, char **argv) {
         num_active_photons += (num_photon - num_photon_done);
         // claim a new buffer and set its properties
         PhotonBuffer &input_buffer = photon_buffers[next_free_buffer];
-        next_free_buffer = free_photon_buffers[next_free_buffer];
+        unsigned int next_free_buffer_now = next_free_buffer;
+        while (!atomic_set(next_free_buffer, next_free_buffer_now,
+                           free_photon_buffers[next_free_buffer_now])) {
+          next_free_buffer_now = next_free_buffer;
+        }
         number_of_buffers_used =
             std::max(number_of_buffers_used, next_free_buffer);
         myassert(next_free_buffer != number_of_buffers, "overflow!");
@@ -396,7 +400,9 @@ int main(int argc, char **argv) {
       // STEP 2: shoot photons, by looping over the buffers and processing all
       //  active buffer. Each buffer creates new output buffers that might or
       //  might not be processed, depending on where they are in the list
-      for (unsigned int ibuffer = 0; ibuffer < number_of_buffers; ++ibuffer) {
+      unsigned int global_ibuffer = 0;
+      while (global_ibuffer < number_of_buffers) {
+        const unsigned int ibuffer = atomic_post_increment(global_ibuffer);
         PhotonBuffer &buffer = photon_buffers[ibuffer];
         // we only process active buffers
         if (buffer._is_input) {
@@ -417,7 +423,11 @@ int main(int argc, char **argv) {
                 photon_buffers[next_free_buffer]._direction =
                     output_to_input_direction(i);
                 photon_buffers[next_free_buffer]._actual_size = 0;
-                next_free_buffer = free_photon_buffers[next_free_buffer];
+                unsigned int next_free_buffer_now = next_free_buffer;
+                while (!atomic_set(next_free_buffer, next_free_buffer_now,
+                                   free_photon_buffers[next_free_buffer_now])) {
+                  next_free_buffer_now = next_free_buffer;
+                }
                 number_of_buffers_used =
                     std::max(number_of_buffers_used, next_free_buffer);
                 myassert(next_free_buffer != number_of_buffers, "overflow!");
