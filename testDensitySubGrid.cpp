@@ -232,8 +232,8 @@ int main(int argc, char **argv) {
   // arbitrarily uses them to store photons
   const unsigned int number_of_buffers = 2000;
   // reemission probability
-  const double reemission_probability = 0.364;
-  //  const double reemission_probability = 0.;
+  //  const double reemission_probability = 0.364;
+  const double reemission_probability = 0.;
 
   // set up the grid of smaller grids used for the algorithm
   // each smaller grid stores a fraction of the total grid and has information
@@ -325,6 +325,7 @@ int main(int argc, char **argv) {
     photon_buffers[i]._is_input = false;
   }
   unsigned int number_of_buffers_used = 0;
+  bool photon_buffer_lock = false;
 
   // get a reference to the central buffer, as this is where our source is
   // located
@@ -365,16 +366,21 @@ int main(int argc, char **argv) {
         num_photon_done += num_photon_this_loop;
         // make sure the main loop knows there are more photons coming
         num_active_photons += (num_photon - num_photon_done);
+
         // claim a new buffer and set its properties
-        PhotonBuffer &input_buffer = photon_buffers[next_free_buffer];
-        unsigned int next_free_buffer_now = next_free_buffer;
-        while (!atomic_set(next_free_buffer, next_free_buffer_now,
-                           free_photon_buffers[next_free_buffer_now])) {
-          next_free_buffer_now = next_free_buffer;
+        // lock the photon buffer lock
+        while (!atomic_lock(photon_buffer_lock)) {
         }
+        // we now have unique access to the photon buffer
+        const unsigned int next_free_buffer_now = next_free_buffer;
+        next_free_buffer = free_photon_buffers[next_free_buffer];
         number_of_buffers_used =
             std::max(number_of_buffers_used, next_free_buffer);
         myassert(next_free_buffer != number_of_buffers, "overflow!");
+        // release the lock
+        photon_buffer_lock = false;
+        PhotonBuffer &input_buffer = photon_buffers[next_free_buffer_now];
+
         input_buffer._actual_size = num_photon_this_loop;
         input_buffer._sub_grid_index = central_index;
         input_buffer._direction = TRAVELDIRECTION_INSIDE;
@@ -401,96 +407,121 @@ int main(int argc, char **argv) {
       //  active buffer. Each buffer creates new output buffers that might or
       //  might not be processed, depending on where they are in the list
       unsigned int global_ibuffer = 0;
-      while (global_ibuffer < number_of_buffers) {
-        const unsigned int ibuffer = atomic_post_increment(global_ibuffer);
-        PhotonBuffer &buffer = photon_buffers[ibuffer];
-        // we only process active buffers
-        if (buffer._is_input) {
-          // get the subgrid connected to this buffer
-          DensitySubGrid &this_grid = *gridvec[buffer._sub_grid_index];
-          // try to set the lock for this region
-          if (this_grid.lock()) {
-            // lock succeeded: do photon traversal
-            // create provisional output buffers
-            unsigned int output_indices[27];
-            for (int i = 0; i < 27; ++i) {
-              const unsigned int ngb = this_grid.get_neighbour(i);
-              // only create buffers that correspond to existing subgrids
-              if (ngb != NEIGHBOUR_OUTSIDE) {
-                output_indices[i] = next_free_buffer;
-                photon_buffers[next_free_buffer]._is_input = true;
-                photon_buffers[next_free_buffer]._sub_grid_index = ngb;
-                photon_buffers[next_free_buffer]._direction =
-                    output_to_input_direction(i);
-                photon_buffers[next_free_buffer]._actual_size = 0;
-                unsigned int next_free_buffer_now = next_free_buffer;
-                while (!atomic_set(next_free_buffer, next_free_buffer_now,
-                                   free_photon_buffers[next_free_buffer_now])) {
-                  next_free_buffer_now = next_free_buffer;
-                }
-                number_of_buffers_used =
-                    std::max(number_of_buffers_used, next_free_buffer);
-                myassert(next_free_buffer != number_of_buffers, "overflow!");
-              } else {
-                output_indices[i] = NEIGHBOUR_OUTSIDE;
-              }
-            }
-            // now do the actual photon traversal
-            for (unsigned int i = 0; i < buffer._actual_size; ++i) {
-              Photon &photon = buffer._photons[i];
-              const int result = this_grid.interact(photon, buffer._direction);
-              myassert(result >= 0 && result < 27, "fail");
-              // check if an absorbed photon needs to be reemitted
-              bool reemit = false;
-              if (result == 0 &&
-                  random_generator.get_uniform_random_double() <
-                      reemission_probability) {
-                reemit = true;
-                get_random_direction(random_generator, photon._direction,
-                                     photon._inverse_direction);
-                photon._current_optical_depth = 0.;
-                photon._target_optical_depth =
-                    -std::log(random_generator.get_uniform_random_double());
-              }
-              // add the photon to an output buffer, if it still exists
-              if ((result > 0 && output_indices[result] != NEIGHBOUR_OUTSIDE) ||
-                  reemit) {
-                PhotonBuffer &output_buffer =
-                    photon_buffers[output_indices[result]];
-                // add the photon to the correct output buffer
-                const unsigned int index = output_buffer._actual_size;
-                output_buffer._photons[index] = photon;
-                myassert(output_buffer._photons[index]._position[0] ==
-                                 photon._position[0] &&
-                             output_buffer._photons[index]._position[1] ==
-                                 photon._position[1] &&
-                             output_buffer._photons[index]._position[2] ==
-                                 photon._position[2],
-                         "fail");
-
-                ++output_buffer._actual_size;
-                myassert(output_buffer._actual_size < PHOTONBUFFER_SIZE,
-                         "output buffer size: " << output_buffer._actual_size);
-              }
-            }
-            // remove the buffer
-            buffer._is_input = false;
-            free_photon_buffers[ibuffer] = next_free_buffer;
-            next_free_buffer = ibuffer;
-            // remove empty output buffers
-            for (unsigned int i = 0; i < 27; ++i) {
-              if (output_indices[i] != NEIGHBOUR_OUTSIDE &&
-                  photon_buffers[output_indices[i]]._actual_size == 0) {
-                photon_buffers[output_indices[i]]._is_input = false;
-                free_photon_buffers[output_indices[i]] = next_free_buffer;
-                next_free_buffer = output_indices[i];
-              }
-            }
-            // we're done: unlock the subgrid
-            this_grid.unlock();
+#pragma omp parallel default(shared)
+      {
+        while (global_ibuffer < number_of_buffers) {
+          const unsigned int ibuffer = atomic_post_increment(global_ibuffer);
+          if (ibuffer >= number_of_buffers) {
+            break;
           }
-        } // if input buffer
-      }   // for flexible_buffer elements
+          PhotonBuffer &buffer = photon_buffers[ibuffer];
+          // we only process active buffers
+          if (buffer._is_input) {
+            // get the subgrid connected to this buffer
+            DensitySubGrid &this_grid = *gridvec[buffer._sub_grid_index];
+            // try to set the lock for this region
+            if (this_grid.lock()) {
+              // lock succeeded: do photon traversal
+              // create provisional output buffers
+              unsigned int output_indices[27];
+              for (int i = 0; i < 27; ++i) {
+                const unsigned int ngb = this_grid.get_neighbour(i);
+                // only create buffers that correspond to existing subgrids
+                if (ngb != NEIGHBOUR_OUTSIDE) {
+
+                  // claim a new buffer and set its properties
+                  // lock the photon buffer lock
+                  while (!atomic_lock(photon_buffer_lock)) {
+                  }
+                  // we now have unique access to the photon buffer
+                  const unsigned int next_free_buffer_now = next_free_buffer;
+                  next_free_buffer = free_photon_buffers[next_free_buffer];
+                  number_of_buffers_used =
+                      std::max(number_of_buffers_used, next_free_buffer);
+                  myassert(next_free_buffer != number_of_buffers, "overflow!");
+                  // release the lock
+                  photon_buffer_lock = false;
+
+                  output_indices[i] = next_free_buffer_now;
+                  // make sure the buffer is not yet processed
+                  photon_buffers[next_free_buffer_now]._is_input = false;
+                  photon_buffers[next_free_buffer_now]._sub_grid_index = ngb;
+                  photon_buffers[next_free_buffer_now]._direction =
+                      output_to_input_direction(i);
+                  photon_buffers[next_free_buffer_now]._actual_size = 0;
+                } else {
+                  output_indices[i] = NEIGHBOUR_OUTSIDE;
+                }
+              }
+              // now do the actual photon traversal
+              for (unsigned int i = 0; i < buffer._actual_size; ++i) {
+                Photon &photon = buffer._photons[i];
+                const int result =
+                    this_grid.interact(photon, buffer._direction);
+                myassert(result >= 0 && result < 27, "fail");
+                // check if an absorbed photon needs to be reemitted
+                bool reemit = false;
+                if (result == 0 &&
+                    random_generator.get_uniform_random_double() <
+                        reemission_probability) {
+                  reemit = true;
+                  get_random_direction(random_generator, photon._direction,
+                                       photon._inverse_direction);
+                  photon._current_optical_depth = 0.;
+                  photon._target_optical_depth =
+                      -std::log(random_generator.get_uniform_random_double());
+                }
+                // add the photon to an output buffer, if it still exists
+                if ((result > 0 &&
+                     output_indices[result] != NEIGHBOUR_OUTSIDE) ||
+                    reemit) {
+                  PhotonBuffer &output_buffer =
+                      photon_buffers[output_indices[result]];
+                  // add the photon to the correct output buffer
+                  const unsigned int index = output_buffer._actual_size;
+                  output_buffer._photons[index] = photon;
+                  myassert(output_buffer._photons[index]._position[0] ==
+                                   photon._position[0] &&
+                               output_buffer._photons[index]._position[1] ==
+                                   photon._position[1] &&
+                               output_buffer._photons[index]._position[2] ==
+                                   photon._position[2],
+                           "fail");
+
+                  ++output_buffer._actual_size;
+                  myassert(
+                      output_buffer._actual_size < PHOTONBUFFER_SIZE,
+                      "output buffer size: " << output_buffer._actual_size);
+                }
+              }
+              // lock the photon buffer lock
+              while (!atomic_lock(photon_buffer_lock)) {
+              }
+              // remove the buffer
+              buffer._is_input = false;
+              free_photon_buffers[ibuffer] = next_free_buffer;
+              next_free_buffer = ibuffer;
+              // remove empty output buffers
+              for (unsigned int i = 0; i < 27; ++i) {
+                if (output_indices[i] != NEIGHBOUR_OUTSIDE) {
+                  if (photon_buffers[output_indices[i]]._actual_size == 0) {
+                    photon_buffers[output_indices[i]]._is_input = false;
+                    free_photon_buffers[output_indices[i]] = next_free_buffer;
+                    next_free_buffer = output_indices[i];
+                  } else {
+                    // the buffer can now be processed
+                    photon_buffers[output_indices[i]]._is_input = true;
+                  }
+                }
+              }
+              // unlock the photon buffer lock
+              photon_buffer_lock = false;
+              // we're done: unlock the subgrid
+              this_grid.unlock();
+            } // if subgrid lock
+          }   // if input buffer
+        }     // for flexible_buffer elements
+      }       // parallel region
 
       // STEP 3: update the number of active photons counter
       for (unsigned int ibuffer = 0; ibuffer < photon_buffers.size();
