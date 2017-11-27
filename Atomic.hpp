@@ -56,4 +56,42 @@
  */
 #define atomic_post_increment(variable) __sync_fetch_and_add(&variable, 1)
 
+/**
+ * @brief Atomically add the given value to the given variable and return the
+ * old value of the variable.
+ *
+ * @param variable Variable to add to.
+ * @param increment Value to add to the variable.
+ * @return Original value of the variable.
+ */
+#define atomic_post_add(variable, increment)                                   \
+  __sync_fetch_and_add(&variable, increment)
+
+/**
+ * @brief Atomically increment the given variable by 1 and return the new value.
+ *
+ * @param variable Variable to increment.
+ * @return New value of the variable.
+ */
+#define atomic_pre_increment(variable) __sync_add_and_fetch(&variable, 1)
+
+/**
+ * @brief Atomically add the given value to the given variable and return the
+ * new value of the variable.
+ *
+ * @param variable Variable to add to.
+ * @param increment Value to add to the variable.
+ * @return New value of the variable.
+ */
+#define atomic_pre_add(variable, increment)                                    \
+  __sync_add_and_fetch(&variable, increment)
+
+/**
+ * @brief Atomically decrease the given variable by 1 and return the new value.
+ *
+ * @param variable Variable to decrease.
+ * @return New value of the variable.
+ */
+#define atomic_pre_subtract(variable) __sync_sub_and_fetch(&variable, 1)
+
 #endif // ATOMIC_HPP

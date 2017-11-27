@@ -40,6 +40,9 @@
  */
 class PhotonBuffer {
 public:
+  /*! @brief Atomic lock. */
+  bool _lock;
+
   /*! @brief Subgrid with which this buffer is associated. */
   unsigned int _sub_grid_index;
 
