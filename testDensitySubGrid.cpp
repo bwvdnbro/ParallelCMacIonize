@@ -33,6 +33,7 @@
 #include <cmath>
 #include <fstream>
 #include <iostream>
+#include <omp.h>
 #include <vector>
 
 /*! @brief Output log level. The higher the value, the more stuff is printed to
@@ -334,7 +335,10 @@ int main(int argc, char **argv) {
       (num_subgrid[1] >> 1) * num_subgrid[2] + (num_subgrid[2] >> 1);
 
   // set up the random number generator
-  RandomGenerator random_generator;
+  RandomGenerator random_generator[16];
+  for (unsigned int i = 0; i < 16; ++i) {
+    random_generator[i].set_seed(42 + i);
+  }
 
   // now for the main loop. This loop
   //  - shoots num_photon photons through the grid to get intensity estimates
@@ -391,13 +395,13 @@ int main(int argc, char **argv) {
           photon._position[0] = 0.;
           photon._position[1] = 0.;
           photon._position[2] = 0.;
-          get_random_direction(random_generator, photon._direction,
+          get_random_direction(random_generator[0], photon._direction,
                                photon._inverse_direction);
           // we currently assume equal weight for all photons
           photon._weight = 1.;
           photon._current_optical_depth = 0.;
           photon._target_optical_depth =
-              -std::log(random_generator.get_uniform_random_double());
+              -std::log(random_generator[0].get_uniform_random_double());
           // this is the fixed cross section we use for the moment
           photon._photoionization_cross_section = 6.3e-22;
         }
@@ -409,6 +413,7 @@ int main(int argc, char **argv) {
       unsigned int global_ibuffer = 0;
 #pragma omp parallel default(shared)
       {
+        const int thread_id = omp_get_thread_num();
         while (global_ibuffer < number_of_buffers) {
           const unsigned int ibuffer = atomic_post_increment(global_ibuffer);
           if (ibuffer >= number_of_buffers) {
@@ -462,14 +467,15 @@ int main(int argc, char **argv) {
                 // check if an absorbed photon needs to be reemitted
                 bool reemit = false;
                 if (result == 0 &&
-                    random_generator.get_uniform_random_double() <
+                    random_generator[thread_id].get_uniform_random_double() <
                         reemission_probability) {
                   reemit = true;
-                  get_random_direction(random_generator, photon._direction,
+                  get_random_direction(random_generator[thread_id],
+                                       photon._direction,
                                        photon._inverse_direction);
                   photon._current_optical_depth = 0.;
-                  photon._target_optical_depth =
-                      -std::log(random_generator.get_uniform_random_double());
+                  photon._target_optical_depth = -std::log(
+                      random_generator[thread_id].get_uniform_random_double());
                 }
                 // add the photon to an output buffer, if it still exists
                 if ((result > 0 &&
