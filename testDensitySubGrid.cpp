@@ -132,6 +132,102 @@ inline static void get_random_direction(RandomGenerator &random_generator,
 }
 
 /**
+ * @brief Fill the given PhotonBuffer with random photons.
+ *
+ * @param buffer PhotonBuffer to fill.
+ * @param number_of_photons Number of photons to draw randomly.
+ * @param random_generator RandomGenerator used to generate random numbers.
+ * @param source_index Index of the subgrid that contains the source.
+ */
+inline static void fill_buffer(PhotonBuffer &buffer,
+                               const unsigned int number_of_photons,
+                               RandomGenerator &random_generator,
+                               const unsigned int source_index) {
+  buffer._actual_size = number_of_photons;
+  buffer._sub_grid_index = source_index;
+  buffer._direction = TRAVELDIRECTION_INSIDE;
+  // draw random photons and store them in the buffer
+  for (unsigned int i = 0; i < number_of_photons; ++i) {
+    Photon &photon = buffer._photons[i];
+    photon._position[0] = 0.;
+    photon._position[1] = 0.;
+    photon._position[2] = 0.;
+    get_random_direction(random_generator, photon._direction,
+                         photon._inverse_direction);
+    // we currently assume equal weight for all photons
+    photon._weight = 1.;
+    photon._current_optical_depth = 0.;
+    photon._target_optical_depth =
+        -std::log(random_generator.get_uniform_random_double());
+    // this is the fixed cross section we use for the moment
+    photon._photoionization_cross_section = 6.3e-22;
+  }
+}
+
+/**
+ * @brief Do the photon traversal for the given input buffer for the given
+ * subgrid and store the result in the given output buffers.
+ *
+ * @param input_buffer Input PhotonBuffer.
+ * @param subgrid DensitySubGrid to operate on.
+ * @param output_buffers Output PhotonBuffers.
+ */
+inline static void do_photon_traversal(PhotonBuffer &input_buffer,
+                                       DensitySubGrid &subgrid,
+                                       PhotonBuffer **output_buffers) {
+  for (unsigned int i = 0; i < input_buffer._actual_size; ++i) {
+    Photon &photon = input_buffer._photons[i];
+    const int result = subgrid.interact(photon, input_buffer._direction);
+    myassert(result >= 0 && result < 27, "fail");
+    // add the photon to an output buffer, if it still exists
+    if (output_buffers[result] != nullptr) {
+      PhotonBuffer &output_buffer = *output_buffers[result];
+      // add the photon to the correct output buffer
+      const unsigned int index = output_buffer._actual_size;
+      output_buffer._photons[index] = photon;
+      myassert(
+          output_buffer._photons[index]._position[0] == photon._position[0] &&
+              output_buffer._photons[index]._position[1] ==
+                  photon._position[1] &&
+              output_buffer._photons[index]._position[2] == photon._position[2],
+          "fail");
+
+      ++output_buffer._actual_size;
+      myassert(output_buffer._actual_size < PHOTONBUFFER_SIZE,
+               "output buffer size: " << output_buffer._actual_size);
+    }
+  }
+}
+
+/**
+ * @brief Do reemission for the given PhotonBuffer.
+ *
+ * @param buffer PhotonBuffer to act on.
+ * @param random_generator RandomGenerator to use to draw random numbers.
+ * @param reemission_probability Reemission probability.
+ */
+inline static void do_reemission(PhotonBuffer &buffer,
+                                 RandomGenerator &random_generator,
+                                 const double reemission_probability) {
+  unsigned int index = 0;
+  for (unsigned int i = 0; i < buffer._actual_size; ++i) {
+    if (random_generator.get_uniform_random_double() < reemission_probability) {
+      Photon &photon = buffer._photons[i];
+      get_random_direction(random_generator, photon._direction,
+                           photon._inverse_direction);
+      photon._current_optical_depth = 0.;
+      photon._target_optical_depth =
+          -std::log(random_generator.get_uniform_random_double());
+      // we never overwrite a photon that should be preserved (we either
+      // overwrite the photon itself, or a photon that is absorbed)
+      buffer._photons[index] = photon;
+      ++index;
+    }
+  }
+  buffer._actual_size = index;
+}
+
+/**
  * @brief Unit test for the DensitySubGrid class.
  *
  * Runs a simple Stromgren sphere test with a homogeneous density field, a
@@ -231,7 +327,7 @@ int main(int argc, char **argv) {
   // number of photon buffers to use
   // this number of buffers is pre-allocated and the photon traversal routine
   // arbitrarily uses them to store photons
-  const unsigned int number_of_buffers = 2000;
+  const unsigned int number_of_buffers = 10000;
   // reemission probability
   //  const double reemission_probability = 0.364;
   const double reemission_probability = 0.;
@@ -397,32 +493,16 @@ int main(int argc, char **argv) {
           photon_buffer_lock = false;
           PhotonBuffer &input_buffer = photon_buffers[next_free_buffer_now];
 
-          input_buffer._actual_size = num_photon_this_loop;
-          input_buffer._sub_grid_index = central_index;
-          input_buffer._direction = TRAVELDIRECTION_INSIDE;
-          // draw random photons and store them in the buffer
-          for (unsigned int i = 0; i < num_photon_this_loop; ++i) {
-            Photon &photon = input_buffer._photons[i];
-            photon._position[0] = 0.;
-            photon._position[1] = 0.;
-            photon._position[2] = 0.;
-            get_random_direction(random_generator[thread_id], photon._direction,
-                                 photon._inverse_direction);
-            // we currently assume equal weight for all photons
-            photon._weight = 1.;
-            photon._current_optical_depth = 0.;
-            photon._target_optical_depth = -std::log(
-                random_generator[thread_id].get_uniform_random_double());
-            // this is the fixed cross section we use for the moment
-            photon._photoionization_cross_section = 6.3e-22;
-          }
+          fill_buffer(input_buffer, num_photon_this_loop,
+                      random_generator[thread_id], central_index);
+
           input_buffer._is_input = true;
         }
 
         // STEP 2: shoot photons, by looping over the buffers and processing
-        // each
-        //  active buffer. Each buffer creates new output buffers that might or
-        //  might not be processed, depending on where they are in the list
+        //  each active buffer. Each buffer creates new output buffers that
+        //  might or might not be processed, depending on where they are in the
+        //  list
         for (unsigned int ibuffer = 0; ibuffer < number_of_buffers; ++ibuffer) {
           PhotonBuffer &buffer = photon_buffers[ibuffer];
           if (atomic_lock(buffer._lock)) {
@@ -435,6 +515,7 @@ int main(int argc, char **argv) {
                 // lock succeeded: do photon traversal
                 // create provisional output buffers
                 unsigned int output_indices[27];
+                PhotonBuffer *output_buffers[27];
                 for (int i = 0; i < 27; ++i) {
                   const unsigned int ngb = this_grid.get_neighbour(i);
                   // only create buffers that correspond to existing subgrids
@@ -455,6 +536,7 @@ int main(int argc, char **argv) {
                     photon_buffer_lock = false;
 
                     output_indices[i] = next_free_buffer_now;
+                    output_buffers[i] = &photon_buffers[next_free_buffer_now];
                     // make sure the buffer is not yet processed
                     photon_buffers[next_free_buffer_now]._is_input = false;
                     photon_buffers[next_free_buffer_now]._sub_grid_index = ngb;
@@ -463,50 +545,20 @@ int main(int argc, char **argv) {
                     photon_buffers[next_free_buffer_now]._actual_size = 0;
                   } else {
                     output_indices[i] = NEIGHBOUR_OUTSIDE;
+                    output_buffers[i] = nullptr;
                   }
                 }
+                // remove the inside buffer if we don't have reemission
+                if (reemission_probability == 0.) {
+                  output_buffers[TRAVELDIRECTION_INSIDE] = nullptr;
+                }
                 // now do the actual photon traversal
-                for (unsigned int i = 0; i < buffer._actual_size; ++i) {
-                  Photon &photon = buffer._photons[i];
-                  const int result =
-                      this_grid.interact(photon, buffer._direction);
-                  myassert(result >= 0 && result < 27, "fail");
-                  // check if an absorbed photon needs to be reemitted
-                  bool reemit = false;
-                  if (result == 0 &&
-                      random_generator[thread_id].get_uniform_random_double() <
-                          reemission_probability) {
-                    reemit = true;
-                    get_random_direction(random_generator[thread_id],
-                                         photon._direction,
-                                         photon._inverse_direction);
-                    photon._current_optical_depth = 0.;
-                    photon._target_optical_depth =
-                        -std::log(random_generator[thread_id]
-                                      .get_uniform_random_double());
-                  }
-                  // add the photon to an output buffer, if it still exists
-                  if ((result > 0 &&
-                       output_indices[result] != NEIGHBOUR_OUTSIDE) ||
-                      reemit) {
-                    PhotonBuffer &output_buffer =
-                        photon_buffers[output_indices[result]];
-                    // add the photon to the correct output buffer
-                    const unsigned int index = output_buffer._actual_size;
-                    output_buffer._photons[index] = photon;
-                    myassert(output_buffer._photons[index]._position[0] ==
-                                     photon._position[0] &&
-                                 output_buffer._photons[index]._position[1] ==
-                                     photon._position[1] &&
-                                 output_buffer._photons[index]._position[2] ==
-                                     photon._position[2],
-                             "fail");
-
-                    ++output_buffer._actual_size;
-                    myassert(
-                        output_buffer._actual_size < PHOTONBUFFER_SIZE,
-                        "output buffer size: " << output_buffer._actual_size);
-                  }
+                do_photon_traversal(buffer, this_grid, output_buffers);
+                // do reemission
+                if (reemission_probability > 0.) {
+                  do_reemission(*output_buffers[TRAVELDIRECTION_INSIDE],
+                                random_generator[thread_id],
+                                reemission_probability);
                 }
                 // lock the photon buffer lock
                 while (!atomic_lock(photon_buffer_lock)) {
@@ -525,8 +577,8 @@ int main(int argc, char **argv) {
                       next_free_buffer = output_indices[i];
                     } else {
                       // the buffer can now be processed
-                      photon_buffers[output_indices[i]]._is_input = true;
                       atomic_pre_increment(num_active_photons);
+                      photon_buffers[output_indices[i]]._is_input = true;
                     }
                   }
                 }

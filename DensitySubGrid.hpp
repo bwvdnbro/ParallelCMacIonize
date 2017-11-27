@@ -786,7 +786,7 @@ public:
   /**
    * @brief Unlock the cell.
    */
-  inline void unlock() { _lock = false; }
+  inline void unlock() { atomic_unlock(_lock); }
 
   /**
    * @brief Get the neighbour for the given direction.

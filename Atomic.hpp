@@ -37,6 +37,14 @@
 #define atomic_lock(flag) __sync_bool_compare_and_swap(&flag, false, true)
 
 /**
+ * @briefUnlLock the given flag atomically, making sure only one thread is
+ * allowed to set it.
+ *
+ * @param flag Flag to set.
+ */
+#define atomic_unlock(flag) __sync_bool_compare_and_swap(&flag, true, false)
+
+/**
  * @brief Atomically tries to set the given variable to the given new value.
  *
  * @param variable Variable to set.
