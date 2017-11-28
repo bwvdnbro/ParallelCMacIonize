@@ -342,8 +342,8 @@ int main(int argc, char **argv) {
   // set up the grid of smaller grids used for the algorithm
   // each smaller grid stores a fraction of the total grid and has information
   // about the neighbouring subgrids
-  std::vector< DensitySubGrid * > gridvec(num_subgrid[0] * num_subgrid[1] *
-                                          num_subgrid[2]);
+  std::vector<DensitySubGrid *> gridvec(num_subgrid[0] * num_subgrid[1] *
+                                        num_subgrid[2]);
   const double subbox_side[3] = {box[3] / num_subgrid[0],
                                  box[4] / num_subgrid[1],
                                  box[5] / num_subgrid[2]};
@@ -406,7 +406,7 @@ int main(int argc, char **argv) {
   }
 
   // set up the photon buffers
-  std::vector< PhotonBuffer > photon_buffers(number_of_buffers);
+  std::vector<PhotonBuffer> photon_buffers(number_of_buffers);
   // next_free_buffer always stores the index of the next buffer that is still
   // available
   // free_photon_buffers stores, for every buffer, the next free index assuming
@@ -421,7 +421,7 @@ int main(int argc, char **argv) {
   //  - 'true' means the buffer is claimed and should be processed
   //  - 'false' means the buffer is free
   unsigned int next_free_buffer = 0;
-  std::vector< unsigned int > free_photon_buffers(number_of_buffers, 0);
+  std::vector<unsigned int> free_photon_buffers(number_of_buffers, 0);
   // initialize the free_photon_buffers list and mark all buffers as free
   for (unsigned int i = 0; i < number_of_buffers; ++i) {
     free_photon_buffers[i] = i + 1;
@@ -432,7 +432,7 @@ int main(int argc, char **argv) {
   unsigned int number_of_buffers_used = 0;
   bool photon_buffer_lock = false;
 
-  std::vector< Queue > queues(16);
+  std::vector<Queue> queues(16);
 
   int num_threads_value;
 #pragma omp parallel
@@ -441,6 +441,8 @@ int main(int argc, char **argv) {
     num_threads_value = omp_get_num_threads();
   }
   const int num_threads = num_threads_value;
+
+  logmessage("Running with " << num_threads << " threads.", 0);
 
   // get a reference to the central buffer, as this is where our source is
   // located
@@ -479,56 +481,38 @@ int main(int argc, char **argv) {
       bool first_loop = true;
       while (first_loop || num_active_buffers > 0) {
         first_loop = false;
-        // STEP 0: log output
+        // SUBSTEP 0: log output
         logmessage("Subloop (" << num_active_buffers << ", " << num_photon_done
                                << ")",
                    1);
 
-        // STEP 1: add new photons from the source
+        // SUBSTEP 1: add new photons from the source
         // we only do this step as long as the source has photons...
-        const unsigned int num_photon_done_now =
-            atomic_post_add(num_photon_done, PHOTONBUFFER_SIZE);
-        if (num_photon_done_now < num_photon) {
+        if (num_active_buffers < 2) {
+          const unsigned int num_photon_done_now =
+              atomic_post_add(num_photon_done, PHOTONBUFFER_SIZE);
+          if (num_photon_done_now < num_photon) {
 
-          unsigned int num_photon_this_loop = PHOTONBUFFER_SIZE;
-          if (num_photon_done_now > num_photon) {
-            num_photon_this_loop += (num_photon - num_photon_done_now);
+            unsigned int num_photon_this_loop = PHOTONBUFFER_SIZE;
+            if (num_photon_done_now > num_photon) {
+              num_photon_this_loop += (num_photon - num_photon_done_now);
+            }
+            // make sure the main loop knows there are more photons coming
+            if (num_photon_done_now + num_photon_this_loop < num_photon) {
+              atomic_pre_increment(num_active_buffers);
+            }
+
+            unsigned int buffer_index;
+            PhotonBuffer *input_buffer =
+                queues[central_queue].get_free_buffer(buffer_index);
+            fill_buffer(*input_buffer, num_photon_this_loop,
+                        random_generator[thread_id], central_index);
+            // buffer is ready to be processed: add to the queue
+            queues[central_queue].add_buffer(buffer_index);
           }
-          // make sure the main loop knows there are more photons coming
-          if (num_photon_done_now + num_photon_this_loop < num_photon) {
-            atomic_pre_increment(num_active_buffers);
-          }
-
-          //          // claim a new buffer and set its properties
-          //          // lock the photon buffer lock
-          //          while (!atomic_lock(photon_buffer_lock)) {
-          //          }
-          //          // we now have unique access to the photon buffer
-          //          const unsigned int next_free_buffer_now =
-          //          next_free_buffer;
-          //          next_free_buffer = free_photon_buffers[next_free_buffer];
-          //          number_of_buffers_used =
-          //              std::max(number_of_buffers_used, next_free_buffer);
-          //          myassert(next_free_buffer != number_of_buffers,
-          //          "overflow!");
-          //          // release the lock
-          //          photon_buffer_lock = false;
-          //          PhotonBuffer &input_buffer =
-          //          photon_buffers[next_free_buffer_now];
-
-          //          fill_buffer(input_buffer, num_photon_this_loop,
-          //                      random_generator[thread_id], central_index);
-
-          //          input_buffer._is_input = true;
-          unsigned int buffer_index;
-          PhotonBuffer *input_buffer =
-              queues[central_queue].get_free_buffer(buffer_index);
-          fill_buffer(*input_buffer, num_photon_this_loop,
-                      random_generator[thread_id], central_index);
-          // buffer is ready to be processed: add to the queue
-          queues[central_queue].add_buffer(buffer_index);
         }
 
+        // SUBSTEP 2: photon traversal
         unsigned int current_index;
         unsigned int queue_index = thread_id;
         PhotonBuffer *buffer = queues[queue_index].get_buffer(current_index);
@@ -586,115 +570,6 @@ int main(int argc, char **argv) {
           queues[queue_index].free_buffer(current_index);
           buffer = queues[thread_id].get_buffer(current_index);
         }
-
-        // STEP 2: shoot photons, by looping over the buffers and processing
-        //  each active buffer. Each buffer creates new output buffers that
-        //  might or might not be processed, depending on where they are in the
-        //  list
-        //        for (unsigned int ibuffer = 0; ibuffer < number_of_buffers;
-        //        ++ibuffer) {
-        //          PhotonBuffer &buffer = photon_buffers[ibuffer];
-        //          if (atomic_lock(buffer._lock)) {
-        //            // we only process active buffers
-        //            if (buffer._is_input) {
-        //              // get the subgrid connected to this buffer
-        //              DensitySubGrid &this_grid =
-        //              *gridvec[buffer._sub_grid_index];
-        //              // try to set the lock for this region
-        //              if (this_grid.lock()) {
-        //                // lock succeeded: do photon traversal
-        //                // create provisional output buffers
-        //                unsigned int output_indices[27];
-        //                PhotonBuffer *output_buffers[27];
-        //                for (int i = 0; i < 27; ++i) {
-        //                  const unsigned int ngb = this_grid.get_neighbour(i);
-        //                  // only create buffers that correspond to existing
-        //                  subgrids
-        //                  if (ngb != NEIGHBOUR_OUTSIDE) {
-
-        //                    // claim a new buffer and set its properties
-        //                    // lock the photon buffer lock
-        //                    while (!atomic_lock(photon_buffer_lock)) {
-        //                    }
-        //                    // we now have unique access to the photon buffer
-        //                    const unsigned int next_free_buffer_now =
-        //                    next_free_buffer;
-        //                    next_free_buffer =
-        //                    free_photon_buffers[next_free_buffer];
-        //                    number_of_buffers_used =
-        //                        std::max(number_of_buffers_used,
-        //                        next_free_buffer);
-        //                    myassert(next_free_buffer != number_of_buffers,
-        //                             "overflow!");
-        //                    // release the lock
-        //                    photon_buffer_lock = false;
-
-        //                    output_indices[i] = next_free_buffer_now;
-        //                    output_buffers[i] =
-        //                    &photon_buffers[next_free_buffer_now];
-        //                    // make sure the buffer is not yet processed
-        //                    photon_buffers[next_free_buffer_now]._is_input =
-        //                    false;
-        //                    photon_buffers[next_free_buffer_now]._sub_grid_index
-        //                    = ngb;
-        //                    photon_buffers[next_free_buffer_now]._direction =
-        //                        output_to_input_direction(i);
-        //                    photon_buffers[next_free_buffer_now]._actual_size
-        //                    = 0;
-        //                  } else {
-        //                    output_indices[i] = NEIGHBOUR_OUTSIDE;
-        //                    output_buffers[i] = nullptr;
-        //                  }
-        //                }
-        //                // remove the inside buffer if we don't have
-        //                reemission
-        //                if (reemission_probability == 0.) {
-        //                  output_buffers[TRAVELDIRECTION_INSIDE] = nullptr;
-        //                }
-        //                // now do the actual photon traversal
-        //                do_photon_traversal(buffer, this_grid,
-        //                output_buffers);
-        //                // do reemission
-        //                if (reemission_probability > 0.) {
-        //                  do_reemission(*output_buffers[TRAVELDIRECTION_INSIDE],
-        //                                random_generator[thread_id],
-        //                                reemission_probability);
-        //                }
-        //                // lock the photon buffer lock
-        //                while (!atomic_lock(photon_buffer_lock)) {
-        //                }
-        //                // remove the buffer
-        //                buffer._is_input = false;
-        //                atomic_pre_subtract(num_active_buffers);
-        //                free_photon_buffers[ibuffer] = next_free_buffer;
-        //                next_free_buffer = ibuffer;
-        //                // remove empty output buffers
-        //                for (unsigned int i = 0; i < 27; ++i) {
-        //                  if (output_indices[i] != NEIGHBOUR_OUTSIDE) {
-        //                    if (photon_buffers[output_indices[i]]._actual_size
-        //                    == 0) {
-        //                      photon_buffers[output_indices[i]]._is_input =
-        //                      false;
-        //                      free_photon_buffers[output_indices[i]] =
-        //                      next_free_buffer;
-        //                      next_free_buffer = output_indices[i];
-        //                    } else {
-        //                      // the buffer can now be processed
-        //                      atomic_pre_increment(num_active_buffers);
-        //                      photon_buffers[output_indices[i]]._is_input =
-        //                      true;
-        //                    }
-        //                  }
-        //                }
-        //                // unlock the photon buffer lock
-        //                photon_buffer_lock = false;
-        //                // we're done: unlock the subgrid
-        //                this_grid.unlock();
-        //              } // if subgrid lock
-        //            }   // if input buffer
-        //            buffer._lock = false;
-        //          }
-        //        } // for flexible_buffer elements
       }
     } // parallel region
 

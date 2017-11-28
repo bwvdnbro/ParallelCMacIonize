@@ -1054,10 +1054,10 @@ public:
           double pos_z = _anchor[2] + (iz + 0.5) * _cell_size[2];
           const int three_index[3] = {ix, iy, iz};
           const int index = get_one_index(three_index);
-          stream.write(reinterpret_cast< char * >(&pos_x), sizeof(double));
-          stream.write(reinterpret_cast< char * >(&pos_y), sizeof(double));
-          stream.write(reinterpret_cast< char * >(&pos_z), sizeof(double));
-          stream.write(reinterpret_cast< char * >(&_neutral_fraction[index]),
+          stream.write(reinterpret_cast<char *>(&pos_x), sizeof(double));
+          stream.write(reinterpret_cast<char *>(&pos_y), sizeof(double));
+          stream.write(reinterpret_cast<char *>(&pos_z), sizeof(double));
+          stream.write(reinterpret_cast<char *>(&_neutral_fraction[index]),
                        sizeof(double));
         }
       }

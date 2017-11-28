@@ -84,6 +84,14 @@
 #define atomic_pre_increment(variable) __sync_add_and_fetch(&variable, 1)
 
 /**
+ * @brief Atomically decrement the given variable by 1 and return the new value.
+ *
+ * @param variable Variable to decrement.
+ * @return New value of the variable.
+ */
+#define atomic_pre_decrement(variable) __sync_sub_and_fetch(&variable, 1)
+
+/**
  * @brief Atomically add the given value to the given variable and return the
  * new value of the variable.
  *

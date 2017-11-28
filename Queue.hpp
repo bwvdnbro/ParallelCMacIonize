@@ -38,7 +38,7 @@
  * @brief PhotonBuffer queue.
  */
 class Queue {
-public:
+private:
   /*! @brief PhotonBuffers stored in this queue. */
   unsigned int _buffers[QUEUE_SIZE];
 
@@ -54,16 +54,34 @@ public:
   /*! @brief Last used memory block. */
   unsigned int _memory_index;
 
+  /*! @brief Number of free memory spaces. */
+  unsigned int _memory_free;
+
   /*! @brief Lock to protect this queue. */
   bool _lock;
 
-  inline Queue() : _last_element(0), _memory_index(0), _lock(false) {
+public:
+  /**
+   * @brief Constructor.
+   */
+  inline Queue()
+      : _last_element(0), _memory_index(0), _memory_free(QUEUE_SIZE),
+        _lock(false) {
     for (unsigned int i = 0; i < QUEUE_SIZE; ++i) {
       _memory_taken[i] = false;
     }
   }
 
-  inline void add_buffer(unsigned int buffer) {
+  /**
+   * @brief Add the buffer with the given index in the internal memory space to
+   * the queue.
+   *
+   * The buffer can only be processed once it has been added. This method locks
+   * the queue.
+   *
+   * @param buffer Index of the buffer in the internal memory space.
+   */
+  inline void add_buffer(const unsigned int buffer) {
     while (!atomic_lock(_lock)) {
     }
     _buffers[_last_element] = buffer;
@@ -72,6 +90,14 @@ public:
     atomic_unlock(_lock);
   }
 
+  /**
+   * @brief Get a buffer from the queue.
+   *
+   * This function locks the queue.
+   *
+   * @param index Variable to store the resulting buffer index in.
+   * @return Pointer to the buffer.
+   */
   inline PhotonBuffer *get_buffer(unsigned int &index) {
     PhotonBuffer *result = nullptr;
     while (!atomic_lock(_lock)) {
@@ -85,7 +111,17 @@ public:
     return result;
   }
 
+  /**
+   * @brief Get a free buffer in the internal memory space.
+   *
+   * This function is lock-free, but can deadlock if there are no available
+   * buffers.
+   *
+   * @param index Variable to store the resulting buffer index in.
+   * @return Pointer to the free memory buffer.
+   */
   inline PhotonBuffer *get_free_buffer(unsigned int &index) {
+    myassert(_memory_free > 0, "No more free memory!");
     // if _memory_index overflows, it is reset to 0. This is what we want.
     index = atomic_post_increment(_memory_index) % QUEUE_SIZE;
     // loop over the buffers until we find one that can be locked
@@ -96,11 +132,20 @@ public:
       //      buffer!");
       index = atomic_post_increment(_memory_index) % QUEUE_SIZE;
     }
+    atomic_pre_decrement(_memory_free);
     return &_memory_space[index];
   }
 
+  /**
+   * @brief Free the buffer with the given index.
+   *
+   * Only buffers that have been freed in this way can be used again.
+   *
+   * @param index Index of the buffer to free.
+   */
   inline void free_buffer(const unsigned int index) {
     atomic_unlock(_memory_taken[index]);
+    atomic_pre_increment(_memory_free);
   }
 };
 
