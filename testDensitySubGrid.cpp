@@ -162,6 +162,9 @@ inline static void fill_buffer(PhotonBuffer &buffer,
         -std::log(random_generator.get_uniform_random_double());
     // this is the fixed cross section we use for the moment
     photon._photoionization_cross_section = 6.3e-22;
+    myassert(photon._direction[0] != 0. || photon._direction[1] != 0. ||
+                 photon._direction[2] != 0.,
+             "fail");
   }
 }
 
@@ -175,14 +178,18 @@ inline static void fill_buffer(PhotonBuffer &buffer,
  */
 inline static void do_photon_traversal(PhotonBuffer &input_buffer,
                                        DensitySubGrid &subgrid,
-                                       PhotonBuffer **output_buffers) {
+                                       PhotonBuffer *output_buffers,
+                                       bool *output_buffer_flags) {
   for (unsigned int i = 0; i < input_buffer._actual_size; ++i) {
     Photon &photon = input_buffer._photons[i];
+    myassert(photon._direction[0] != 0. || photon._direction[1] != 0. ||
+                 photon._direction[2] != 0.,
+             "size: " << input_buffer._actual_size);
     const int result = subgrid.interact(photon, input_buffer._direction);
     myassert(result >= 0 && result < 27, "fail");
     // add the photon to an output buffer, if it still exists
-    if (output_buffers[result] != nullptr) {
-      PhotonBuffer &output_buffer = *output_buffers[result];
+    if (output_buffer_flags[result]) {
+      PhotonBuffer &output_buffer = output_buffers[result];
       // add the photon to the correct output buffer
       const unsigned int index = output_buffer._actual_size;
       output_buffer._photons[index] = photon;
@@ -192,6 +199,10 @@ inline static void do_photon_traversal(PhotonBuffer &input_buffer,
                   photon._position[1] &&
               output_buffer._photons[index]._position[2] == photon._position[2],
           "fail");
+      myassert(output_buffer._photons[index]._direction[0] != 0. ||
+                   output_buffer._photons[index]._direction[1] != 0. ||
+                   output_buffer._photons[index]._direction[2] != 0.,
+               "size: " << output_buffer._actual_size);
 
       ++output_buffer._actual_size;
       myassert(output_buffer._actual_size < PHOTONBUFFER_SIZE,
@@ -378,7 +389,61 @@ int main(int argc, char **argv) {
   logmessage("Running with " << num_threads << " threads.", 0);
 
   // set up the queues
-  std::vector< Queue > queues(num_threads);
+  std::vector< unsigned int > new_queues[16];
+  bool new_queue_locks[16];
+
+#define add_to_queue(macro_queue_index, macro_buffer)                          \
+  while (!atomic_lock(new_queue_locks[macro_queue_index])) {                   \
+  }                                                                            \
+  new_queues[macro_queue_index].push_back(macro_buffer);                       \
+  atomic_unlock(new_queue_locks[macro_queue_index]);
+
+#define queue_get(macro_queue_index, macro_buffer, macro_flag)                 \
+  while (!atomic_lock(new_queue_locks[macro_queue_index])) {                   \
+  }                                                                            \
+  macro_flag = false;                                                          \
+  if (new_queues[macro_queue_index].size() > 0) {                              \
+    macro_buffer = new_queues[macro_queue_index].back();                       \
+    new_queues[macro_queue_index].pop_back();                                  \
+    macro_flag = true;                                                         \
+  }                                                                            \
+  atomic_unlock(new_queue_locks[macro_queue_index]);
+
+#define BUFFER_SIZE 1000
+
+  std::vector< PhotonBuffer > new_buffers(BUFFER_SIZE);
+  unsigned int new_buffer_current_index = 0;
+  bool new_buffer_used[BUFFER_SIZE];
+  bool new_buffer_locks[BUFFER_SIZE];
+  for (unsigned int i = 0; i < BUFFER_SIZE; ++i) {
+    new_buffers[i]._actual_size = 0;
+    new_buffer_used[i] = false;
+    new_buffer_locks[i] = false;
+  }
+
+#define get_free_buffer(macro_new_index)                                       \
+  macro_new_index =                                                            \
+      atomic_post_increment(new_buffer_current_index) % BUFFER_SIZE;           \
+  while (!atomic_lock(new_buffer_used[macro_new_index])) {                     \
+    macro_new_index =                                                          \
+        atomic_post_increment(new_buffer_current_index) % BUFFER_SIZE;         \
+  }
+
+#define copy_buffer(macro_buffer, macro_target)                                \
+  while (!atomic_lock(new_buffer_locks[macro_target])) {                       \
+  }                                                                            \
+  new_buffers[macro_target]._actual_size = macro_buffer._actual_size;          \
+  for (unsigned int macro_i = 0; macro_i < macro_buffer._actual_size;          \
+       ++macro_i) {                                                            \
+    new_buffers[macro_target]._photons[macro_i] =                              \
+        macro_buffer._photons[macro_i];                                        \
+    myassert(                                                                  \
+        new_buffers[macro_target]._photons[macro_i]._direction[0] != 0. ||     \
+            new_buffers[macro_target]._photons[macro_i]._direction[1] != 0. || \
+            new_buffers[macro_target]._photons[macro_i]._direction[2] != 0.,   \
+        "copy size: " << new_buffers[macro_target]._actual_size);              \
+  }                                                                            \
+  atomic_unlock(new_buffer_locks[macro_target]);
 
   // set up the grid of smaller grids used for the algorithm
   // each smaller grid stores a fraction of the total grid and has information
@@ -393,71 +458,62 @@ int main(int argc, char **argv) {
                                ncell[2] / num_subgrid[2]};
   const unsigned int tot_num_subgrid =
       num_subgrid[0] * num_subgrid[1] * num_subgrid[2];
-// set up the subgrids (in parallel)
-#pragma omp parallel default(shared)
-  {
-    // id of this specific thread
-    const int thread_id = omp_get_thread_num();
-    for (int ix = 0; ix < num_subgrid[0]; ++ix) {
-      for (int iy = 0; iy < num_subgrid[1]; ++iy) {
-        for (int iz = 0; iz < num_subgrid[2]; ++iz) {
-          const unsigned int index =
-              ix * num_subgrid[1] * num_subgrid[2] + iy * num_subgrid[2] + iz;
-          // only process local grids
-          if (get_queue(index, tot_num_subgrid, num_threads) == thread_id) {
-            const double subbox[6] = {box[0] + ix * subbox_side[0],
-                                      box[1] + iy * subbox_side[1],
-                                      box[2] + iz * subbox_side[2],
-                                      subbox_side[0],
-                                      subbox_side[1],
-                                      subbox_side[2]};
-            gridvec[index] = new DensitySubGrid(subbox, subbox_ncell);
-            DensitySubGrid &this_grid = *gridvec[index];
-            // set up neighbouring information. We first make sure all
-            // neighbours are initialized to NEIGHBOUR_OUTSIDE, indicating no
-            // neighbour
-            for (int i = 0; i < 27; ++i) {
-              this_grid.set_neighbour(i, NEIGHBOUR_OUTSIDE);
-            }
-            // now set up the correct neighbour relations for the neighbours
-            // that exist
-            for (int nix = -1; nix < 2; ++nix) {
-              for (int niy = -1; niy < 2; ++niy) {
-                for (int niz = -1; niz < 2; ++niz) {
-                  // get neighbour corrected indices
-                  const int cix = ix + nix;
-                  const int ciy = iy + niy;
-                  const int ciz = iz + niz;
-                  // if the indices above point to a real subgrid: set up the
-                  // neighbour relations
-                  if (cix >= 0 && cix < num_subgrid[0] && ciy >= 0 &&
-                      ciy < num_subgrid[1] && ciz >= 0 &&
-                      ciz < num_subgrid[2]) {
-                    // we use get_output_direction() to get the correct index
-                    // for the neighbour
-                    // the three_index components will either be
-                    //  - -ncell --> negative --> lower limit
-                    //  - 0 --> in range --> inside
-                    //  - ncell --> upper limit
-                    const int three_index[3] = {nix * subbox_ncell[0],
-                                                niy * subbox_ncell[1],
-                                                niz * subbox_ncell[2]};
-                    const int ngbi =
-                        this_grid.get_output_direction(three_index);
-                    // now get the actual ngb index
-                    const unsigned int ngb_index =
-                        cix * num_subgrid[1] * num_subgrid[2] +
-                        ciy * num_subgrid[2] + ciz;
-                    this_grid.set_neighbour(ngbi, ngb_index);
-                  }
-                }
+  // set up the subgrids
+  for (int ix = 0; ix < num_subgrid[0]; ++ix) {
+    for (int iy = 0; iy < num_subgrid[1]; ++iy) {
+      for (int iz = 0; iz < num_subgrid[2]; ++iz) {
+        const unsigned int index =
+            ix * num_subgrid[1] * num_subgrid[2] + iy * num_subgrid[2] + iz;
+        const double subbox[6] = {box[0] + ix * subbox_side[0],
+                                  box[1] + iy * subbox_side[1],
+                                  box[2] + iz * subbox_side[2],
+                                  subbox_side[0],
+                                  subbox_side[1],
+                                  subbox_side[2]};
+        gridvec[index] = new DensitySubGrid(subbox, subbox_ncell);
+        DensitySubGrid &this_grid = *gridvec[index];
+        // set up neighbouring information. We first make sure all
+        // neighbours are initialized to NEIGHBOUR_OUTSIDE, indicating no
+        // neighbour
+        for (int i = 0; i < 27; ++i) {
+          this_grid.set_neighbour(i, NEIGHBOUR_OUTSIDE);
+          this_grid.set_active_buffer(i, NEIGHBOUR_OUTSIDE);
+        }
+        // now set up the correct neighbour relations for the neighbours
+        // that exist
+        for (int nix = -1; nix < 2; ++nix) {
+          for (int niy = -1; niy < 2; ++niy) {
+            for (int niz = -1; niz < 2; ++niz) {
+              // get neighbour corrected indices
+              const int cix = ix + nix;
+              const int ciy = iy + niy;
+              const int ciz = iz + niz;
+              // if the indices above point to a real subgrid: set up the
+              // neighbour relations
+              if (cix >= 0 && cix < num_subgrid[0] && ciy >= 0 &&
+                  ciy < num_subgrid[1] && ciz >= 0 && ciz < num_subgrid[2]) {
+                // we use get_output_direction() to get the correct index
+                // for the neighbour
+                // the three_index components will either be
+                //  - -ncell --> negative --> lower limit
+                //  - 0 --> in range --> inside
+                //  - ncell --> upper limit
+                const int three_index[3] = {nix * subbox_ncell[0],
+                                            niy * subbox_ncell[1],
+                                            niz * subbox_ncell[2]};
+                const int ngbi = this_grid.get_output_direction(three_index);
+                // now get the actual ngb index
+                const unsigned int ngb_index =
+                    cix * num_subgrid[1] * num_subgrid[2] +
+                    ciy * num_subgrid[2] + ciz;
+                this_grid.set_neighbour(ngbi, ngb_index);
               }
             }
           }
         }
       }
     }
-  } // end of parallel region
+  }
 
   // get a reference to the central buffer, as this is where our source is
   // located
@@ -490,6 +546,12 @@ int main(int argc, char **argv) {
     {
       // id of this specific thread
       const int thread_id = omp_get_thread_num();
+      PhotonBuffer local_buffers[27];
+      bool local_buffer_flags[27];
+      for (int i = 0; i < 27; ++i) {
+        local_buffers[i]._direction = output_to_input_direction(i);
+        local_buffers[i]._actual_size = 0;
+      }
       // this loop is repeated until all photons have been shot. It
       //  - creates one new buffer with source photons
       //  - shoots all photons in all buffers that are in the local thread queue
@@ -517,85 +579,69 @@ int main(int argc, char **argv) {
 
           // get a free photon buffer in the central queue
           unsigned int buffer_index;
-          PhotonBuffer *input_buffer =
-              queues[central_queue].get_free_buffer(buffer_index);
-          fill_buffer(*input_buffer, num_photon_this_loop,
+          get_free_buffer(buffer_index);
+          PhotonBuffer &input_buffer = new_buffers[buffer_index];
+          fill_buffer(input_buffer, num_photon_this_loop,
                       random_generator[thread_id], central_index);
           // buffer is ready to be processed: add to the queue
-          queues[central_queue].add_buffer(buffer_index);
+          add_to_queue(thread_id, buffer_index);
         }
 
         // SUBSTEP 2: photon traversal
-        // note that we initialize this value because GCC 4.8.4 is too stupid to
-        // realize it can never be used uninitialized
-        unsigned int current_index = 0;
-        // queue on which the photon buffer we use lives. Normally this is the
-        // queue corresponding to the local thread. However, if that queue is
-        // empty, we will try to steal some work from the central queue.
-        unsigned int queue_index = thread_id;
-        PhotonBuffer *buffer = queues[queue_index].get_buffer(current_index);
-        if (buffer == nullptr) {
-          // try to steal a task from the central queue
-          queue_index = central_queue;
-          buffer = queues[queue_index].get_buffer(current_index);
-        }
+        unsigned int current_index;
+        bool flag;
+        queue_get(thread_id, current_index, flag);
         // keep processing buffers until the queue is empty
-        while (buffer != nullptr) {
+        while (flag) {
+          PhotonBuffer *buffer = &new_buffers[current_index];
           DensitySubGrid &this_grid = *gridvec[buffer->_sub_grid_index];
-          // create output buffers
-          PhotonBuffer *output_buffers[27];
-          // we also store the queue indices and indices within the queue
-          // memory space
-          unsigned int queue_indices[27];
-          unsigned int buffer_indices[27];
+          // prepare output buffers
           for (int i = 0; i < 27; ++i) {
             const unsigned int ngb = this_grid.get_neighbour(i);
-            if (ngb != NEIGHBOUR_OUTSIDE &&
-                (i > 0 || reemission_probability > 0.)) {
-              const unsigned int iqueue =
-                  get_queue(ngb, tot_num_subgrid, num_threads);
-              queue_indices[i] = iqueue;
-              output_buffers[i] =
-                  queues[iqueue].get_free_buffer(buffer_indices[i]);
-              output_buffers[i]->_sub_grid_index = ngb;
-              output_buffers[i]->_direction = output_to_input_direction(i);
-              output_buffers[i]->_actual_size = 0;
+            if (ngb != NEIGHBOUR_OUTSIDE) {
+              local_buffer_flags[i] = true;
+              local_buffers[i]._actual_size = 0;
             } else {
-              output_buffers[i] = nullptr;
+              local_buffer_flags[i] = false;
             }
+          }
+          if (reemission_probability == 0.) {
+            local_buffer_flags[TRAVELDIRECTION_INSIDE] = false;
           }
           // now do the actual photon traversal. Note that we need to lock the
           // subgrid to avoid conflicts with threads that stole work from this
           // thread
           while (!this_grid.lock()) {
           }
-          do_photon_traversal(*buffer, this_grid, output_buffers);
+          do_photon_traversal(*buffer, this_grid, local_buffers,
+                              local_buffer_flags);
           this_grid.unlock();
           // do reemission (if applicable)
           if (reemission_probability > 0.) {
-            do_reemission(*output_buffers[TRAVELDIRECTION_INSIDE],
+            do_reemission(local_buffers[TRAVELDIRECTION_INSIDE],
                           random_generator[thread_id], reemission_probability);
           }
           // add none empty buffers to the appropriate queues
           for (int i = 0; i < 27; ++i) {
-            if (output_buffers[i] != nullptr) {
-              const unsigned int iqueue = queue_indices[i];
-              if (output_buffers[i]->_actual_size > 0) {
+            if (local_buffer_flags[i]) {
+              if (local_buffers[i]._actual_size > 0) {
                 // we are adding a new active buffer
                 atomic_pre_increment(num_active_buffers);
-                // add the buffer to its respective queue
-                queues[iqueue].add_buffer(buffer_indices[i]);
-              } else {
-                // buffer was not used: free the space in the respective queue
-                queues[iqueue].free_buffer(buffer_indices[i]);
+                const unsigned int ngb = this_grid.get_neighbour(i);
+                unsigned int new_index;
+                get_free_buffer(new_index);
+                new_buffers[new_index]._sub_grid_index = ngb;
+                new_buffers[new_index]._direction = local_buffers[i]._direction;
+                copy_buffer(local_buffers[i], new_index);
+                add_to_queue(central_queue, new_index);
               }
             }
           }
           // delete the original buffer
           atomic_pre_subtract(num_active_buffers);
-          queues[queue_index].free_buffer(current_index);
+          atomic_unlock(new_buffer_used[current_index]);
           // try to get a new buffer from the local queue
-          buffer = queues[thread_id].get_buffer(current_index);
+          queue_get(thread_id, current_index, flag);
         }
       }
     } // parallel region

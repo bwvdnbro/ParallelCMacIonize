@@ -30,9 +30,39 @@
 #include "Atomic.hpp"
 #include "PhotonBuffer.hpp"
 
+#include <fstream>
+#include <sstream>
 #include <vector>
 
-#define QUEUE_SIZE 1000
+#define QUEUE_SIZE 2000
+
+//#define QUEUE_LOG
+
+#ifdef QUEUE_LOG
+#define queue_log_variable std::ofstream *_log
+#else
+#define queue_log_variable
+#endif
+
+#ifdef QUEUE_LOG
+#define queue_init(name) _log = new std::ofstream(name)
+#else
+#define queue_init(name)
+#endif
+
+#ifdef QUEUE_LOG
+#define queue_free() delete _log
+#else
+#define queue_free()
+#endif
+
+#ifdef QUEUE_LOG
+#define queue_log(message)                                                     \
+  *_log << message << "\n";                                                    \
+  _log->flush();
+#else
+#define queue_log(message)
+#endif
 
 /**
  * @brief PhotonBuffer queue.
@@ -51,14 +81,26 @@ private:
   /*! @brief Flags telling us if memory is available or not. */
   bool _memory_taken[QUEUE_SIZE];
 
+  /*! @brief Flags telling us if memory is queued or not. */
+  bool _memory_queued[QUEUE_SIZE];
+
   /*! @brief Last used memory block. */
   unsigned int _memory_index;
 
   /*! @brief Number of free memory spaces. */
   unsigned int _memory_free;
 
-  /*! @brief Lock to protect this queue. */
-  bool _lock;
+  /*! @brief Lock to protect the buffer queue. */
+  bool _buffer_lock;
+
+  /*! @brief Log to write task info to. */
+  queue_log_variable;
+
+  inline static std::string get_logname(int rank) {
+    std::stringstream logname;
+    logname << "thread_" << rank;
+    return logname.str();
+  }
 
 public:
   /**
@@ -66,11 +108,16 @@ public:
    */
   inline Queue()
       : _last_element(0), _memory_index(0), _memory_free(QUEUE_SIZE),
-        _lock(false) {
+        _buffer_lock(false) {
     for (unsigned int i = 0; i < QUEUE_SIZE; ++i) {
       _memory_taken[i] = false;
+      _memory_queued[i] = false;
     }
   }
+
+  inline ~Queue() { queue_free(); }
+
+  inline void set_rank(int rank) { queue_init(get_logname(rank)); }
 
   /**
    * @brief Add the buffer with the given index in the internal memory space to
@@ -82,12 +129,16 @@ public:
    * @param buffer Index of the buffer in the internal memory space.
    */
   inline void add_buffer(const unsigned int buffer) {
-    while (!atomic_lock(_lock)) {
+    while (!atomic_lock(_buffer_lock)) {
     }
+    atomic_lock(_memory_queued[buffer]);
     _buffers[_last_element] = buffer;
+    queue_log("added buffer "
+              << buffer << " to queue index " << _last_element << ", contains "
+              << _memory_space[buffer]._actual_size << " photons");
     ++_last_element;
     myassert(_last_element != QUEUE_SIZE, "queue size overflow!");
-    atomic_unlock(_lock);
+    atomic_unlock(_buffer_lock);
   }
 
   /**
@@ -100,14 +151,19 @@ public:
    */
   inline PhotonBuffer *get_buffer(unsigned int &index) {
     PhotonBuffer *result = nullptr;
-    while (!atomic_lock(_lock)) {
+    while (!atomic_lock(_buffer_lock)) {
     }
     if (_last_element > 0) {
       --_last_element;
       index = _buffers[_last_element];
       result = &_memory_space[index];
+      queue_log("retrieved buffer " << index << " from queue index "
+                                    << _last_element << ", contains "
+                                    << result->_actual_size << " photons");
+    } else {
+      queue_log("refused buffer request because of empty queue");
     }
-    atomic_unlock(_lock);
+    atomic_unlock(_buffer_lock);
     return result;
   }
 
@@ -144,6 +200,7 @@ public:
    */
   inline void free_buffer(const unsigned int index) {
     atomic_unlock(_memory_taken[index]);
+    atomic_unlock(_memory_queued[index]);
     atomic_pre_increment(_memory_free);
   }
 };

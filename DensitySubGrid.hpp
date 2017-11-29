@@ -354,6 +354,9 @@ private:
   /*! @brief Indices of the neighbouring subgrids. */
   unsigned int _ngbs[27];
 
+  /*! @brief Indices of the active buffers. */
+  unsigned int _active_buffers[27];
+
   /*! @brief Number density for each cell (in m^-3). */
   double *_number_density;
 
@@ -813,6 +816,14 @@ public:
     _ngbs[output_direction] = ngb;
   }
 
+  inline unsigned int get_active_buffer(const int direction) const {
+    return _active_buffers[direction];
+  }
+
+  inline void set_active_buffer(const int direction, const unsigned int index) {
+    _active_buffers[direction] = index;
+  }
+
   /**
    * @brief Get the box containing the sub grid.
    *
@@ -858,7 +869,10 @@ public:
     // get some photon variables
     const double direction[3] = {photon._direction[0], photon._direction[1],
                                  photon._direction[2]};
-    myassert(is_compatible_input_direction(direction, input_direction), "fail");
+    myassert(is_compatible_input_direction(direction, input_direction),
+             "direction: " << direction[0] << " " << direction[1] << " "
+                           << direction[2]
+                           << ", input_direction: " << input_direction);
     const double inverse_direction[3] = {photon._inverse_direction[0],
                                          photon._inverse_direction[1],
                                          photon._inverse_direction[2]};
