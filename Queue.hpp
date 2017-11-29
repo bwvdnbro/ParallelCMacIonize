@@ -128,8 +128,7 @@ public:
     unsigned int num_attempt = 0;
     while (!atomic_lock(_memory_taken[index])) {
       ++num_attempt;
-      //      myassert(num_attempt < 2*QUEUE_SIZE, "cannot obtain free
-      //      buffer!");
+      myassert(num_attempt < 2 * QUEUE_SIZE, "cannot obtain free buffer!");
       index = atomic_post_increment(_memory_index) % QUEUE_SIZE;
     }
     atomic_pre_decrement(_memory_free);
