@@ -396,7 +396,7 @@ int main(int argc, char **argv) {
   }
 
   // set up the memory space
-  MemorySpace new_buffers(1000);
+  MemorySpace new_buffers(10000);
 
   // set up the grid of smaller grids used for the algorithm
   // each smaller grid stores a fraction of the total grid and has information
@@ -467,6 +467,12 @@ int main(int argc, char **argv) {
                         cix * num_subgrid[1] * num_subgrid[2] +
                         ciy * num_subgrid[2] + ciz;
                     this_grid.set_neighbour(ngbi, ngb_index);
+                    const unsigned int active_buffer =
+                        new_buffers.get_free_buffer();
+                    PhotonBuffer &buffer = new_buffers[active_buffer];
+                    buffer._sub_grid_index = ngb_index;
+                    buffer._direction = output_to_input_direction(ngbi);
+                    this_grid.set_active_buffer(ngbi, active_buffer);
                   } // if ci
                 }   // for niz
               }     // for niy
@@ -477,7 +483,7 @@ int main(int argc, char **argv) {
     }               // for ix
   }                 // end parallel region
 
-  // get a reference to the central buffer, as this is where our source is
+  // get a reference to the central subgrid, as this is where our source is
   // located
   const unsigned int central_index =
       (num_subgrid[0] >> 1) * num_subgrid[1] * num_subgrid[2] +
@@ -589,14 +595,27 @@ int main(int argc, char **argv) {
                 // we are adding a new active buffer
                 atomic_pre_increment(num_active_buffers);
                 const unsigned int ngb = this_grid.get_neighbour(i);
-                unsigned int new_index = new_buffers.get_free_buffer();
-                new_buffers[new_index]._sub_grid_index = ngb;
-                new_buffers[new_index]._direction = local_buffers[i]._direction;
-                unsigned int test_index =
-                    new_buffers.add_photons(new_index, local_buffers[i]);
-                myassert(test_index == new_index, "index confusion");
-                new_queues[get_queue(ngb, tot_num_subgrid, num_threads)]
-                    ->add_task(new_index);
+                unsigned int new_index = this_grid.get_active_buffer(i);
+                if (!new_buffers[new_index].try_lock()) {
+                  logmessage("Error obtaining buffer lock!", 0);
+                  abort();
+                } else {
+                  // buffer is now locked
+                  unsigned int test_index =
+                      new_buffers.add_photons(new_index, local_buffers[i]);
+                  if (test_index != new_index) {
+                    // add buffer to queue
+                    atomic_pre_increment(num_active_buffers);
+                    new_queues[get_queue(ngb, tot_num_subgrid, num_threads)]
+                        ->add_task(new_index);
+                    new_buffers[new_index].unlock();
+                    while (!this_grid.lock()) {
+                    }
+                    this_grid.set_active_buffer(i, test_index);
+                    this_grid.unlock();
+                    new_buffers[test_index].unlock();
+                  }
+                }
               }
             }
           }

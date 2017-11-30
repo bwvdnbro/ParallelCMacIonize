@@ -40,13 +40,13 @@ private:
   size_t *_queue;
 
   /*! @brief Last element in the queue. */
-  size_t _current_index;
+  size_t _current_queue_index;
 
-  /*! @brief Size of the queue. */
+  /*! @brief Size of the queues. */
   const size_t _size;
 
   /*! @brief Lock that protects the queue. */
-  bool _lock;
+  bool _queue_lock;
 
 public:
   /**
@@ -54,7 +54,8 @@ public:
    *
    * @param size Size of the queue.
    */
-  inline NewQueue(const size_t size) : _current_index(0), _size(size) {
+  inline NewQueue(const size_t size)
+      : _current_queue_index(0), _size(size), _queue_lock(false) {
     _queue = new size_t[size];
   }
 
@@ -69,12 +70,12 @@ public:
    * @param task Task to add.
    */
   inline void add_task(const size_t task) {
-    while (!atomic_lock(_lock)) {
+    while (!atomic_lock(_queue_lock)) {
     }
-    _queue[_current_index] = task;
-    ++_current_index;
-    myassert(_current_index < _size, "Too many tasks in queue!");
-    atomic_unlock(_lock);
+    _queue[_current_queue_index] = task;
+    ++_current_queue_index;
+    myassert(_current_queue_index < _size, "Too many tasks in queue!");
+    atomic_unlock(_queue_lock);
   }
 
   /**
@@ -83,14 +84,14 @@ public:
    * @return Task, or NO_TASK if no task is available.
    */
   inline size_t get_task() {
-    while (!atomic_lock(_lock)) {
+    while (!atomic_lock(_queue_lock)) {
     }
     size_t task = NO_TASK;
-    if (_current_index > 0) {
-      --_current_index;
-      task = _queue[_current_index];
+    if (_current_queue_index > 0) {
+      --_current_queue_index;
+      task = _queue[_current_queue_index];
     }
-    atomic_unlock(_lock);
+    atomic_unlock(_queue_lock);
     return task;
   }
 };
