@@ -28,6 +28,7 @@
 #define PHOTONBUFFER_HPP
 
 // project includes
+#include "Atomic.hpp"
 #include "Photon.hpp"
 
 /*! @brief Number of photons that can be stored in a single buffer. */
@@ -55,8 +56,17 @@ public:
   /*! @brief Actual photon buffer. */
   Photon _photons[PHOTONBUFFER_SIZE];
 
-  /*! @brief Flag indicating if this buffer acts as input buffer. */
-  bool _is_input;
+  /*! @brief Flag indicating if this buffer is in use. */
+  bool _is_in_use;
+
+  inline void lock() {
+    while (!atomic_lock(_lock)) {
+    }
+  }
+
+  inline bool try_lock() { return atomic_lock(_lock); }
+
+  inline void unlock() { atomic_unlock(_lock); }
 };
 
 #endif // PHOTONBUFFER_HPP
