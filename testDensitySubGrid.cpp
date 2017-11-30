@@ -510,6 +510,8 @@ int main(int argc, char **argv) {
     unsigned int num_photon_done = 0;
     //  - number of active photon buffers across all threads
     unsigned int num_active_buffers = 0;
+    //  - number of empty assigned buffers
+    unsigned int num_empty = tot_num_subgrid * 27;
 #pragma omp parallel default(shared)
     {
       // id of this specific thread
@@ -524,43 +526,81 @@ int main(int argc, char **argv) {
       //  - creates one new buffer with source photons
       //  - shoots all photons in all buffers that are in the local thread queue
       //    and creates new buffers with output photons
-      while (num_photon_done < num_photon || num_active_buffers > 0) {
+      while (num_photon_done < num_photon || num_active_buffers > 0 ||
+             num_empty < tot_num_subgrid * 27) {
         // SUBSTEP 0: log output
-        logmessage("Subloop (" << num_active_buffers << ", " << num_photon_done
-                               << ")",
+        logmessage("Subloop (num_active_buffers: "
+                       << num_active_buffers
+                       << ", num_photon_done: " << num_photon_done
+                       << ", num_empty: " << num_empty << ")",
                    1);
 
         // SUBSTEP 1: add new photons from the source
         // we only do this step as long as the source has photons...
-        const unsigned int num_photon_done_now =
-            atomic_post_add(num_photon_done, PHOTONBUFFER_SIZE);
-        if (num_photon_done_now < num_photon) {
-          // we will create a new buffer
-          atomic_pre_increment(num_active_buffers);
+        if (num_photon_done < num_photon) {
+          const unsigned int num_photon_done_now =
+              atomic_post_add(num_photon_done, PHOTONBUFFER_SIZE);
+          if (num_photon_done_now < num_photon) {
+            // we will create a new buffer
+            atomic_pre_increment(num_active_buffers);
 
-          // if this is the last buffer: cap the total number of photons to the
-          // requested value
-          unsigned int num_photon_this_loop = PHOTONBUFFER_SIZE;
-          if (num_photon_done_now > num_photon) {
-            num_photon_this_loop += (num_photon - num_photon_done_now);
+            // if this is the last buffer: cap the total number of photons to
+            // the
+            // requested value
+            unsigned int num_photon_this_loop = PHOTONBUFFER_SIZE;
+            if (num_photon_done_now > num_photon) {
+              num_photon_this_loop += (num_photon - num_photon_done_now);
+            }
+
+            // get a free photon buffer in the central queue
+            unsigned int buffer_index = new_buffers.get_free_buffer();
+            // no need to lock this buffer
+            PhotonBuffer &input_buffer = new_buffers[buffer_index];
+            fill_buffer(input_buffer, num_photon_this_loop,
+                        random_generator[thread_id], central_index);
+            // buffer is ready to be processed: add to the queue
+            new_queues[central_queue]->add_task(buffer_index);
           }
-
-          // get a free photon buffer in the central queue
-          unsigned int buffer_index = new_buffers.get_free_buffer();
-          // no need to lock this buffer
-          PhotonBuffer &input_buffer = new_buffers[buffer_index];
-          fill_buffer(input_buffer, num_photon_this_loop,
-                      random_generator[thread_id], central_index);
-          // buffer is ready to be processed: add to the queue
-          new_queues[central_queue]->add_task(buffer_index);
         }
 
         // SUBSTEP 2: photon traversal
         unsigned int current_index = new_queues[thread_id]->get_task();
+        if (current_index == NO_TASK) {
+          // try to activate a non-full buffer
+          unsigned int non_full_index = 0;
+          unsigned int target_i = 0;
+          int target_j = 0;
+          for (unsigned int i = 0; i < gridvec.size(); ++i) {
+            if (get_queue(i, tot_num_subgrid, num_threads) == thread_id) {
+              for (int j = 0; j < 27; ++j) {
+                if (gridvec[i]->get_neighbour(j) != NEIGHBOUR_OUTSIDE &&
+                    new_buffers[gridvec[i]->get_active_buffer(j)]._actual_size >
+                        0) {
+                  non_full_index = gridvec[i]->get_active_buffer(j);
+                  target_i = i;
+                  target_j = j;
+                  break;
+                }
+              }
+            }
+          }
+          unsigned int new_index = new_buffers.get_free_buffer();
+          new_buffers[new_index]._sub_grid_index =
+              new_buffers[non_full_index]._sub_grid_index;
+          new_buffers[new_index]._direction =
+              new_buffers[non_full_index]._direction;
+          gridvec[target_i]->set_active_buffer(target_j, new_index);
+          // add buffer to queue
+          atomic_pre_increment(num_active_buffers);
+          new_queues[thread_id]->add_task(non_full_index);
+          // we have created a new empty buffer
+          atomic_pre_increment(num_empty);
+          current_index = new_queues[thread_id]->get_task();
+        }
         // keep processing buffers until the queue is empty
         while (current_index != NO_TASK) {
           PhotonBuffer &buffer = new_buffers[current_index];
-          buffer.lock();
+          //          buffer.lock();
           DensitySubGrid &this_grid = *gridvec[buffer._sub_grid_index];
           // prepare output buffers
           for (int i = 0; i < 27; ++i) {
@@ -578,8 +618,7 @@ int main(int argc, char **argv) {
           // now do the actual photon traversal. Note that we need to lock the
           // subgrid to avoid conflicts with threads that stole work from this
           // thread
-          while (!this_grid.lock()) {
-          }
+          this_grid.lock();
           do_photon_traversal(buffer, this_grid, local_buffers,
                               local_buffer_flags);
           this_grid.unlock();
@@ -592,37 +631,63 @@ int main(int argc, char **argv) {
           for (int i = 0; i < 27; ++i) {
             if (local_buffer_flags[i]) {
               if (local_buffers[i]._actual_size > 0) {
-                // we are adding a new active buffer
-                atomic_pre_increment(num_active_buffers);
                 const unsigned int ngb = this_grid.get_neighbour(i);
                 unsigned int new_index = this_grid.get_active_buffer(i);
-                if (!new_buffers[new_index].try_lock()) {
-                  logmessage("Error obtaining buffer lock!", 0);
-                  abort();
-                } else {
-                  // buffer is now locked
-                  unsigned int test_index =
-                      new_buffers.add_photons(new_index, local_buffers[i]);
-                  if (test_index != new_index) {
-                    // add buffer to queue
-                    atomic_pre_increment(num_active_buffers);
-                    new_queues[get_queue(ngb, tot_num_subgrid, num_threads)]
-                        ->add_task(new_index);
-                    new_buffers[new_index].unlock();
-                    while (!this_grid.lock()) {
-                    }
-                    this_grid.set_active_buffer(i, test_index);
-                    this_grid.unlock();
-                    new_buffers[test_index].unlock();
+                if (new_buffers[new_index]._actual_size == 0) {
+                  // we are adding photons to an empty buffer
+                  atomic_pre_decrement(num_empty);
+                }
+                unsigned int add_index =
+                    new_buffers.add_photons(new_index, local_buffers[i]);
+                if (add_index != new_index) {
+                  // add buffer to queue
+                  atomic_pre_increment(num_active_buffers);
+                  new_queues[get_queue(ngb, tot_num_subgrid, num_threads)]
+                      ->add_task(new_index);
+                  myassert(new_buffers[add_index]._sub_grid_index == ngb,
+                           "Wrong subgrid");
+                  myassert(new_buffers[add_index]._direction ==
+                               output_to_input_direction(i),
+                           "Wrong direction");
+                  this_grid.set_active_buffer(i, add_index);
+                  if (new_buffers[add_index]._actual_size == 0) {
+                    // we have created a new empty buffer
+                    atomic_pre_increment(num_empty);
                   }
                 }
+
+                //                unsigned int new_index =
+                //                this_grid.get_active_buffer(i);
+                //                if (!new_buffers[new_index].try_lock()) {
+                //                  logmessage("Error obtaining buffer lock!",
+                //                  0);
+                //                  abort();
+                //                } else {
+                //                  // buffer is now locked
+                //                  unsigned int test_index =
+                //                      new_buffers.add_photons(new_index,
+                //                      local_buffers[i]);
+                //                  if (test_index != new_index) {
+                //                    // add buffer to queue
+                //                    atomic_pre_increment(num_active_buffers);
+                //                    new_queues[get_queue(ngb, tot_num_subgrid,
+                //                    num_threads)]
+                //                        ->add_task(new_index);
+                //                    new_buffers[new_index].unlock();
+                //                    this_grid.lock();
+                //                    this_grid.set_active_buffer(i,
+                //                    test_index);
+                //                    this_grid.unlock();
+                //                    new_buffers[test_index].unlock();
+                //                  }
+                //                }
               }
             }
           }
           // delete the original buffer
           atomic_pre_subtract(num_active_buffers);
           new_buffers.free_buffer(current_index);
-          buffer.unlock();
+          //          buffer.unlock();
           // try to get a new buffer from the local queue
           current_index = new_queues[thread_id]->get_task();
         }

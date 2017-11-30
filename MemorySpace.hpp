@@ -29,6 +29,8 @@
 #include "Atomic.hpp"
 #include "PhotonBuffer.hpp"
 
+#include <omp.h>
+
 /**
  * @brief Buffer with pre-allocated PhotonBuffers that can be used.
  */
@@ -46,6 +48,9 @@ private:
   /*! @brief Memory space itself. */
   PhotonBuffer *_memory_space;
 
+  /*! @brief Lock protecting the memory space. */
+  omp_lock_t _lock;
+
 public:
   /**
    * @brief Constructor.
@@ -56,16 +61,19 @@ public:
       : _current_index(0), _size(size), _number_taken(0) {
     _memory_space = new PhotonBuffer[size];
     for (size_t i = 0; i < size; ++i) {
-      _memory_space[i]._lock = false;
       _memory_space[i]._actual_size = 0;
       _memory_space[i]._is_in_use = false;
     }
+    omp_init_lock(&_lock);
   }
 
   /**
    * @brief Destructor.
    */
-  inline ~MemorySpace() { delete[] _memory_space; }
+  inline ~MemorySpace() {
+    delete[] _memory_space;
+    omp_destroy_lock(&_lock);
+  }
 
   /**
    * @brief Access the buffer with the given index.
@@ -80,12 +88,24 @@ public:
    * @return Index of a free buffer.
    */
   inline size_t get_free_buffer() {
+    //    myassert(_number_taken < _size, "No more free buffers in memory
+    //    space!");
+    //    size_t index = atomic_post_increment(_current_index) % _size;
+    //    while (!atomic_lock(_memory_space[index]._is_in_use)) {
+    //      index = atomic_post_increment(_current_index) % _size;
+    //    }
+    //    atomic_pre_increment(_number_taken);
+    //    return index;
+
     myassert(_number_taken < _size, "No more free buffers in memory space!");
-    size_t index = atomic_post_increment(_current_index) % _size;
-    while (!atomic_lock(_memory_space[index]._is_in_use)) {
-      index = atomic_post_increment(_current_index) % _size;
+    omp_set_lock(&_lock);
+    while (_memory_space[_current_index]._is_in_use) {
+      _current_index = (_current_index + 1) % _size;
     }
-    atomic_pre_increment(_number_taken);
+    const size_t index = _current_index;
+    _memory_space[index]._is_in_use = true;
+    ++_number_taken;
+    omp_unset_lock(&_lock);
     return index;
   }
 
@@ -95,9 +115,15 @@ public:
    * @param index Index of a buffer that was in use.
    */
   inline void free_buffer(const size_t index) {
+    //    _memory_space[index]._actual_size = 0;
+    //    atomic_unlock(_memory_space[index]._is_in_use);
+    //    atomic_post_increment(_number_taken);
+
+    omp_set_lock(&_lock);
     _memory_space[index]._actual_size = 0;
-    atomic_unlock(_memory_space[index]._is_in_use);
-    atomic_post_increment(_number_taken);
+    _memory_space[index]._is_in_use = false;
+    --_number_taken;
+    omp_unset_lock(&_lock);
   }
 
   /**
@@ -130,7 +156,6 @@ public:
       // buffer. We need to make sure they release it without deleting it if
       // it does not (yet) contain any photons.
       PhotonBuffer &buffer_target_new = _memory_space[index_out];
-      buffer_target_new.lock();
       // copy the old buffer properties
       buffer_target_new._sub_grid_index = buffer_target._sub_grid_index;
       buffer_target_new._direction = buffer_target._direction;

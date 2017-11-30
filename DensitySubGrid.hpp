@@ -37,6 +37,7 @@
 #include <cfloat>
 #include <cmath>
 #include <iostream>
+#include <omp.h>
 #include <ostream>
 
 /*! @brief Special neighbour index marking a neighbour that does not exist. */
@@ -322,7 +323,7 @@ inline bool is_compatible_input_direction(const double *direction,
 class DensitySubGrid {
 private:
   /*! @brief Lock flag that ensures thread safe access to this subgrid. */
-  bool _lock;
+  omp_lock_t _lock;
 
   /*! @brief Lower front left corner of the box that contains the subgrid (in
    *  m). */
@@ -767,6 +768,8 @@ public:
       _neutral_fraction[i] = 1.e-6;
       _intensity_integral[i] = 0.;
     }
+
+    omp_init_lock(&_lock);
   }
 
   /**
@@ -777,6 +780,7 @@ public:
     delete[] _number_density;
     delete[] _neutral_fraction;
     delete[] _intensity_integral;
+    omp_destroy_lock(&_lock);
   }
 
   /**
@@ -784,12 +788,19 @@ public:
    *
    * @return True if the lock succeeded.
    */
-  inline bool lock() { return atomic_lock(_lock); }
+  inline bool try_lock() { return omp_test_lock(&_lock); }
+
+  /**
+   * @brief Lock the cell.
+   *
+   * Blocks until the lock succeeds.
+   */
+  inline void lock() { return omp_set_lock(&_lock); }
 
   /**
    * @brief Unlock the cell.
    */
-  inline void unlock() { atomic_unlock(_lock); }
+  inline void unlock() { omp_unset_lock(&_lock); }
 
   /**
    * @brief Get the neighbour for the given direction.
