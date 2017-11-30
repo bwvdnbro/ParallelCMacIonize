@@ -30,6 +30,7 @@
 #include "NewQueue.hpp"
 #include "PhotonBuffer.hpp"
 #include "RandomGenerator.hpp"
+#include "Timer.hpp"
 
 // standard library includes
 #include <cmath>
@@ -55,7 +56,7 @@
 #ifdef LOG_OUTPUT
 #define logmessage(message, loglevel)                                          \
   if (loglevel < LOG_OUTPUT) {                                                 \
-    std::cerr << message << std::endl;                                         \
+    _Pragma("omp single") { std::cerr << message << std::endl; }               \
   }
 #else
 #define logmessage(s, loglevel)
@@ -398,6 +399,9 @@ int main(int argc, char **argv) {
   // set up the memory space
   MemorySpace new_buffers(10000);
 
+  Timer program_timer;
+  program_timer.start();
+
   // set up the grid of smaller grids used for the algorithm
   // each smaller grid stores a fraction of the total grid and has information
   // about the neighbouring subgrids
@@ -567,40 +571,47 @@ int main(int argc, char **argv) {
         unsigned int current_index = new_queues[thread_id]->get_task();
         if (current_index == NO_TASK) {
           // try to activate a non-full buffer
-          unsigned int non_full_index = 0;
-          unsigned int target_i = 0;
-          int target_j = 0;
-          for (unsigned int i = 0; i < gridvec.size(); ++i) {
+          // note that we only try to access thread-local information, so as
+          // long as we don't allow task stealing, this will be thread-safe
+          unsigned int i = 0;
+          while (i < gridvec.size() && current_index == NO_TASK) {
             if (get_queue(i, tot_num_subgrid, num_threads) == thread_id) {
-              for (int j = 0; j < 27; ++j) {
+              int j = 0;
+              while (j < 27 && current_index == NO_TASK) {
                 if (gridvec[i]->get_neighbour(j) != NEIGHBOUR_OUTSIDE &&
                     new_buffers[gridvec[i]->get_active_buffer(j)]._actual_size >
                         0) {
-                  non_full_index = gridvec[i]->get_active_buffer(j);
-                  target_i = i;
-                  target_j = j;
-                  break;
+                  const unsigned int non_full_index =
+                      gridvec[i]->get_active_buffer(j);
+                  const unsigned int new_index = new_buffers.get_free_buffer();
+                  new_buffers[new_index]._sub_grid_index =
+                      new_buffers[non_full_index]._sub_grid_index;
+                  new_buffers[new_index]._direction =
+                      new_buffers[non_full_index]._direction;
+                  gridvec[i]->set_active_buffer(j, new_index);
+                  // add buffer to queue
+                  atomic_pre_increment(num_active_buffers);
+                  new_queues[get_queue(
+                                 new_buffers[non_full_index]._sub_grid_index,
+                                 tot_num_subgrid, num_threads)]
+                      ->add_task(non_full_index);
+                  // we have created a new empty buffer
+                  atomic_pre_increment(num_empty);
+                  // try again to get a task (might be the one we just created,
+                  // although
+                  // that could live on another thread)
+                  current_index = new_queues[thread_id]->get_task();
                 }
+                ++j;
               }
             }
+            ++i;
           }
-          unsigned int new_index = new_buffers.get_free_buffer();
-          new_buffers[new_index]._sub_grid_index =
-              new_buffers[non_full_index]._sub_grid_index;
-          new_buffers[new_index]._direction =
-              new_buffers[non_full_index]._direction;
-          gridvec[target_i]->set_active_buffer(target_j, new_index);
-          // add buffer to queue
-          atomic_pre_increment(num_active_buffers);
-          new_queues[thread_id]->add_task(non_full_index);
-          // we have created a new empty buffer
-          atomic_pre_increment(num_empty);
-          current_index = new_queues[thread_id]->get_task();
         }
         // keep processing buffers until the queue is empty
         while (current_index != NO_TASK) {
+          // we don't allow task-stealing, so no need to lock anything just now
           PhotonBuffer &buffer = new_buffers[current_index];
-          //          buffer.lock();
           DensitySubGrid &this_grid = *gridvec[buffer._sub_grid_index];
           // prepare output buffers
           for (int i = 0; i < 27; ++i) {
@@ -615,13 +626,8 @@ int main(int argc, char **argv) {
           if (reemission_probability == 0.) {
             local_buffer_flags[TRAVELDIRECTION_INSIDE] = false;
           }
-          // now do the actual photon traversal. Note that we need to lock the
-          // subgrid to avoid conflicts with threads that stole work from this
-          // thread
-          this_grid.lock();
           do_photon_traversal(buffer, this_grid, local_buffers,
                               local_buffer_flags);
-          this_grid.unlock();
           // do reemission (if applicable)
           if (reemission_probability > 0.) {
             do_reemission(local_buffers[TRAVELDIRECTION_INSIDE],
@@ -655,50 +661,33 @@ int main(int argc, char **argv) {
                     atomic_pre_increment(num_empty);
                   }
                 }
-
-                //                unsigned int new_index =
-                //                this_grid.get_active_buffer(i);
-                //                if (!new_buffers[new_index].try_lock()) {
-                //                  logmessage("Error obtaining buffer lock!",
-                //                  0);
-                //                  abort();
-                //                } else {
-                //                  // buffer is now locked
-                //                  unsigned int test_index =
-                //                      new_buffers.add_photons(new_index,
-                //                      local_buffers[i]);
-                //                  if (test_index != new_index) {
-                //                    // add buffer to queue
-                //                    atomic_pre_increment(num_active_buffers);
-                //                    new_queues[get_queue(ngb, tot_num_subgrid,
-                //                    num_threads)]
-                //                        ->add_task(new_index);
-                //                    new_buffers[new_index].unlock();
-                //                    this_grid.lock();
-                //                    this_grid.set_active_buffer(i,
-                //                    test_index);
-                //                    this_grid.unlock();
-                //                    new_buffers[test_index].unlock();
-                //                  }
-                //                }
               }
             }
           }
           // delete the original buffer
           atomic_pre_subtract(num_active_buffers);
           new_buffers.free_buffer(current_index);
-          //          buffer.unlock();
           // try to get a new buffer from the local queue
           current_index = new_queues[thread_id]->get_task();
         }
       }
     } // parallel region
 
-    // STEP 2: update the ionization structure for each subgrid
-    for (unsigned int igrid = 0; igrid < gridvec.size(); ++igrid) {
-      gridvec[igrid]->compute_neutral_fraction(num_photon);
+// STEP 2: update the ionization structure for each subgrid
+#pragma omp parallel default(shared)
+    {
+      // id of this specific thread
+      const int thread_id = omp_get_thread_num();
+      for (unsigned int igrid = 0; igrid < gridvec.size(); ++igrid) {
+        if (get_queue(igrid, tot_num_subgrid, num_threads) == thread_id) {
+          gridvec[igrid]->compute_neutral_fraction(num_photon);
+        }
+      }
     }
   }
+
+  program_timer.stop();
+  logmessage("Total program time " << program_timer.value() << " s.", 0);
 
   // OUTPUT:
   //  - ASCII output (for the VisIt plot script)
