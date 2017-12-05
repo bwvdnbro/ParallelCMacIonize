@@ -30,6 +30,7 @@
 #include "NewQueue.hpp"
 #include "PhotonBuffer.hpp"
 #include "RandomGenerator.hpp"
+#include "Task.hpp"
 #include "Timer.hpp"
 
 // standard library includes
@@ -37,6 +38,7 @@
 #include <fstream>
 #include <iostream>
 #include <omp.h>
+#include <sstream>
 #include <vector>
 
 /*! @brief Output log level. The higher the value, the more stuff is printed to
@@ -110,6 +112,32 @@
       return 1;                                                                \
     }                                                                          \
   }
+
+/**
+ * @brief Write a file with the start and end times of all tasks.
+ *
+ * @param iloop Iteration number (added to file name).
+ * @param tasks Tasks to print.
+ */
+inline void output_tasks(unsigned int iloop,
+                         const ThreadSafeVector< Task > &tasks) {
+  std::stringstream filename;
+  filename << "tasks_";
+  filename.fill('0');
+  filename.width(2);
+  filename << iloop;
+  filename << ".txt";
+
+  std::ofstream ofile(filename.str());
+  ofile << "# thread\tstart\tstop\ttype\n";
+
+  const size_t tsize = tasks.size();
+  for (size_t i = 0; i < tsize; ++i) {
+    const Task &task = tasks[i];
+    ofile << task._thread_id << "\t" << task._start_time << "\t"
+          << task._end_time << "\t" << task._type << "\n";
+  }
+}
 
 /**
  * @brief Draw a random direction.
@@ -398,6 +426,8 @@ int main(int argc, char **argv) {
 
   // set up the memory space
   MemorySpace new_buffers(10000);
+  // set up the task space
+  ThreadSafeVector< Task > tasks(40000);
 
   Timer program_timer;
   program_timer.start();
@@ -564,8 +594,13 @@ int main(int argc, char **argv) {
             PhotonBuffer &input_buffer = new_buffers[buffer_index];
             fill_buffer(input_buffer, num_photon_this_loop,
                         random_generator[thread_id], central_index);
+
+            const size_t task_index = tasks.get_free_element();
+            tasks[task_index]._type = TASKTYPE_PHOTON_TRAVERSAL;
+            tasks[task_index]._cell = central_index;
+            tasks[task_index]._buffer = buffer_index;
             // buffer is ready to be processed: add to the queue
-            new_queues[central_queue]->add_task(buffer_index);
+            new_queues[central_queue]->add_task(task_index);
           }
         }
 
@@ -593,10 +628,15 @@ int main(int argc, char **argv) {
                   gridvec[i]->set_active_buffer(j, new_index);
                   // add buffer to queue
                   atomic_pre_increment(num_active_buffers);
+                  const size_t task_index = tasks.get_free_element();
+                  tasks[task_index]._type = TASKTYPE_PHOTON_TRAVERSAL;
+                  tasks[task_index]._cell =
+                      new_buffers[non_full_index]._sub_grid_index;
+                  tasks[task_index]._buffer = non_full_index;
                   new_queues[get_queue(
                                  new_buffers[non_full_index]._sub_grid_index,
                                  tot_num_subgrid, num_threads)]
-                      ->add_task(non_full_index);
+                      ->add_task(task_index);
                   // we have created a new empty buffer
                   atomic_pre_increment(num_empty);
                   // try again to get a task (might be the one we just created,
@@ -612,8 +652,11 @@ int main(int argc, char **argv) {
         }
         // keep processing buffers until the queue is empty
         while (current_index != NO_TASK) {
+          Task &task = tasks[current_index];
+          task.start(thread_id);
+          const unsigned int current_buffer_index = task._buffer;
           // we don't allow task-stealing, so no need to lock anything just now
-          PhotonBuffer &buffer = new_buffers[current_index];
+          PhotonBuffer &buffer = new_buffers[current_buffer_index];
           DensitySubGrid &this_grid = *gridvec[buffer._sub_grid_index];
           // prepare output buffers
           for (int i = 0; i < 27; ++i) {
@@ -651,8 +694,13 @@ int main(int argc, char **argv) {
                 if (add_index != new_index) {
                   // add buffer to queue
                   atomic_pre_increment(num_active_buffers);
+                  const size_t task_index = tasks.get_free_element();
+                  tasks[task_index]._type = TASKTYPE_PHOTON_TRAVERSAL;
+                  tasks[task_index]._cell =
+                      new_buffers[new_index]._sub_grid_index;
+                  tasks[task_index]._buffer = new_index;
                   new_queues[get_queue(ngb, tot_num_subgrid, num_threads)]
-                      ->add_task(new_index);
+                      ->add_task(task_index);
                   myassert(new_buffers[add_index]._sub_grid_index == ngb,
                            "Wrong subgrid");
                   myassert(new_buffers[add_index]._direction ==
@@ -669,7 +717,8 @@ int main(int argc, char **argv) {
           }
           // delete the original buffer
           atomic_pre_subtract(num_active_buffers);
-          new_buffers.free_buffer(current_index);
+          new_buffers.free_buffer(current_buffer_index);
+          task.stop();
           // try to get a new buffer from the local queue
           current_index = new_queues[thread_id]->get_task();
         }
@@ -688,7 +737,11 @@ int main(int argc, char **argv) {
         }
       }
     }
-  }
+
+    output_tasks(iloop, tasks);
+    // clear task buffer
+    tasks.clear();
+  } // main loop
 
   program_timer.stop();
   logmessage("Total program time " << program_timer.value() << " s.", 0);

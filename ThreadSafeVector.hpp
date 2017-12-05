@@ -72,6 +72,19 @@ public:
   }
 
   /**
+   * @brief Clear the contents of the vector.
+   *
+   * This method is not meant to be thread safe.
+   */
+  inline void clear() {
+    for (size_t i = 0; i < _size; ++i) {
+      _locks[i] = false;
+    }
+    _number_taken = 0;
+    _current_index = 0;
+  }
+
+  /**
    * @brief Access the element with the given index.
    *
    * @param index Index of an element.
@@ -122,6 +135,19 @@ public:
     myassert(_locks[index], "Element not in use!");
     atomic_unlock(_locks[index]);
     atomic_pre_decrement(_number_taken);
+  }
+
+  /**
+   * @brief Get the size of the vector.
+   *
+   * Only makes sense if the vector is continuous, i.e. non of the elements has
+   * ever been removed.
+   *
+   * @return Number of used elements in the vector.
+   */
+  inline const size_t size() const {
+    myassert(_number_taken == _current_index, "Non continuous vector!");
+    return _number_taken;
   }
 };
 
