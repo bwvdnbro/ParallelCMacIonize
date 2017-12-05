@@ -28,8 +28,7 @@
 
 #include "Assert.hpp"
 #include "Atomic.hpp"
-
-#include <omp.h>
+#include "Lock.hpp"
 
 #define NO_TASK 0xffffffff
 
@@ -48,7 +47,7 @@ private:
   const size_t _size;
 
   /*! @brief Lock that protects the queue. */
-  omp_lock_t _queue_lock;
+  Lock _queue_lock;
 
 public:
   /**
@@ -58,16 +57,12 @@ public:
    */
   inline NewQueue(const size_t size) : _current_queue_index(0), _size(size) {
     _queue = new size_t[size];
-    omp_init_lock(&_queue_lock);
   }
 
   /**
    * @brief Destructor.
    */
-  inline ~NewQueue() {
-    delete[] _queue;
-    omp_destroy_lock(&_queue_lock);
-  }
+  inline ~NewQueue() { delete[] _queue; }
 
   /**
    * @brief Add a task to the queue.
@@ -75,11 +70,11 @@ public:
    * @param task Task to add.
    */
   inline void add_task(const size_t task) {
-    omp_set_lock(&_queue_lock);
+    _queue_lock.lock();
     _queue[_current_queue_index] = task;
     ++_current_queue_index;
     myassert(_current_queue_index < _size, "Too many tasks in queue!");
-    omp_unset_lock(&_queue_lock);
+    _queue_lock.unlock();
   }
 
   /**
@@ -88,13 +83,13 @@ public:
    * @return Task, or NO_TASK if no task is available.
    */
   inline size_t get_task() {
-    omp_set_lock(&_queue_lock);
+    _queue_lock.lock();
     size_t task = NO_TASK;
     if (_current_queue_index > 0) {
       --_current_queue_index;
       task = _queue[_current_queue_index];
     }
-    omp_unset_lock(&_queue_lock);
+    _queue_lock.unlock();
     return task;
   }
 };

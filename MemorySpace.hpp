@@ -27,9 +27,8 @@
 #define MEMORYSPACE_HPP
 
 #include "Atomic.hpp"
+#include "Lock.hpp"
 #include "PhotonBuffer.hpp"
-
-#include <omp.h>
 
 /**
  * @brief Buffer with pre-allocated PhotonBuffers that can be used.
@@ -49,7 +48,7 @@ private:
   PhotonBuffer *_memory_space;
 
   /*! @brief Lock protecting the memory space. */
-  omp_lock_t _lock;
+  Lock _lock;
 
 public:
   /**
@@ -64,16 +63,12 @@ public:
       _memory_space[i]._actual_size = 0;
       _memory_space[i]._is_in_use = false;
     }
-    omp_init_lock(&_lock);
   }
 
   /**
    * @brief Destructor.
    */
-  inline ~MemorySpace() {
-    delete[] _memory_space;
-    omp_destroy_lock(&_lock);
-  }
+  inline ~MemorySpace() { delete[] _memory_space; }
 
   /**
    * @brief Access the buffer with the given index.
@@ -98,14 +93,14 @@ public:
     //    return index;
 
     myassert(_number_taken < _size, "No more free buffers in memory space!");
-    omp_set_lock(&_lock);
+    _lock.lock();
     while (_memory_space[_current_index]._is_in_use) {
       _current_index = (_current_index + 1) % _size;
     }
     const size_t index = _current_index;
     _memory_space[index]._is_in_use = true;
     ++_number_taken;
-    omp_unset_lock(&_lock);
+    _lock.unlock();
     return index;
   }
 
@@ -119,11 +114,11 @@ public:
     //    atomic_unlock(_memory_space[index]._is_in_use);
     //    atomic_post_increment(_number_taken);
 
-    omp_set_lock(&_lock);
+    _lock.lock();
     _memory_space[index]._actual_size = 0;
     _memory_space[index]._is_in_use = false;
     --_number_taken;
-    omp_unset_lock(&_lock);
+    _lock.unlock();
   }
 
   /**

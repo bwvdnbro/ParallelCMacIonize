@@ -31,8 +31,6 @@
 #include "Atomic.hpp"
 #include "Photon.hpp"
 
-#include <omp.h>
-
 /*! @brief Number of photons that can be stored in a single buffer. */
 #define PHOTONBUFFER_SIZE 1000u
 
@@ -43,9 +41,6 @@
  */
 class PhotonBuffer {
 public:
-  /*! @brief Lock. */
-  omp_lock_t _lock;
-
   /*! @brief Subgrid with which this buffer is associated. */
   unsigned int _sub_grid_index;
 
@@ -60,16 +55,6 @@ public:
 
   /*! @brief Flag indicating if this buffer is in use. */
   bool _is_in_use;
-
-  PhotonBuffer() { omp_init_lock(&_lock); }
-
-  ~PhotonBuffer() { omp_destroy_lock(&_lock); }
-
-  inline void lock() { omp_set_lock(&_lock); }
-
-  inline bool try_lock() { return omp_test_lock(&_lock); }
-
-  inline void unlock() { omp_unset_lock(&_lock); }
 };
 
 #endif // PHOTONBUFFER_HPP
