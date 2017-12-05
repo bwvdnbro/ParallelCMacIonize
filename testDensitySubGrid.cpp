@@ -516,6 +516,8 @@ int main(int argc, char **argv) {
     unsigned int num_active_buffers = 0;
     //  - number of empty assigned buffers
     unsigned int num_empty = tot_num_subgrid * 27;
+    // for statistics: number of tasks performed in total
+    unsigned int number_of_tasks = 0;
 #pragma omp parallel default(shared)
     {
       // id of this specific thread
@@ -628,6 +630,7 @@ int main(int argc, char **argv) {
           }
           do_photon_traversal(buffer, this_grid, local_buffers,
                               local_buffer_flags);
+          atomic_pre_increment(number_of_tasks);
           // do reemission (if applicable)
           if (reemission_probability > 0.) {
             do_reemission(local_buffers[TRAVELDIRECTION_INSIDE],
@@ -672,6 +675,7 @@ int main(int argc, char **argv) {
         }
       }
     } // parallel region
+    logmessage("Total number of tasks: " << number_of_tasks, 0);
 
 // STEP 2: update the ionization structure for each subgrid
 #pragma omp parallel default(shared)

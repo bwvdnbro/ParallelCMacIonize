@@ -29,23 +29,15 @@
 #include "Atomic.hpp"
 #include "Lock.hpp"
 #include "PhotonBuffer.hpp"
+#include "ThreadSafeVector.hpp"
 
 /**
  * @brief Buffer with pre-allocated PhotonBuffers that can be used.
  */
 class MemorySpace {
 private:
-  /*! @brief Current active index in the memory space. */
-  size_t _current_index;
-
-  /*! @brief Size of the memory space. */
-  const size_t _size;
-
-  /*! @brief Number of buffers that have been taken. */
-  size_t _number_taken;
-
   /*! @brief Memory space itself. */
-  PhotonBuffer *_memory_space;
+  ThreadSafeVector< PhotonBuffer > _memory_space;
 
 public:
   /**
@@ -53,19 +45,7 @@ public:
    *
    * @param size Size of the memory space.
    */
-  inline MemorySpace(const size_t size)
-      : _current_index(0), _size(size), _number_taken(0) {
-    _memory_space = new PhotonBuffer[size];
-    for (size_t i = 0; i < size; ++i) {
-      _memory_space[i]._actual_size = 0;
-      _memory_space[i]._is_in_use = false;
-    }
-  }
-
-  /**
-   * @brief Destructor.
-   */
-  inline ~MemorySpace() { delete[] _memory_space; }
+  inline MemorySpace(const size_t size) : _memory_space(size) {}
 
   /**
    * @brief Access the buffer with the given index.
@@ -79,15 +59,7 @@ public:
    *
    * @return Index of a free buffer.
    */
-  inline size_t get_free_buffer() {
-    myassert(_number_taken < _size, "No more free buffers in memory space!");
-    size_t index = atomic_post_increment(_current_index) % _size;
-    while (!atomic_lock(_memory_space[index]._is_in_use)) {
-      index = atomic_post_increment(_current_index) % _size;
-    }
-    atomic_pre_increment(_number_taken);
-    return index;
-  }
+  inline size_t get_free_buffer() { return _memory_space.get_free_element(); }
 
   /**
    * @brief Free the buffer with the given index.
@@ -96,8 +68,7 @@ public:
    */
   inline void free_buffer(const size_t index) {
     _memory_space[index]._actual_size = 0;
-    atomic_unlock(_memory_space[index]._is_in_use);
-    atomic_pre_decrement(_number_taken);
+    _memory_space.free_element(index);
   }
 
   /**
