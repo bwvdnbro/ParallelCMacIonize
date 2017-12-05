@@ -47,9 +47,6 @@ private:
   /*! @brief Memory space itself. */
   PhotonBuffer *_memory_space;
 
-  /*! @brief Lock protecting the memory space. */
-  Lock _lock;
-
 public:
   /**
    * @brief Constructor.
@@ -83,24 +80,12 @@ public:
    * @return Index of a free buffer.
    */
   inline size_t get_free_buffer() {
-    //    myassert(_number_taken < _size, "No more free buffers in memory
-    //    space!");
-    //    size_t index = atomic_post_increment(_current_index) % _size;
-    //    while (!atomic_lock(_memory_space[index]._is_in_use)) {
-    //      index = atomic_post_increment(_current_index) % _size;
-    //    }
-    //    atomic_pre_increment(_number_taken);
-    //    return index;
-
     myassert(_number_taken < _size, "No more free buffers in memory space!");
-    _lock.lock();
-    while (_memory_space[_current_index]._is_in_use) {
-      _current_index = (_current_index + 1) % _size;
+    size_t index = atomic_post_increment(_current_index) % _size;
+    while (!atomic_lock(_memory_space[index]._is_in_use)) {
+      index = atomic_post_increment(_current_index) % _size;
     }
-    const size_t index = _current_index;
-    _memory_space[index]._is_in_use = true;
-    ++_number_taken;
-    _lock.unlock();
+    atomic_pre_increment(_number_taken);
     return index;
   }
 
@@ -110,15 +95,9 @@ public:
    * @param index Index of a buffer that was in use.
    */
   inline void free_buffer(const size_t index) {
-    //    _memory_space[index]._actual_size = 0;
-    //    atomic_unlock(_memory_space[index]._is_in_use);
-    //    atomic_post_increment(_number_taken);
-
-    _lock.lock();
     _memory_space[index]._actual_size = 0;
-    _memory_space[index]._is_in_use = false;
-    --_number_taken;
-    _lock.unlock();
+    atomic_unlock(_memory_space[index]._is_in_use);
+    atomic_pre_decrement(_number_taken);
   }
 
   /**
