@@ -115,6 +115,26 @@ public:
   }
 
   /**
+   * @brief Set the computational cost for the given element.
+   *
+   * @param index Index of an element.
+   * @param cost New computation cost.
+   */
+  inline void set_cost(const size_t index, const unsigned long cost) {
+    _costs[index] = cost;
+  }
+
+  /**
+   * @brief Get the computational cost for the given element.
+   *
+   * @param index Index of an element.
+   * @return Computational cost for that element.
+   */
+  inline const unsigned long get_cost(const size_t index) const {
+    return _costs[index];
+  }
+
+  /**
    * @brief Redistribute the elements such that the computational cost for each
    * thread is as close as possible to the average.
    */

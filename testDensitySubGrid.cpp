@@ -271,17 +271,69 @@ inline static void do_reemission(PhotonBuffer &buffer,
 }
 
 /**
- * @brief Get the queue assigned to the given subgrid in a realm with the given
- * number of threads.
+ * @brief Create a copy of the subgrid with the given index.
  *
- * @param igrid Subgrid index.
- * @param ngrid Total number of subgrids (currently ignored).
- * @param nthread Number of threads.
- * @return Thread that usually handles the given subgrid.
+ * @param original Original subgrid index.
+ * @param gridvec Subgrids.
+ * @param new_buffers Photon buffer space.
+ * @param duplicates List of copies.
  */
-static inline int get_queue(const unsigned int igrid, const unsigned int ngrid,
-                            const int nthread) {
-  return igrid % nthread;
+inline void
+make_copy(const unsigned int original, std::vector< DensitySubGrid * > &gridvec,
+          MemorySpace &new_buffers,
+          std::vector< std::pair< unsigned int, unsigned int > > &duplicates) {
+  // copy subgrids 29 and 30, as we know they are very computationally expensive
+  const unsigned int copy = gridvec.size();
+  duplicates.push_back(std::make_pair(original, copy));
+
+  gridvec.push_back(new DensitySubGrid(*gridvec[original]));
+  for (int i = 0; i < 27; ++i) {
+    if (i > 0) {
+      const unsigned int original_ngb = gridvec[original]->get_neighbour(i);
+      gridvec[copy]->set_neighbour(i, original_ngb);
+      const unsigned int active_buffer = new_buffers.get_free_buffer();
+      new_buffers[active_buffer]._sub_grid_index = original_ngb;
+      new_buffers[active_buffer]._direction = output_to_input_direction(i);
+      gridvec[copy]->set_active_buffer(i, active_buffer);
+    } else {
+      gridvec[copy]->set_neighbour(i, copy);
+      const unsigned int active_buffer = new_buffers.get_free_buffer();
+      new_buffers[active_buffer]._sub_grid_index = copy;
+      new_buffers[active_buffer]._direction = TRAVELDIRECTION_INSIDE;
+      gridvec[copy]->set_active_buffer(i, active_buffer);
+    }
+  }
+}
+
+/**
+ * @brief Make sure the given copies of the given original subgrids are mutual
+ * neighbours.
+ *
+ * @param original_A First original.
+ * @param original_B Second original.
+ * @param copy_A First copy.
+ * @param copy_B Second copy.
+ * @param gridvec Subgrids.
+ * @param new_buffers Photon buffer space.
+ */
+inline void ensure_neighbours(const unsigned int original_A,
+                              const unsigned int original_B,
+                              const unsigned int copy_A,
+                              const unsigned int copy_B,
+                              std::vector< DensitySubGrid * > &gridvec,
+                              MemorySpace &new_buffers) {
+  for (int i = 1; i < 27; ++i) {
+    if (gridvec[original_A]->get_neighbour(i) == original_B) {
+      gridvec[copy_A]->set_neighbour(i, copy_B);
+      unsigned int active_buffer = gridvec[copy_A]->get_active_buffer(i);
+      new_buffers[active_buffer]._sub_grid_index = copy_B;
+      gridvec[copy_B]->set_neighbour(output_to_input_direction(i), copy_A);
+      active_buffer =
+          gridvec[copy_B]->get_active_buffer(output_to_input_direction(i));
+      new_buffers[active_buffer]._sub_grid_index = copy_A;
+      break;
+    }
+  }
 }
 
 /**
@@ -448,7 +500,7 @@ int main(int argc, char **argv) {
       num_subgrid[0] * num_subgrid[1] * num_subgrid[2];
 
   // +2 for the 2 subgrid copies we make below
-  CostVector costs(tot_num_subgrid + 2, num_threads);
+  CostVector costs(tot_num_subgrid + 6, num_threads);
 // set up the subgrids (in parallel)
 #pragma omp parallel default(shared)
   {
@@ -528,71 +580,35 @@ int main(int argc, char **argv) {
   // need to be added to the original
   std::vector< std::pair< unsigned int, unsigned int > > duplicates;
 
-#define MAKE_COPIES
+  // make copies of the 2 central subgrids, so that multiple threads can work
+  // on them simultaneously
+  make_copy(29, gridvec, new_buffers, duplicates);
+  make_copy(30, gridvec, new_buffers, duplicates);
+  make_copy(29, gridvec, new_buffers, duplicates);
+  make_copy(30, gridvec, new_buffers, duplicates);
+  make_copy(29, gridvec, new_buffers, duplicates);
+  make_copy(30, gridvec, new_buffers, duplicates);
+  ensure_neighbours(29, 30, 60, 61, gridvec, new_buffers);
+  ensure_neighbours(29, 30, 62, 63, gridvec, new_buffers);
+  ensure_neighbours(29, 30, 64, 65, gridvec, new_buffers);
 
-#ifdef MAKE_COPIES
-  // copy subgrids 29 and 30, as we know they are very computationally expensive
-  const unsigned int copy_29 = gridvec.size();
-  const unsigned int copy_30 = gridvec.size() + 1;
-  duplicates.push_back(std::make_pair(29, copy_29));
-  duplicates.push_back(std::make_pair(30, copy_30));
-
-  gridvec.resize(gridvec.size() + 2, nullptr);
-  gridvec[copy_29] = new DensitySubGrid(*gridvec[29]);
-  gridvec[copy_30] = new DensitySubGrid(*gridvec[30]);
-  for (int i = 0; i < 27; ++i) {
-    if (i > 0) {
-      unsigned int original_ngb = gridvec[29]->get_neighbour(i);
-      gridvec[copy_29]->set_neighbour(i, original_ngb);
-      unsigned int active_buffer = new_buffers.get_free_buffer();
-      new_buffers[active_buffer]._sub_grid_index = original_ngb;
-      new_buffers[active_buffer]._direction = output_to_input_direction(i);
-      gridvec[copy_29]->set_active_buffer(i, active_buffer);
-
-      original_ngb = gridvec[30]->get_neighbour(i);
-      gridvec[copy_30]->set_neighbour(i, original_ngb);
-      active_buffer = new_buffers.get_free_buffer();
-      new_buffers[active_buffer]._sub_grid_index = original_ngb;
-      new_buffers[active_buffer]._direction = output_to_input_direction(i);
-      gridvec[copy_30]->set_active_buffer(i, active_buffer);
-    } else {
-      gridvec[copy_29]->set_neighbour(i, copy_29);
-      unsigned int active_buffer = new_buffers.get_free_buffer();
-      new_buffers[active_buffer]._sub_grid_index = copy_29;
-      new_buffers[active_buffer]._direction = TRAVELDIRECTION_INSIDE;
-      gridvec[copy_29]->set_active_buffer(i, active_buffer);
-
-      gridvec[copy_30]->set_neighbour(i, copy_30);
-      active_buffer = new_buffers.get_free_buffer();
-      new_buffers[active_buffer]._sub_grid_index = copy_30;
-      new_buffers[active_buffer]._direction = TRAVELDIRECTION_INSIDE;
-      gridvec[copy_30]->set_active_buffer(i, active_buffer);
-    }
+  // a very basic initial cost guess (good enough to get the idle fraction below
+  // 50%)
+  for (unsigned int i = 0; i < gridvec.size(); ++i) {
+    costs.add_cost(i, 1);
   }
-  // make sure copy 29 and copy 30 are mutual neighbours
-  for (int i = 1; i < 27; ++i) {
-    if (gridvec[29]->get_neighbour(i) == 30) {
-      gridvec[copy_29]->set_neighbour(i, copy_30);
-      unsigned int active_buffer = gridvec[copy_29]->get_active_buffer(i);
-      new_buffers[active_buffer]._sub_grid_index = copy_30;
-      gridvec[copy_30]->set_neighbour(output_to_input_direction(i), copy_29);
-      active_buffer =
-          gridvec[copy_30]->get_active_buffer(output_to_input_direction(i));
-      new_buffers[active_buffer]._sub_grid_index = copy_29;
-      break;
-    }
-  }
-#else // MAKE_COPIES
-  const unsigned int copy_30 = 30;
-#endif
+  costs.add_cost(29, 10000);
+  costs.add_cost(60, 10000);
+  costs.add_cost(62, 10000);
+  costs.add_cost(64, 10000);
+  costs.add_cost(30, 11000);
+  costs.add_cost(61, 11000);
+  costs.add_cost(63, 11000);
+  costs.add_cost(65, 11000);
+  costs.redistribute();
 
-  // get a reference to the central subgrid, as this is where our source is
-  // located
-  //  const unsigned int central_index =
-  //      (num_subgrid[0] >> 1) * num_subgrid[1] * num_subgrid[2] +
-  //      (num_subgrid[1] >> 1) * num_subgrid[2] + (num_subgrid[2] >> 1);
-  //  std::cout << "Central index: " << central_index << std::endl;
-  const unsigned int central_index[2] = {30, copy_30};
+  // get the central subgrid indices
+  const unsigned int central_index[4] = {30, 61, 63, 65};
 
   // set up the random number generators
   std::vector< RandomGenerator > random_generator(num_threads);
@@ -604,8 +620,9 @@ int main(int argc, char **argv) {
   //  - shoots num_photon photons through the grid to get intensity estimates
   //  - computes the ionization equilibrium
   for (unsigned int iloop = 0; iloop < number_of_iterations; ++iloop) {
-    const int central_queue[2] = {costs[central_index[0]],
-                                  costs[central_index[1]]};
+    const int central_queue[4] = {
+        costs[central_index[0]], costs[central_index[1]],
+        costs[central_index[2]], costs[central_index[3]]};
     // STEP 0: log output
     logmessage("Loop " << iloop + 1, 0);
 
@@ -673,8 +690,10 @@ int main(int argc, char **argv) {
             unsigned int buffer_index = new_buffers.get_free_buffer();
             // no need to lock this buffer
             PhotonBuffer &input_buffer = new_buffers[buffer_index];
-            bool which_central_index =
-                random_generator[thread_id].get_uniform_random_double() > 0.5;
+            int which_central_index =
+                random_generator[thread_id].get_uniform_random_double() * 4.;
+            myassert(which_central_index >= 0 && which_central_index < 4,
+                     "Oopsie!");
             unsigned int this_central_index =
                 central_index[which_central_index];
             fill_buffer(input_buffer, num_photon_this_loop,
