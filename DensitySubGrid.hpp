@@ -325,6 +325,9 @@ private:
   /*! @brief Lock flag that ensures thread safe access to this subgrid. */
   omp_lock_t _lock;
 
+  /*! @brief Computational cost of this subgrid. */
+  unsigned long _computational_cost;
+
   /*! @brief Lower front left corner of the box that contains the subgrid (in
    *  m). */
   double _anchor[3];
@@ -748,7 +751,7 @@ public:
    * @param ncell Number of cells in each dimension.
    */
   inline DensitySubGrid(const double *box, const int *ncell)
-      : _anchor{box[0], box[1], box[2]},
+      : _computational_cost(0), _anchor{box[0], box[1], box[2]},
         _cell_size{box[3] / ncell[0], box[4] / ncell[1], box[5] / ncell[2]},
         _inv_cell_size{ncell[0] / box[3], ncell[1] / box[4], ncell[2] / box[5]},
         _number_of_cells{ncell[0], ncell[1], ncell[2], ncell[1] * ncell[2]} {
@@ -773,6 +776,37 @@ public:
   }
 
   /**
+   * @brief Copy constructor.
+   *
+   * @param original DensitySubGrid to copy.
+   */
+  inline DensitySubGrid(const DensitySubGrid &original)
+      : _computational_cost(0),
+        _anchor{original._anchor[0], original._anchor[1], original._anchor[2]},
+        _cell_size{original._cell_size[0], original._cell_size[1],
+                   original._cell_size[2]},
+        _inv_cell_size{original._inv_cell_size[0], original._inv_cell_size[1],
+                       original._inv_cell_size[2]},
+        _number_of_cells{
+            original._number_of_cells[0], original._number_of_cells[1],
+            original._number_of_cells[2], original._number_of_cells[3]} {
+    const int tot_ncell = _number_of_cells[3] * _number_of_cells[0];
+    _number_density = new double[tot_ncell];
+    _neutral_fraction = new double[tot_ncell];
+    _intensity_integral = new double[tot_ncell];
+
+    // copy data arrays
+    for (int i = 0; i < tot_ncell; ++i) {
+      // initial density (homogeneous density)
+      _number_density[i] = original._number_density[i];
+      _neutral_fraction[i] = original._neutral_fraction[i];
+      _intensity_integral[i] = 0.;
+    }
+
+    omp_init_lock(&_lock);
+  }
+
+  /**
    * @brief Destructor.
    */
   inline ~DensitySubGrid() {
@@ -781,6 +815,31 @@ public:
     delete[] _neutral_fraction;
     delete[] _intensity_integral;
     omp_destroy_lock(&_lock);
+  }
+
+  /**
+   * @brief Sync the neutral fractions with the given subgrid.
+   *
+   * @param original Original subgrid from which to copy.
+   */
+  inline void update_neutral_fractions(const DensitySubGrid &original) {
+    const int tot_ncell = _number_of_cells[3] * _number_of_cells[0];
+    for (int i = 0; i < tot_ncell; ++i) {
+      _neutral_fraction[i] = original._neutral_fraction[i];
+      _intensity_integral[i] = 0.;
+    }
+  }
+
+  /**
+   * @brief Add the contributions of subgrid copies to the intensity integrals.
+   *
+   * @param copy Subgrid copy from which to read.
+   */
+  inline void update_intensities(const DensitySubGrid &copy) {
+    const int tot_ncell = _number_of_cells[3] * _number_of_cells[0];
+    for (int i = 0; i < tot_ncell; ++i) {
+      _intensity_integral[i] += copy._intensity_integral[i];
+    }
   }
 
   /**
@@ -1087,6 +1146,29 @@ public:
         }
       }
     }
+  }
+
+  /**
+   * @brief Add the given ammount to the computational cost.
+   *
+   * @param computational_cost Amount to add.
+   */
+  inline void add_computational_cost(const unsigned long computational_cost) {
+    _computational_cost += computational_cost;
+  }
+
+  /**
+   * @brief Reset the computational cost.
+   */
+  inline void reset_computational_cost() { _computational_cost = 0; }
+
+  /**
+   * @brief Get the computational cost for this subgrid.
+   *
+   * @return Computational cost.
+   */
+  inline const unsigned long get_computational_cost() const {
+    return _computational_cost;
   }
 };
 

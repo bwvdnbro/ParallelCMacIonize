@@ -41,6 +41,8 @@
 #ifdef DO_ASSERTS
 #define myassert(condition, message)                                           \
   if (!(condition)) {                                                          \
+    std::cerr << __FILE__ << ":" << __FUNCTION__ << "():" << __LINE__ << ":"   \
+              << std::endl;                                                    \
     std::cerr << "Assertion failed: " #condition << std::endl;                 \
     std::cerr << message << std::endl;                                         \
     abort();                                                                   \
