@@ -41,6 +41,7 @@
 #include <mpi.h>
 #include <omp.h>
 #include <sstream>
+#include <sys/resource.h>
 #include <vector>
 
 /*! @brief Output log level. The higher the value, the more stuff is printed to
@@ -187,6 +188,50 @@ inline void output_costs(const unsigned int iloop, const unsigned int ngrid,
       ofile << i << "\t" << costs_per_thread[i] << "\n";
     }
   }
+}
+
+/**
+ * @brief Get the unit of @f$2^{10e}@f$ bytes.
+ *
+ * @param exponent Exponent @f$e@f$.
+ * @return Name for @f$2^{10e}@f$ bytes: (@f$2^{10}@f$ bytes = KB, ...).
+ */
+inline std::string byte_unit(uint_fast8_t exponent) {
+  switch (exponent) {
+  case 0:
+    return "bytes";
+  case 1:
+    return "KB";
+  case 2:
+    return "MB";
+  case 3:
+    return "GB";
+  case 4:
+    return "TB";
+  default:
+    return "";
+  }
+}
+
+/**
+ * @brief Convert the given number of bytes to a human readable string.
+ *
+ * @param bytes Number of bytes.
+ * @return std::string containing the given number of bytes in "bytes", "KB",
+ * "MB", "GB"...
+ */
+inline std::string human_readable_bytes(size_t bytes) {
+  uint_fast8_t sizecount = 0;
+  double bytefloat = bytes;
+  while ((bytes >> 10) > 0) {
+    bytes >>= 10;
+    ++sizecount;
+    bytefloat /= 1024.;
+  }
+  std::stringstream bytestream;
+  bytefloat = std::round(100. * bytefloat) * 0.01;
+  bytestream << bytefloat << " " << byte_unit(sizecount);
+  return bytestream.str();
 }
 
 /**
@@ -524,8 +569,8 @@ int main(int argc, char **argv) {
   // number of subgrids: 3^3
   const int num_subgrid[3] = {3, 5, 4};
   // reemission probability
-  //  const double reemission_probability = 0.364;
-  const double reemission_probability = 0.;
+  const double reemission_probability = 0.364;
+  //  const double reemission_probability = 0.;
 
   // set up the number of threads to use
   // we first determine the number of threads available (either by system
@@ -570,7 +615,7 @@ int main(int argc, char **argv) {
   // set up the memory space
   MemorySpace new_buffers(10000);
   // set up the task space
-  ThreadSafeVector< Task > tasks(40000);
+  ThreadSafeVector< Task > tasks(400000);
 
   Timer program_timer;
   program_timer.start();
@@ -749,8 +794,6 @@ int main(int argc, char **argv) {
     //  - number of empty assigned buffers
     unsigned int num_empty = gridvec.size() * 27;
     const unsigned int num_empty_target = gridvec.size() * 27;
-    // for statistics: number of tasks performed in total
-    unsigned int number_of_tasks = 0;
 #pragma omp parallel default(shared)
     {
       // id of this specific thread
@@ -804,7 +847,11 @@ int main(int argc, char **argv) {
                   // add buffer to queue
                   atomic_pre_increment(num_active_buffers);
                   const size_t task_index = tasks.get_free_element();
-                  tasks[task_index]._type = TASKTYPE_PHOTON_TRAVERSAL;
+                  if (j > 0) {
+                    tasks[task_index]._type = TASKTYPE_PHOTON_TRAVERSAL;
+                  } else {
+                    tasks[task_index]._type = TASKTYPE_PHOTON_REEMIT;
+                  }
                   tasks[task_index]._cell =
                       new_buffers[non_full_index]._sub_grid_index;
                   tasks[task_index]._buffer = non_full_index;
@@ -901,15 +948,10 @@ int main(int argc, char **argv) {
             }
             do_photon_traversal(buffer, this_grid, local_buffers,
                                 local_buffer_flags);
-            atomic_pre_increment(number_of_tasks);
-            // do reemission (if applicable)
-            if (reemission_probability > 0.) {
-              do_reemission(local_buffers[TRAVELDIRECTION_INSIDE],
-                            random_generator[thread_id],
-                            reemission_probability);
-            }
             // add none empty buffers to the appropriate queues
-            for (int i = 0; i < 27; ++i) {
+            // we go backwards, so that the local queue is added to the task
+            // list last
+            for (int i = 27; i >= 0; --i) {
               if (local_buffer_flags[i]) {
                 if (local_buffers[i]._actual_size > 0) {
                   const unsigned int ngb = this_grid.get_neighbour(i);
@@ -924,7 +966,11 @@ int main(int argc, char **argv) {
                     // add buffer to queue
                     atomic_pre_increment(num_active_buffers);
                     const size_t task_index = tasks.get_free_element();
-                    tasks[task_index]._type = TASKTYPE_PHOTON_TRAVERSAL;
+                    if (i > 0) {
+                      tasks[task_index]._type = TASKTYPE_PHOTON_TRAVERSAL;
+                    } else {
+                      tasks[task_index]._type = TASKTYPE_PHOTON_REEMIT;
+                    }
                     tasks[task_index]._cell =
                         new_buffers[new_index]._sub_grid_index;
                     tasks[task_index]._buffer = new_index;
@@ -948,6 +994,19 @@ int main(int argc, char **argv) {
             new_buffers.free_buffer(current_buffer_index);
             task.stop();
             costs.add_cost(igrid, task._end_time - task._start_time);
+          } else if (task._type == TASKTYPE_PHOTON_REEMIT) {
+            task.start(thread_id);
+            const unsigned int current_buffer_index = task._buffer;
+            PhotonBuffer &buffer = new_buffers[current_buffer_index];
+            do_reemission(buffer, random_generator[thread_id],
+                          reemission_probability);
+            const size_t task_index = tasks.get_free_element();
+            tasks[task_index]._type = TASKTYPE_PHOTON_TRAVERSAL;
+            tasks[task_index]._cell = task._cell;
+            tasks[task_index]._buffer = current_buffer_index;
+            new_queues[thread_id]->add_task(task_index);
+            task.stop();
+            costs.add_cost(task._cell, task._end_time - task._start_time);
           } else {
             logmessage("Unknown task!", 0);
           }
@@ -956,7 +1015,7 @@ int main(int argc, char **argv) {
         }
       }
     } // parallel region
-    logmessage("Total number of tasks: " << number_of_tasks, 0);
+    logmessage("Total number of tasks: " << tasks.size(), 0);
 
     for (unsigned int i = 0; i < duplicates.size(); ++i) {
       logmessage("Updating ionization integrals for " << duplicates[i].first
@@ -991,7 +1050,13 @@ int main(int argc, char **argv) {
   } // main loop
 
   program_timer.stop();
-  logmessage("Total program time " << program_timer.value() << " s.", 0);
+  logmessage("Total program time: " << program_timer.value() << " s.", 0);
+
+  struct rusage resource_usage;
+  getrusage(RUSAGE_SELF, &resource_usage);
+  size_t max_memory = static_cast< size_t >(resource_usage.ru_maxrss) *
+                      static_cast< size_t >(1024);
+  logmessage("Maximum memory usage: " << human_readable_bytes(max_memory), 0);
 
   // OUTPUT:
   //  - ASCII output (for the VisIt plot script)

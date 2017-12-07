@@ -48,7 +48,9 @@ enum TaskType {
   /*! @brief Draw random photons from the source. */
   TASKTYPE_SOURCE_PHOTON,
   /*! @brief Propagate photons through a subgrid. */
-  TASKTYPE_PHOTON_TRAVERSAL
+  TASKTYPE_PHOTON_TRAVERSAL,
+  /*! @brief Reemit photons. */
+  TASKTYPE_PHOTON_REEMIT
 };
 
 /**

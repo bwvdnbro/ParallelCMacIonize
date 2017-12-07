@@ -8,8 +8,8 @@ pl.rcParams["text.usetex"] = True
 pl.rcParams["figure.figsize"] = (12, 10)
 pl.rcParams["font.size"] = 14
 
-task_colors = ["b", "r"]
-task_names = ["source photon", "photon traversal"]
+task_colors = ["b", "r", "g"]
+task_names = ["source photon", "photon traversal", "reemission"]
 
 def plot_file(name):
   print "Plotting tasks for", name, "..."

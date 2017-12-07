@@ -10,8 +10,8 @@ pl.rcParams["font.size"] = 14
 
 name = sys.argv[1]
 
-task_colors = ["b", "r"]
-task_names = ["source photon", "photon traversal"]
+task_colors = ["b", "r", "g"]
+task_names = ["source photon", "photon traversal", "reemission"]
 
 print "Plotting tasks for", name, "..."
 
