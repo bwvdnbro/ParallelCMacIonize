@@ -636,6 +636,7 @@ int main(int argc, char **argv) {
 
   // +6 for the 6 subgrid copies we make below
   CostVector costs(tot_num_subgrid + 6, num_threads, MPI_size);
+
 // set up the subgrids (in parallel)
 #pragma omp parallel default(shared)
   {
@@ -763,7 +764,8 @@ int main(int argc, char **argv) {
   // set up the random number generators
   std::vector< RandomGenerator > random_generator(num_threads);
   for (int i = 0; i < num_threads; ++i) {
-    random_generator[i].set_seed(42 + i);
+    // make sure every thread on every process has a different seed
+    random_generator[i].set_seed(42 + MPI_rank * num_threads + i);
   }
 
   // now for the main loop. This loop
