@@ -61,6 +61,9 @@ private:
   /*! @brief Number of threads. */
   const int _number_of_threads;
 
+  /*! @brief Number of MPI processes. */
+  const int _number_of_processes;
+
   /*! @brief Computational costs for each element. */
   unsigned long *_costs;
 
@@ -68,21 +71,30 @@ private:
    *  scheme. */
   int *_thread_list;
 
+  /*! @brief Process list that links elements to MPI processes in an optimal
+   *  balancing scheme. */
+  int *_process_list;
+
 public:
   /**
    * @brief Constructor.
    *
    * @param size Number of elements.
    * @param number_of_threads Number of threads.
+   * @param number_of_proceses Number of MPI processes.
    */
-  inline CostVector(const size_t size, const int number_of_threads)
-      : _size(size), _number_of_threads(number_of_threads) {
+  inline CostVector(const size_t size, const int number_of_threads,
+                    const int number_of_processes)
+      : _size(size), _number_of_threads(number_of_threads),
+        _number_of_processes(number_of_processes) {
     _costs = new unsigned long[size];
     _thread_list = new int[size];
+    _process_list = new int[size];
     for (size_t i = 0; i < size; ++i) {
       _costs[i] = 0;
       // our initial decomposition
       _thread_list[i] = i % number_of_threads;
+      _process_list[i] = i % number_of_processes;
     }
   }
 
@@ -92,6 +104,7 @@ public:
   inline ~CostVector() {
     delete[] _costs;
     delete[] _thread_list;
+    delete[] _process_list;
   }
 
   /**
@@ -100,8 +113,18 @@ public:
    * @param index Index of an element.
    * @return Thread id that owns that element.
    */
-  inline const int &operator[](const size_t index) const {
+  inline const int get_thread(const size_t index) const {
     return _thread_list[index];
+  }
+
+  /**
+   * @brief Get the process id for the given element.
+   *
+   * @param index Index of an element.
+   * @return Process rank that owns that element.
+   */
+  inline const int get_process(const size_t index) const {
+    return _process_list[index];
   }
 
   /**
@@ -139,56 +162,51 @@ public:
    * thread is as close as possible to the average.
    */
   inline void redistribute() {
-    // compute the target cost per thread
-    unsigned long totcost = 0;
-    for (size_t i = 0; i < _size; ++i) {
-      totcost += _costs[i];
-    }
-    unsigned long target_per_thread = totcost / _number_of_threads;
-    // remove all subgrids with above average costs from the total, to avoid
-    // having threads without any subgrids
-    unsigned int num_large = 0;
-    for (size_t i = 0; i < _size; ++i) {
-      if (_costs[i] > target_per_thread) {
-        totcost -= _costs[i];
-        ++num_large;
-      }
-    }
-    target_per_thread = totcost / (_number_of_threads - num_large);
 
-    // now for the actual distribution:
-    //  we want to assign the _number_of_threads most expensive subgrids to
-    //  different threads, and then fill up the threads with the least expensive
-    //  subgrids until the target is reached
-    // argsort the costs
+    // argsort the elements based on cost
     std::vector< size_t > indices = argsort(_costs, _size);
-    // subdivide
-    size_t low_index = 0;
-    size_t high_index = _size - 1;
-    const size_t max_low_index = _size - _number_of_threads;
-    int thread = 0;
-    while (thread < _number_of_threads) {
-      totcost = 0;
-      _thread_list[indices[high_index]] = thread;
-      totcost += _costs[indices[high_index]];
-      --high_index;
-      while (totcost < target_per_thread && low_index < max_low_index) {
-        _thread_list[indices[low_index]] = thread;
-        totcost += _costs[indices[low_index]];
-        ++low_index;
+    // store the cost per thread for later
+    std::vector< std::vector< unsigned long > > threadcost(
+        _number_of_processes,
+        std::vector< unsigned long >(_number_of_threads, 0));
+    // loop over the subgrids in descending cost order
+    size_t index = 0;
+    const size_t max_index = _size - 1;
+    // first pass: give every thread and rank an expensive element
+    // we do ranks in the inner loop to load balance across processes
+    for (int ithread = 0; ithread < _number_of_threads; ++ithread) {
+      for (int irank = 0; irank < _number_of_processes; ++irank) {
+        const size_t current_index = indices[max_index - index];
+        _thread_list[current_index] = ithread;
+        _process_list[current_index] = irank;
+        threadcost[irank][ithread] += _costs[current_index];
+        ++index;
       }
-      ++thread;
     }
-    // the loop above might have missed the last subgrid; add it here
-    --thread;
-    while (low_index < max_low_index) {
-      _thread_list[indices[low_index]] = thread;
-      totcost += _costs[indices[low_index]];
-      ++low_index;
+    // second pass: add the remaining indices in an optimal way: we try to
+    // find the thread that can fit a cost best
+    for (; index < _size; ++index) {
+      const size_t current_index = indices[max_index - index];
+      // find the thread where this cost has the lowest impact
+      int cmatch_rank = -1;
+      int cmatch_thread = -1;
+      unsigned long cmatch = threadcost[0][0] + _costs[current_index];
+      for (int irank = 0; irank < _number_of_processes; ++irank) {
+        for (int ithread = 0; ithread < _number_of_threads; ++ithread) {
+          const unsigned long cvalue =
+              threadcost[irank][ithread] + _costs[current_index];
+          if (cvalue <= cmatch) {
+            cmatch = cvalue;
+            cmatch_rank = irank;
+            cmatch_thread = ithread;
+          }
+        }
+      }
+      myassert(cmatch_rank >= 0 && cmatch_thread >= 0, "No closest match!");
+      _thread_list[current_index] = cmatch_thread;
+      _process_list[current_index] = cmatch_rank;
+      threadcost[cmatch_rank][cmatch_thread] += _costs[current_index];
     }
-    myassert(high_index + 1 == low_index,
-             "Missing subgrids (high: " << high_index << ", low: " << low_index
-                                        << "!");
 
     // reset costs
     for (size_t i = 0; i < _size; ++i) {

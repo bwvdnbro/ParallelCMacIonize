@@ -38,6 +38,7 @@
 #include <cmath>
 #include <fstream>
 #include <iostream>
+#include <mpi.h>
 #include <omp.h>
 #include <sstream>
 #include <vector>
@@ -48,6 +49,9 @@
 
 /*! @brief Activate this to unit test the directional algorithms. */
 //#define TEST_DIRECTIONS
+
+/*! @brief Activate this to unit test the CostVector. */
+//#define TEST_COSTVECTOR
 
 /**
  * @brief Write a message to the log with the given log level.
@@ -164,7 +168,7 @@ inline void output_costs(const unsigned int iloop, const unsigned int ngrid,
     ofile << "# subgrid\tcost\n";
     for (unsigned int i = 0; i < ngrid; ++i) {
       ofile << i << "\t" << costs.get_cost(i) << "\n";
-      costs_per_thread[costs[i]] += costs.get_cost(i);
+      costs_per_thread[costs.get_thread(i)] += costs.get_cost(i);
     }
   }
 
@@ -394,6 +398,22 @@ inline void ensure_neighbours(const unsigned int original_A,
  */
 int main(int argc, char **argv) {
 
+  // MPI initialisation
+  MPI_Init(&argc, &argv);
+  int rank_get, size_get;
+  MPI_Comm_rank(MPI_COMM_WORLD, &rank_get);
+  MPI_Comm_size(MPI_COMM_WORLD, &size_get);
+  const int MPI_rank = rank_get;
+  const int MPI_size = size_get;
+
+  if (MPI_rank == 0) {
+    if (MPI_size > 1) {
+      logmessage("Running on " << MPI_size << " processes.", 0);
+    } else {
+      logmessage("Running on a single process.", 0);
+    }
+  }
+
 #ifdef TEST_DIRECTIONS
   /// test directional routines
   {
@@ -463,6 +483,31 @@ int main(int argc, char **argv) {
     check_input(test_grid, position, TRAVELDIRECTION_CORNER_PNP, 9, 0, 9);
     check_input(test_grid, position, TRAVELDIRECTION_CORNER_PPN, 9, 9, 0);
     check_input(test_grid, position, TRAVELDIRECTION_CORNER_PPP, 9, 9, 9);
+    return 0;
+  }
+#endif
+
+#ifdef TEST_COSTVECTOR
+  {
+    RandomGenerator random_generator;
+    CostVector costs(100, 16, 4);
+    unsigned long cost_list[100];
+    for (size_t i = 0; i < 100; ++i) {
+      cost_list[i] = random_generator.get_uniform_random_double() * 0xffffffff;
+      costs.add_cost(i, cost_list[i]);
+    }
+    // add an element with a ridiculously high cost to see how the algorithm
+    // copes
+    cost_list[42] = 0xfffffffff;
+    costs.set_cost(42, cost_list[42]);
+    costs.redistribute();
+    std::ofstream ofile("cost_test.txt");
+    ofile << "# element\tcost\trank\tthread\n";
+    for (size_t i = 0; i < 100; ++i) {
+      ofile << i << "\t" << cost_list[i] << "\t" << costs.get_process(i) << "\t"
+            << costs.get_thread(i) << "\n";
+    }
+    return 0;
   }
 #endif
 
@@ -545,7 +590,7 @@ int main(int argc, char **argv) {
       num_subgrid[0] * num_subgrid[1] * num_subgrid[2];
 
   // +6 for the 6 subgrid copies we make below
-  CostVector costs(tot_num_subgrid + 6, num_threads);
+  CostVector costs(tot_num_subgrid + 6, num_threads, MPI_size);
 // set up the subgrids (in parallel)
 #pragma omp parallel default(shared)
   {
@@ -556,7 +601,7 @@ int main(int argc, char **argv) {
         for (int iz = 0; iz < num_subgrid[2]; ++iz) {
           const unsigned int index =
               ix * num_subgrid[1] * num_subgrid[2] + iy * num_subgrid[2] + iz;
-          if (costs[index] == thread_id) {
+          if (costs.get_thread(index) == thread_id) {
             const double subbox[6] = {box[0] + ix * subbox_side[0],
                                       box[1] + iy * subbox_side[1],
                                       box[2] + iz * subbox_side[2],
@@ -681,8 +726,8 @@ int main(int argc, char **argv) {
   //  - computes the ionization equilibrium
   for (unsigned int iloop = 0; iloop < number_of_iterations; ++iloop) {
     const int central_queue[4] = {
-        costs[central_index[0]], costs[central_index[1]],
-        costs[central_index[2]], costs[central_index[3]]};
+        costs.get_thread(central_index[0]), costs.get_thread(central_index[1]),
+        costs.get_thread(central_index[2]), costs.get_thread(central_index[3])};
     // STEP 0: log output
     logmessage("Loop " << iloop + 1, 0);
 
@@ -742,7 +787,7 @@ int main(int argc, char **argv) {
           // long as we don't allow task stealing, this will be thread-safe
           unsigned int i = 0;
           while (i < gridvec.size() && current_index == NO_TASK) {
-            if (costs[i] == thread_id) {
+            if (costs.get_thread(i) == thread_id) {
               int j = 0;
               while (j < 27 && current_index == NO_TASK) {
                 if (gridvec[i]->get_neighbour(j) != NEIGHBOUR_OUTSIDE &&
@@ -763,7 +808,8 @@ int main(int argc, char **argv) {
                   tasks[task_index]._cell =
                       new_buffers[non_full_index]._sub_grid_index;
                   tasks[task_index]._buffer = non_full_index;
-                  new_queues[costs[new_buffers[non_full_index]._sub_grid_index]]
+                  new_queues[costs.get_thread(
+                                 new_buffers[non_full_index]._sub_grid_index)]
                       ->add_task(task_index);
                   // we have created a new empty buffer
                   atomic_pre_increment(num_empty);
@@ -882,7 +928,7 @@ int main(int argc, char **argv) {
                     tasks[task_index]._cell =
                         new_buffers[new_index]._sub_grid_index;
                     tasks[task_index]._buffer = new_index;
-                    new_queues[costs[ngb]]->add_task(task_index);
+                    new_queues[costs.get_thread(ngb)]->add_task(task_index);
                     myassert(new_buffers[add_index]._sub_grid_index == ngb,
                              "Wrong subgrid");
                     myassert(new_buffers[add_index]._direction ==
