@@ -569,8 +569,8 @@ int main(int argc, char **argv) {
   // number of subgrids: 3^3
   const int num_subgrid[3] = {3, 5, 4};
   // reemission probability
-  const double reemission_probability = 0.364;
-  //  const double reemission_probability = 0.;
+  //  const double reemission_probability = 0.364;
+  const double reemission_probability = 0.;
 
   // set up the number of threads to use
   // we first determine the number of threads available (either by system
