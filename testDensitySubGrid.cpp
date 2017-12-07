@@ -120,7 +120,7 @@
  * @param iloop Iteration number (added to file name).
  * @param tasks Tasks to print.
  */
-inline void output_tasks(unsigned int iloop,
+inline void output_tasks(const unsigned int iloop,
                          const ThreadSafeVector< Task > &tasks) {
   std::stringstream filename;
   filename << "tasks_";
@@ -137,6 +137,51 @@ inline void output_tasks(unsigned int iloop,
     const Task &task = tasks[i];
     ofile << task._thread_id << "\t" << task._start_time << "\t"
           << task._end_time << "\t" << task._type << "\n";
+  }
+}
+
+/**
+ * @brief Write files with cost information for an iteration.
+ *
+ * @param iloop Iteration number (added to file names).
+ * @param ngrid Number of subgrids.
+ * @param nthread Number of threads.
+ * @param costs CostVector to print.
+ */
+inline void output_costs(const unsigned int iloop, const unsigned int ngrid,
+                         const int nthread, const CostVector &costs) {
+  std::vector< unsigned int > costs_per_thread(nthread, 0);
+  // per subgrid
+  {
+    std::stringstream filename;
+    filename << "costs_per_subgrid_";
+    filename.fill('0');
+    filename.width(2);
+    filename << iloop;
+    filename << ".txt";
+
+    std::ofstream ofile(filename.str());
+    ofile << "# subgrid\tcost\n";
+    for (unsigned int i = 0; i < ngrid; ++i) {
+      ofile << i << "\t" << costs.get_cost(i) << "\n";
+      costs_per_thread[costs[i]] += costs.get_cost(i);
+    }
+  }
+
+  // per thread
+  {
+    std::stringstream filename;
+    filename << "costs_per_thread_";
+    filename.fill('0');
+    filename.width(2);
+    filename << iloop;
+    filename << ".txt";
+
+    std::ofstream ofile(filename.str());
+    ofile << "# thread\tcost\n";
+    for (int i = 0; i < nthread; ++i) {
+      ofile << i << "\t" << costs_per_thread[i] << "\n";
+    }
   }
 }
 
@@ -474,7 +519,7 @@ int main(int argc, char **argv) {
   // set up the queues
   std::vector< NewQueue * > new_queues(num_threads, nullptr);
   for (int i = 0; i < num_threads; ++i) {
-    new_queues[i] = new NewQueue(1000);
+    new_queues[i] = new NewQueue(2000);
   }
 
   // set up the memory space
@@ -499,7 +544,7 @@ int main(int argc, char **argv) {
   const unsigned int tot_num_subgrid =
       num_subgrid[0] * num_subgrid[1] * num_subgrid[2];
 
-  // +2 for the 2 subgrid copies we make below
+  // +6 for the 6 subgrid copies we make below
   CostVector costs(tot_num_subgrid + 6, num_threads);
 // set up the subgrids (in parallel)
 #pragma omp parallel default(shared)
@@ -592,19 +637,34 @@ int main(int argc, char **argv) {
   ensure_neighbours(29, 30, 62, 63, gridvec, new_buffers);
   ensure_neighbours(29, 30, 64, 65, gridvec, new_buffers);
 
-  // a very basic initial cost guess (good enough to get the idle fraction below
-  // 50%)
-  for (unsigned int i = 0; i < gridvec.size(); ++i) {
-    costs.add_cost(i, 1);
+  std::ifstream initial_costs("costs_per_subgrid_00.txt");
+  if (initial_costs.good()) {
+    // use cost information from a previous run as initial guess for the cost
+    // skip the initial comment line
+    std::string line;
+    std::getline(initial_costs, line);
+    unsigned int index;
+    unsigned long cost;
+    for (unsigned int i = 0; i < gridvec.size(); ++i) {
+      initial_costs >> index >> cost;
+      myassert(index == i, "Wrong index!");
+      costs.add_cost(index, cost);
+    }
+  } else {
+    // no previous information available: use a very basic initial cost guess
+    // (good enough to get the idle fraction below 50%)
+    for (unsigned int i = 0; i < gridvec.size(); ++i) {
+      costs.add_cost(i, 1);
+    }
+    costs.add_cost(29, 10000);
+    costs.add_cost(60, 10000);
+    costs.add_cost(62, 10000);
+    costs.add_cost(64, 10000);
+    costs.add_cost(30, 11000);
+    costs.add_cost(61, 11000);
+    costs.add_cost(63, 11000);
+    costs.add_cost(65, 11000);
   }
-  costs.add_cost(29, 10000);
-  costs.add_cost(60, 10000);
-  costs.add_cost(62, 10000);
-  costs.add_cost(64, 10000);
-  costs.add_cost(30, 11000);
-  costs.add_cost(61, 11000);
-  costs.add_cost(63, 11000);
-  costs.add_cost(65, 11000);
   costs.redistribute();
 
   // get the central subgrid indices
@@ -861,23 +921,26 @@ int main(int argc, char **argv) {
           *gridvec[duplicates[i].second]);
     }
 
-// STEP 2: update the ionization structure for each subgrid
+    // STEP 2: update the ionization structure for each subgrid
+    unsigned int igrid = 0;
 #pragma omp parallel default(shared)
     {
-      // id of this specific thread
-      const int thread_id = omp_get_thread_num();
-      // we use tot_num_subgrid here, since we want to exclude copies
-      for (unsigned int igrid = 0; igrid < tot_num_subgrid; ++igrid) {
-        if (costs[igrid] == thread_id) {
-          gridvec[igrid]->compute_neutral_fraction(num_photon);
+      while (igrid < tot_num_subgrid) {
+        const unsigned int current_igrid = atomic_post_increment(igrid);
+        if (current_igrid < tot_num_subgrid) {
+          gridvec[current_igrid]->compute_neutral_fraction(num_photon);
         }
       }
     }
 
+    // output useful information about this iteration
     output_tasks(iloop, tasks);
+    output_costs(iloop, gridvec.size(), num_threads, costs);
+
     // clear task buffer
     tasks.clear();
-
+    // redistribute the subgrids among the threads to balance the computational
+    // costs (based on this iteration)
     costs.redistribute();
   } // main loop
 
