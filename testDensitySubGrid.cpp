@@ -656,61 +656,26 @@ int main(int argc, char **argv) {
         local_buffers[i]._direction = output_to_input_direction(i);
         local_buffers[i]._actual_size = 0;
       }
-      // this loop is repeated until all photons have been shot. It
-      //  - creates one new buffer with source photons
-      //  - shoots all photons in all buffers that are in the local thread queue
-      //    and creates new buffers with output photons
+      // set up the initial source photon task
+      {
+        const size_t task_index = tasks.get_free_element();
+        tasks[task_index]._type = TASKTYPE_SOURCE_PHOTON;
+        // buffer is ready to be processed: add to the queue
+        new_queues[thread_id]->add_task(task_index);
+      }
+      // this loop is repeated until all photons have been shot
       while (num_photon_done < num_photon || num_active_buffers > 0 ||
              num_empty < num_empty_target) {
-        // SUBSTEP 0: log output
+
         logmessage("Subloop (num_active_buffers: "
                        << num_active_buffers
                        << ", num_photon_done: " << num_photon_done
                        << ", num_empty: " << num_empty << ")",
                    1);
 
-        // SUBSTEP 1: add new photons from the source
-        // we only do this step as long as the source has photons...
-        if (num_photon_done < num_photon) {
-          const unsigned int num_photon_done_now =
-              atomic_post_add(num_photon_done, PHOTONBUFFER_SIZE);
-          if (num_photon_done_now < num_photon) {
-            // we will create a new buffer
-            atomic_pre_increment(num_active_buffers);
-
-            // if this is the last buffer: cap the total number of photons to
-            // the
-            // requested value
-            unsigned int num_photon_this_loop = PHOTONBUFFER_SIZE;
-            if (num_photon_done_now > num_photon) {
-              num_photon_this_loop += (num_photon - num_photon_done_now);
-            }
-
-            // get a free photon buffer in the central queue
-            unsigned int buffer_index = new_buffers.get_free_buffer();
-            // no need to lock this buffer
-            PhotonBuffer &input_buffer = new_buffers[buffer_index];
-            int which_central_index =
-                random_generator[thread_id].get_uniform_random_double() * 4.;
-            myassert(which_central_index >= 0 && which_central_index < 4,
-                     "Oopsie!");
-            unsigned int this_central_index =
-                central_index[which_central_index];
-            fill_buffer(input_buffer, num_photon_this_loop,
-                        random_generator[thread_id], this_central_index);
-
-            const size_t task_index = tasks.get_free_element();
-            tasks[task_index]._type = TASKTYPE_PHOTON_TRAVERSAL;
-            tasks[task_index]._cell = this_central_index;
-            tasks[task_index]._buffer = buffer_index;
-            // buffer is ready to be processed: add to the queue
-            new_queues[central_queue[which_central_index]]->add_task(
-                task_index);
-          }
-        }
-
-        // SUBSTEP 2: photon traversal
         unsigned int current_index = new_queues[thread_id]->get_task();
+        // task activation: if no task is found, try to launch a photon buffer
+        // that is not yet full
         if (current_index == NO_TASK) {
           // try to activate a non-full buffer
           // note that we only try to access thread-local information, so as
@@ -742,9 +707,8 @@ int main(int argc, char **argv) {
                       ->add_task(task_index);
                   // we have created a new empty buffer
                   atomic_pre_increment(num_empty);
-                  // try again to get a task (might be the one we just created,
-                  // although
-                  // that could live on another thread)
+                  // try again to get a task (probably the one we just created,
+                  // unless another thread gave us some work in the meantime)
                   current_index = new_queues[thread_id]->get_task();
                 }
                 ++j;
@@ -756,73 +720,131 @@ int main(int argc, char **argv) {
         // keep processing buffers until the queue is empty
         while (current_index != NO_TASK) {
           Task &task = tasks[current_index];
-          task.start(thread_id);
-          const unsigned int current_buffer_index = task._buffer;
-          // we don't allow task-stealing, so no need to lock anything just now
-          PhotonBuffer &buffer = new_buffers[current_buffer_index];
-          const unsigned int igrid = buffer._sub_grid_index;
-          DensitySubGrid &this_grid = *gridvec[buffer._sub_grid_index];
-          // prepare output buffers
-          for (int i = 0; i < 27; ++i) {
-            const unsigned int ngb = this_grid.get_neighbour(i);
-            if (ngb != NEIGHBOUR_OUTSIDE) {
-              local_buffer_flags[i] = true;
-              local_buffers[i]._actual_size = 0;
-            } else {
-              local_buffer_flags[i] = false;
-            }
-          }
-          if (reemission_probability == 0.) {
-            local_buffer_flags[TRAVELDIRECTION_INSIDE] = false;
-          }
-          do_photon_traversal(buffer, this_grid, local_buffers,
-                              local_buffer_flags);
-          atomic_pre_increment(number_of_tasks);
-          // do reemission (if applicable)
-          if (reemission_probability > 0.) {
-            do_reemission(local_buffers[TRAVELDIRECTION_INSIDE],
-                          random_generator[thread_id], reemission_probability);
-          }
-          // add none empty buffers to the appropriate queues
-          for (int i = 0; i < 27; ++i) {
-            if (local_buffer_flags[i]) {
-              if (local_buffers[i]._actual_size > 0) {
-                const unsigned int ngb = this_grid.get_neighbour(i);
-                unsigned int new_index = this_grid.get_active_buffer(i);
-                if (new_buffers[new_index]._actual_size == 0) {
-                  // we are adding photons to an empty buffer
-                  atomic_pre_decrement(num_empty);
-                }
-                unsigned int add_index =
-                    new_buffers.add_photons(new_index, local_buffers[i]);
-                if (add_index != new_index) {
-                  // add buffer to queue
-                  atomic_pre_increment(num_active_buffers);
+          if (task._type == TASKTYPE_SOURCE_PHOTON) {
+            task.start(thread_id);
+            if (num_photon_done < num_photon) {
+              const unsigned int num_photon_done_now =
+                  atomic_post_add(num_photon_done, PHOTONBUFFER_SIZE);
+              if (num_photon_done_now < num_photon) {
+                // spawn a new source photon task
+                {
                   const size_t task_index = tasks.get_free_element();
-                  tasks[task_index]._type = TASKTYPE_PHOTON_TRAVERSAL;
-                  tasks[task_index]._cell =
-                      new_buffers[new_index]._sub_grid_index;
-                  tasks[task_index]._buffer = new_index;
-                  new_queues[costs[ngb]]->add_task(task_index);
-                  myassert(new_buffers[add_index]._sub_grid_index == ngb,
-                           "Wrong subgrid");
-                  myassert(new_buffers[add_index]._direction ==
-                               output_to_input_direction(i),
-                           "Wrong direction");
-                  this_grid.set_active_buffer(i, add_index);
-                  if (new_buffers[add_index]._actual_size == 0) {
-                    // we have created a new empty buffer
-                    atomic_pre_increment(num_empty);
+                  tasks[task_index]._type = TASKTYPE_SOURCE_PHOTON;
+                  // buffer is ready to be processed: add to the queue
+                  new_queues[thread_id]->add_task(task_index);
+                }
+
+                // we will create a new buffer
+                atomic_pre_increment(num_active_buffers);
+
+                // if this is the last buffer: cap the total number of photons
+                // to the requested value
+                // (note that num_photon_done_now is the number of photons that
+                //  was generated BEFORE this task, after this task,
+                //  num_photon_done_now + PHOTONBUFFER_SIZE photons will have
+                //  been generated, unless this number is capped)
+                unsigned int num_photon_this_loop = PHOTONBUFFER_SIZE;
+                if (num_photon_done_now + PHOTONBUFFER_SIZE > num_photon) {
+                  num_photon_this_loop += (num_photon - num_photon_done_now);
+                }
+
+                // get a free photon buffer in the central queue
+                unsigned int buffer_index = new_buffers.get_free_buffer();
+                // no need to lock this buffer
+                PhotonBuffer &input_buffer = new_buffers[buffer_index];
+                int which_central_index =
+                    random_generator[thread_id].get_uniform_random_double() *
+                    4.;
+                myassert(which_central_index >= 0 && which_central_index < 4,
+                         "Oopsie!");
+                unsigned int this_central_index =
+                    central_index[which_central_index];
+                fill_buffer(input_buffer, num_photon_this_loop,
+                            random_generator[thread_id], this_central_index);
+
+                const size_t task_index = tasks.get_free_element();
+                tasks[task_index]._type = TASKTYPE_PHOTON_TRAVERSAL;
+                tasks[task_index]._cell = this_central_index;
+                tasks[task_index]._buffer = buffer_index;
+                // buffer is ready to be processed: add to the queue
+                new_queues[central_queue[which_central_index]]->add_task(
+                    task_index);
+              }
+            }
+            task.stop();
+          } else if (task._type == TASKTYPE_PHOTON_TRAVERSAL) {
+            task.start(thread_id);
+            const unsigned int current_buffer_index = task._buffer;
+            // we don't allow task-stealing, so no need to lock anything just
+            // now
+            PhotonBuffer &buffer = new_buffers[current_buffer_index];
+            const unsigned int igrid = buffer._sub_grid_index;
+            DensitySubGrid &this_grid = *gridvec[buffer._sub_grid_index];
+            // prepare output buffers
+            for (int i = 0; i < 27; ++i) {
+              const unsigned int ngb = this_grid.get_neighbour(i);
+              if (ngb != NEIGHBOUR_OUTSIDE) {
+                local_buffer_flags[i] = true;
+                local_buffers[i]._actual_size = 0;
+              } else {
+                local_buffer_flags[i] = false;
+              }
+            }
+            if (reemission_probability == 0.) {
+              local_buffer_flags[TRAVELDIRECTION_INSIDE] = false;
+            }
+            do_photon_traversal(buffer, this_grid, local_buffers,
+                                local_buffer_flags);
+            atomic_pre_increment(number_of_tasks);
+            // do reemission (if applicable)
+            if (reemission_probability > 0.) {
+              do_reemission(local_buffers[TRAVELDIRECTION_INSIDE],
+                            random_generator[thread_id],
+                            reemission_probability);
+            }
+            // add none empty buffers to the appropriate queues
+            for (int i = 0; i < 27; ++i) {
+              if (local_buffer_flags[i]) {
+                if (local_buffers[i]._actual_size > 0) {
+                  const unsigned int ngb = this_grid.get_neighbour(i);
+                  unsigned int new_index = this_grid.get_active_buffer(i);
+                  if (new_buffers[new_index]._actual_size == 0) {
+                    // we are adding photons to an empty buffer
+                    atomic_pre_decrement(num_empty);
+                  }
+                  unsigned int add_index =
+                      new_buffers.add_photons(new_index, local_buffers[i]);
+                  if (add_index != new_index) {
+                    // add buffer to queue
+                    atomic_pre_increment(num_active_buffers);
+                    const size_t task_index = tasks.get_free_element();
+                    tasks[task_index]._type = TASKTYPE_PHOTON_TRAVERSAL;
+                    tasks[task_index]._cell =
+                        new_buffers[new_index]._sub_grid_index;
+                    tasks[task_index]._buffer = new_index;
+                    new_queues[costs[ngb]]->add_task(task_index);
+                    myassert(new_buffers[add_index]._sub_grid_index == ngb,
+                             "Wrong subgrid");
+                    myassert(new_buffers[add_index]._direction ==
+                                 output_to_input_direction(i),
+                             "Wrong direction");
+                    this_grid.set_active_buffer(i, add_index);
+                    if (new_buffers[add_index]._actual_size == 0) {
+                      // we have created a new empty buffer
+                      atomic_pre_increment(num_empty);
+                    }
                   }
                 }
               }
             }
+            // delete the original buffer
+            atomic_pre_subtract(num_active_buffers);
+            new_buffers.free_buffer(current_buffer_index);
+            task.stop();
+            costs.add_cost(igrid, task._end_time - task._start_time);
+          } else {
+            logmessage("Unknown task!", 0);
           }
-          // delete the original buffer
-          atomic_pre_subtract(num_active_buffers);
-          new_buffers.free_buffer(current_buffer_index);
-          task.stop();
-          costs.add_cost(igrid, task._end_time - task._start_time);
           // try to get a new buffer from the local queue
           current_index = new_queues[thread_id]->get_task();
         }

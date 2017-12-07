@@ -27,7 +27,7 @@
 #ifndef COSTVECTOR_HPP
 #define COSTVECTOR_HPP
 
-#include <iostream>
+#include "Assert.hpp"
 
 #include <algorithm>
 #include <vector>
@@ -145,31 +145,50 @@ public:
       totcost += _costs[i];
     }
     unsigned long target_per_thread = totcost / _number_of_threads;
+    // remove all subgrids with above average costs from the total, to avoid
+    // having threads without any subgrids
+    unsigned int num_large = 0;
     for (size_t i = 0; i < _size; ++i) {
       if (_costs[i] > target_per_thread) {
-        std::cout << i << std::endl;
         totcost -= _costs[i];
+        ++num_large;
       }
     }
-    target_per_thread = totcost / _number_of_threads;
+    target_per_thread = totcost / (_number_of_threads - num_large);
+
+    // now for the actual distribution:
+    //  we want to assign the _number_of_threads most expensive subgrids to
+    //  different threads, and then fill up the threads with the least expensive
+    //  subgrids until the target is reached
     // argsort the costs
     std::vector< size_t > indices = argsort(_costs, _size);
     // subdivide
     size_t low_index = 0;
     size_t high_index = _size - 1;
+    const size_t max_low_index = _size - _number_of_threads;
     int thread = 0;
     while (thread < _number_of_threads) {
       totcost = 0;
       _thread_list[indices[high_index]] = thread;
       totcost += _costs[indices[high_index]];
       --high_index;
-      while (totcost < target_per_thread) {
+      while (totcost < target_per_thread && low_index < max_low_index) {
         _thread_list[indices[low_index]] = thread;
         totcost += _costs[indices[low_index]];
         ++low_index;
       }
       ++thread;
     }
+    // the loop above might have missed the last subgrid; add it here
+    --thread;
+    while (low_index < max_low_index) {
+      _thread_list[indices[low_index]] = thread;
+      totcost += _costs[indices[low_index]];
+      ++low_index;
+    }
+    myassert(high_index + 1 == low_index,
+             "Missing subgrids (high: " << high_index << ", low: " << low_index
+                                        << "!");
 
     // reset costs
     for (size_t i = 0; i < _size; ++i) {

@@ -32,7 +32,7 @@
 #include "Photon.hpp"
 
 /*! @brief Number of photons that can be stored in a single buffer. */
-#define PHOTONBUFFER_SIZE 1000u
+#define PHOTONBUFFER_SIZE 500u
 
 /**
  * @brief Photon buffer.

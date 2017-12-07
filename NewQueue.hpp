@@ -92,6 +92,13 @@ public:
     _queue_lock.unlock();
     return task;
   }
+
+  /**
+   * @brief Get the current size of the queue.
+   *
+   * @return Current size of the queue.
+   */
+  inline const size_t size() const { return _current_queue_index; }
 };
 
 #endif // NEWQUEUE_HPP

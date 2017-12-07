@@ -6,8 +6,12 @@ import sys
 
 pl.rcParams["text.usetex"] = True
 pl.rcParams["figure.figsize"] = (12, 10)
+pl.rcParams["font.size"] = 14
 
 name = sys.argv[1]
+
+task_colors = ["b", "r"]
+task_names = ["source photon", "photon traversal"]
 
 print "Plotting tasks for", name, "..."
 
@@ -24,10 +28,14 @@ for i in range(nthread):
            for task in thread]
   tottime = np.array([line[1] for line in bar]).sum()
   alltime += tottime
-  colors = ["b" for task in thread]
+  colors = [task_colors[int(task[3])] for task in thread]
   pl.broken_barh(bar, (i-0.4, 0.8), facecolors = colors, edgecolor = "none")
   pl.text(0.5, i, "{0:.2f} \%".format(tottime * 100.),
           bbox = dict(facecolor='white', alpha=0.9))
+for i in range(len(task_colors)):
+  pl.plot([], [], color = task_colors[i], label = task_names[i])
+pl.legend(loc = "upper center", ncol = len(task_colors))
+pl.ylim(-1., nthread * 1.1)
 alltime /= nthread
 pl.title("Total empty fraction: {0:.2f} \%".format((1. - alltime) * 100.))
 pl.gca().set_yticks([])
