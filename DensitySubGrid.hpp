@@ -30,6 +30,7 @@
 // local includes
 #include "Assert.hpp"
 #include "Atomic.hpp"
+#include "Lock.hpp"
 #include "Photon.hpp"
 
 // standard library includes
@@ -42,6 +43,23 @@
 
 /*! @brief Special neighbour index marking a neighbour that does not exist. */
 #define NEIGHBOUR_OUTSIDE 0xffffffff
+
+/*! @brief Enable this to activate cell locking. */
+//#define SUBGRID_CELL_LOCK
+
+#ifdef SUBGRID_CELL_LOCK
+#define subgrid_cell_lock_variables() Lock *_locks
+#define subgrid_cell_lock_init(ncell) _locks = new Lock[ncell]
+#define subgrid_cell_lock_destroy() delete[] _locks
+#define subgrid_cell_lock_lock(cell) _locks[cell].lock()
+#define subgrid_cell_lock_unlock(cell) _locks[cell].unlock()
+#else
+#define subgrid_cell_lock_variables()
+#define subgrid_cell_lock_init(ncell)
+#define subgrid_cell_lock_destroy()
+#define subgrid_cell_lock_lock(cell)
+#define subgrid_cell_lock_unlock(cell)
+#endif
 
 /**
  * @brief Custom abort macro that prints a message before aborting.
@@ -369,6 +387,9 @@ private:
 
   /*! @brief Ionizing intensity estimate for each cell (in m^3). */
   double *_intensity_integral;
+
+  /*! @brief Cell locks (if active). */
+  subgrid_cell_lock_variables();
 
   /**
    * @brief Convert the given 3 indices to a single index.
@@ -761,6 +782,7 @@ public:
     _number_density = new double[tot_ncell];
     _neutral_fraction = new double[tot_ncell];
     _intensity_integral = new double[tot_ncell];
+    subgrid_cell_lock_init(tot_ncell);
 
     // initialize data arrays
     for (int i = 0; i < tot_ncell; ++i) {
@@ -794,6 +816,7 @@ public:
     _number_density = new double[tot_ncell];
     _neutral_fraction = new double[tot_ncell];
     _intensity_integral = new double[tot_ncell];
+    subgrid_cell_lock_init(tot_ncell);
 
     // copy data arrays
     for (int i = 0; i < tot_ncell; ++i) {
@@ -814,6 +837,7 @@ public:
     delete[] _number_density;
     delete[] _neutral_fraction;
     delete[] _intensity_integral;
+    subgrid_cell_lock_destroy();
     omp_destroy_lock(&_lock);
   }
 
@@ -1032,7 +1056,9 @@ public:
         }
       }
       // add the pathlength to the intensity counter
+      subgrid_cell_lock_lock(active_cell);
       _intensity_integral[active_cell] += lminsigma * photon_weight;
+      subgrid_cell_lock_unlock(active_cell);
       // update the photon position
       // we use the complicated syntax below to make sure the positions we
       // know are 100% accurate (only important for our assertions)

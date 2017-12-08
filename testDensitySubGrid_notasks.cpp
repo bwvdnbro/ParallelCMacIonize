@@ -24,12 +24,17 @@
  * @author Bert Vandenbroucke (bv7@st-andrews.ac.uk)
  */
 
+/*! @brief We define this to make sure cell locking is enabled. */
+#define SUBGRID_CELL_LOCK
+
+#include "Atomic.hpp"
 #include "DensitySubGrid.hpp"
 #include "RandomGenerator.hpp"
 #include "Timer.hpp"
 
 #include <cmath>
 #include <fstream>
+#include <omp.h>
 #include <sstream>
 #include <sys/resource.h>
 
@@ -122,37 +127,85 @@ int main(int argc, char **argv) {
   DensitySubGrid grid(box, ncell);
   const unsigned int num_photon = 1000000;
 
+  // set up the number of threads to use
+  // we first determine the number of threads available (either by system
+  // default, or because the user has set the OMP_NUM_THREADS environment
+  // variable). We then check if a number of threads was specified on the
+  // command line. We don't allow setting the number of threads to a value
+  // larger than available, and use the available number as default if no value
+  // was given on the command line. If the requested number of threads is larger
+  // than what is available, we display a message.
+  int num_threads_available;
+#pragma omp parallel
+  {
+#pragma omp single
+    num_threads_available = omp_get_num_threads();
+  }
+
+  int num_threads_request = num_threads_available;
+  if (argc > 1) {
+    num_threads_request = atoi(argv[1]);
+  }
+
+  if (num_threads_request > num_threads_available) {
+    logmessage("More threads requested ("
+                   << num_threads_request << ") than available ("
+                   << num_threads_available
+                   << "). Resetting to maximum available number of threads.",
+               0);
+    num_threads_request = num_threads_available;
+  }
+
+  omp_set_num_threads(num_threads_request);
+  const int num_threads = num_threads_request;
+
+  logmessage("Running with " << num_threads << " threads.", 0);
+
   Timer program_timer;
   program_timer.start();
 
-  RandomGenerator random_generator;
+  // set up the random number generators
+  std::vector< RandomGenerator > random_generator(num_threads);
+  for (int i = 0; i < num_threads; ++i) {
+    // make sure every thread on every process has a different seed
+    random_generator[i].set_seed(42 + i);
+  }
+
   for (unsigned int iloop = 0; iloop < 10; ++iloop) {
     logmessage("Loop " << iloop + 1, 0);
 
-    for (unsigned int i = 0; i < num_photon; ++i) {
-      Photon photon;
-      photon._position[0] = 0.;
-      photon._position[1] = 0.;
-      photon._position[2] = 0.;
-      const double cost =
-          2. * random_generator.get_uniform_random_double() - 1.;
-      const double sint = std::sqrt(std::max(1. - cost * cost, 0.));
-      const double phi =
-          2. * M_PI * random_generator.get_uniform_random_double();
-      const double cosp = std::cos(phi);
-      const double sinp = std::sin(phi);
-      photon._direction[0] = sint * cosp;
-      photon._direction[1] = sint * sinp;
-      photon._direction[2] = cost;
-      photon._inverse_direction[0] = 1. / photon._direction[0];
-      photon._inverse_direction[1] = 1. / photon._direction[1];
-      photon._inverse_direction[2] = 1. / photon._direction[2];
-      photon._weight = 1.;
-      photon._current_optical_depth = 0.;
-      photon._target_optical_depth =
-          -std::log(random_generator.get_uniform_random_double());
-      photon._photoionization_cross_section = 6.3e-22;
-      grid.interact(photon, TRAVELDIRECTION_INSIDE);
+    unsigned int iglobal = 0;
+#pragma omp parallel default(shared)
+    {
+      // id of this specific thread
+      const int thread_id = omp_get_thread_num();
+      unsigned int i = atomic_post_increment(iglobal);
+      while (i < num_photon) {
+        Photon photon;
+        photon._position[0] = 0.;
+        photon._position[1] = 0.;
+        photon._position[2] = 0.;
+        const double cost =
+            2. * random_generator[thread_id].get_uniform_random_double() - 1.;
+        const double sint = std::sqrt(std::max(1. - cost * cost, 0.));
+        const double phi =
+            2. * M_PI * random_generator[thread_id].get_uniform_random_double();
+        const double cosp = std::cos(phi);
+        const double sinp = std::sin(phi);
+        photon._direction[0] = sint * cosp;
+        photon._direction[1] = sint * sinp;
+        photon._direction[2] = cost;
+        photon._inverse_direction[0] = 1. / photon._direction[0];
+        photon._inverse_direction[1] = 1. / photon._direction[1];
+        photon._inverse_direction[2] = 1. / photon._direction[2];
+        photon._weight = 1.;
+        photon._current_optical_depth = 0.;
+        photon._target_optical_depth =
+            -std::log(random_generator[thread_id].get_uniform_random_double());
+        photon._photoionization_cross_section = 6.3e-22;
+        grid.interact(photon, TRAVELDIRECTION_INSIDE);
+        i = atomic_post_increment(iglobal);
+      }
     }
     grid.compute_neutral_fraction(num_photon);
   }
