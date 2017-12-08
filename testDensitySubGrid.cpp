@@ -171,38 +171,19 @@ inline void output_tasks(const unsigned int iloop,
 inline void output_costs(const unsigned int iloop, const unsigned int ngrid,
                          const int nthread, const CostVector &costs) {
 #ifdef COST_OUTPUT
-  std::vector< unsigned int > costs_per_thread(nthread, 0);
-  // per subgrid
-  {
-    std::stringstream filename;
-    filename << "costs_per_subgrid_";
-    filename.fill('0');
-    filename.width(2);
-    filename << iloop;
-    filename << ".txt";
+  std::stringstream filename;
+  filename << "costs_";
+  filename.fill('0');
+  filename.width(2);
+  filename << iloop;
+  filename << ".txt";
 
-    std::ofstream ofile(filename.str());
-    ofile << "# subgrid\tcost\n";
-    for (unsigned int i = 0; i < ngrid; ++i) {
-      ofile << i << "\t" << costs.get_cost(i) << "\n";
-      costs_per_thread[costs.get_thread(i)] += costs.get_cost(i);
-    }
-  }
-
-  // per thread
-  {
-    std::stringstream filename;
-    filename << "costs_per_thread_";
-    filename.fill('0');
-    filename.width(2);
-    filename << iloop;
-    filename << ".txt";
-
-    std::ofstream ofile(filename.str());
-    ofile << "# thread\tcost\n";
-    for (int i = 0; i < nthread; ++i) {
-      ofile << i << "\t" << costs_per_thread[i] << "\n";
-    }
+  std::ofstream ofile(filename.str());
+  ofile << "# subgrid\tcost\trank\tthread\n";
+  for (unsigned int i = 0; i < ngrid; ++i) {
+    ofile << i << "\t" << costs.get_cost(i) << "\t"
+          << "\t" << costs.get_process(i) << "\t" << costs.get_thread(i)
+          << "\n";
   }
 #endif
 }
@@ -745,7 +726,7 @@ int main(int argc, char **argv) {
   ensure_neighbours(29, 30, 62, 63, gridvec, new_buffers);
   ensure_neighbours(29, 30, 64, 65, gridvec, new_buffers);
 
-  std::ifstream initial_costs("costs_per_subgrid_00.txt");
+  std::ifstream initial_costs("costs_00.txt");
   if (initial_costs.good()) {
     // use cost information from a previous run as initial guess for the cost
     // skip the initial comment line
@@ -753,8 +734,9 @@ int main(int argc, char **argv) {
     std::getline(initial_costs, line);
     unsigned int index;
     unsigned long cost;
+    int rank, thread;
     for (unsigned int i = 0; i < gridvec.size(); ++i) {
-      initial_costs >> index >> cost;
+      initial_costs >> index >> cost >> rank >> thread;
       myassert(index == i, "Wrong index!");
       costs.add_cost(index, cost);
     }
