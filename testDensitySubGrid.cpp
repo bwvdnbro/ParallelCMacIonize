@@ -24,6 +24,29 @@
  * @author Bert Vandenbroucke (bv7@st-andrews.ac.uk)
  */
 
+// Defines: we do these first, as some includes depend on them
+
+/*! @brief Output log level. The higher the value, the more stuff is printed to
+ *  the stderr. Comment to disable logging altogether. */
+#define LOG_OUTPUT 1
+
+/*! @brief Enable this to activate task output. */
+#define TASK_OUTPUT
+
+/*! @brief Enable this to activate cost output. */
+#define COST_OUTPUT
+
+/*! @brief Activate this to unit test the directional algorithms. */
+//#define TEST_DIRECTIONS
+
+/*! @brief Activate this to unit test the CostVector. */
+//#define TEST_COSTVECTOR
+
+#ifdef TASK_OUTPUT
+// activate task output in Task.hpp
+#define TASK_PLOT
+#endif
+
 // Project includes
 #include "CostVector.hpp"
 #include "DensitySubGrid.hpp"
@@ -43,16 +66,6 @@
 #include <sstream>
 #include <sys/resource.h>
 #include <vector>
-
-/*! @brief Output log level. The higher the value, the more stuff is printed to
- *  the stderr. Comment to disable logging altogether. */
-#define LOG_OUTPUT 1
-
-/*! @brief Activate this to unit test the directional algorithms. */
-//#define TEST_DIRECTIONS
-
-/*! @brief Activate this to unit test the CostVector. */
-//#define TEST_COSTVECTOR
 
 /**
  * @brief Write a message to the log with the given log level.
@@ -127,6 +140,7 @@
  */
 inline void output_tasks(const unsigned int iloop,
                          const ThreadSafeVector< Task > &tasks) {
+#ifdef TASK_OUTPUT
   std::stringstream filename;
   filename << "tasks_";
   filename.fill('0');
@@ -143,6 +157,7 @@ inline void output_tasks(const unsigned int iloop,
     ofile << task._thread_id << "\t" << task._start_time << "\t"
           << task._end_time << "\t" << task._type << "\n";
   }
+#endif
 }
 
 /**
@@ -155,6 +170,7 @@ inline void output_tasks(const unsigned int iloop,
  */
 inline void output_costs(const unsigned int iloop, const unsigned int ngrid,
                          const int nthread, const CostVector &costs) {
+#ifdef COST_OUTPUT
   std::vector< unsigned int > costs_per_thread(nthread, 0);
   // per subgrid
   {
@@ -188,6 +204,7 @@ inline void output_costs(const unsigned int iloop, const unsigned int ngrid,
       ofile << i << "\t" << costs_per_thread[i] << "\n";
     }
   }
+#endif
 }
 
 /**
@@ -928,6 +945,8 @@ int main(int argc, char **argv) {
             }
             task.stop();
           } else if (task._type == TASKTYPE_PHOTON_TRAVERSAL) {
+            unsigned long task_start, task_end;
+            task_tick(task_start);
             task.start(thread_id);
             const unsigned int current_buffer_index = task._buffer;
             // we don't allow task-stealing, so no need to lock anything just
@@ -995,8 +1014,11 @@ int main(int argc, char **argv) {
             atomic_pre_subtract(num_active_buffers);
             new_buffers.free_buffer(current_buffer_index);
             task.stop();
-            costs.add_cost(igrid, task._end_time - task._start_time);
+            task_tick(task_end);
+            costs.add_cost(igrid, task_end - task_start);
           } else if (task._type == TASKTYPE_PHOTON_REEMIT) {
+            unsigned long task_start, task_end;
+            task_tick(task_start);
             task.start(thread_id);
             const unsigned int current_buffer_index = task._buffer;
             PhotonBuffer &buffer = new_buffers[current_buffer_index];
@@ -1008,7 +1030,8 @@ int main(int argc, char **argv) {
             tasks[task_index]._buffer = current_buffer_index;
             new_queues[thread_id]->add_task(task_index);
             task.stop();
-            costs.add_cost(task._cell, task._end_time - task._start_time);
+            task_tick(task_end);
+            costs.add_cost(task._cell, task_end - task_start);
           } else {
             logmessage("Unknown task!", 0);
           }
