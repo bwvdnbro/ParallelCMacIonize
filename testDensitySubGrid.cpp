@@ -139,7 +139,7 @@
  * @param tasks Tasks to print.
  */
 inline void output_tasks(const unsigned int iloop,
-                         const ThreadSafeVector< Task > &tasks) {
+                         const ThreadSafeVector<Task> &tasks) {
 #ifdef TASK_OUTPUT
   std::stringstream filename;
   filename << "tasks_";
@@ -363,6 +363,127 @@ inline static void do_reemission(PhotonBuffer &buffer,
 }
 
 /**
+ * @brief Make copies of the subgrids according to the given level matrix.
+ *
+ * The level matrix is per subgrid number that tells us how many copies we need
+ * of that particular subgrid: for a subgrid at level \f$l\f$, \f$2^l\f$ copies
+ * are made.
+ *
+ * The power of 2 hierarchy is necessary to get a consistent neighbour
+ * structure, as we want neighbouring copies at the same level to be mutual
+ * neighbours. For neighbours on different levels, the neighbour relations are
+ * not mutual: if subgrid \f$A\f$ has level \f$l_l\f$ and its neighbour \f$B\f$
+ * has level \f$l_h\f$ (\f$l_l < l_h\f$), then groups of \f$2^{l_h-l_l}\f$
+ * copies of \f$B\f$ will share the same neighbour copy of \f$A\f$, while that
+ * same neighbour copy of \f$A\f$ will only have one copy of \f$B\f$ out of that
+ * group as neighbour.
+ *
+ * New copies are stored at the end of the subgrid list, and the index of the
+ * original subgrid is retained in a separate list of originals.
+ *
+ * @param gridvec List of subgrids.
+ * @param levels Desired copy level of each subgrid.
+ * @param new_buffers Photon buffer space to add newly created copy buffers to.
+ * @param originals List of originals for the newly created copies.
+ */
+inline void create_copies(std::vector<DensitySubGrid *> &gridvec,
+                          std::vector<unsigned char> &levels,
+                          MemorySpace &new_buffers,
+                          std::vector<unsigned int> &originals) {
+
+  // we need to do 2 loops:
+  //  - one loop to create the copies and store the offset of the first copy
+  //    for each subgrid
+  //  - a second loop that sets the neighbours (and has access to all necessary
+  //    copies to set inter-copy neighbour relations)
+
+  // we need to store the original number of subgrids for reference
+  const unsigned int number_of_unique_subgrids = gridvec.size();
+
+  // array to store the offsets of new copies in
+  std::vector<unsigned int> copy_offsets(gridvec.size(), 0);
+  for (unsigned int i = 0; i < number_of_unique_subgrids; ++i) {
+    const unsigned char level = levels[i];
+    const unsigned int number_of_copies = 1 << level;
+    // create the copies
+    if (number_of_copies > 1) {
+      copy_offsets.push_back(gridvec.size());
+    }
+    for (unsigned int j = 1; j < number_of_copies; ++j) {
+      gridvec.push_back(new DensitySubGrid(*gridvec[i]));
+    }
+  }
+
+  // neighbour setting
+  for (unsigned int i = 0; i < number_of_unique_subgrids; ++i) {
+    const unsigned char level = levels[i];
+    const unsigned int number_of_copies = 1 << level;
+    // first do the self-reference for each copy (if there are copies)
+    for (unsigned int j = 1; j < number_of_copies; ++j) {
+      const unsigned int copy = copy_offsets[i] + j - 1;
+      gridvec[copy]->set_neighbour(i, copy);
+      const unsigned int active_buffer = new_buffers.get_free_buffer();
+      new_buffers[active_buffer]._sub_grid_index = copy;
+      new_buffers[active_buffer]._direction = TRAVELDIRECTION_INSIDE;
+      gridvec[copy]->set_active_buffer(i, active_buffer);
+    }
+    // now do the actual neighbours
+    for (int j = 1; j < 27; ++j) {
+      const unsigned int original_ngb = gridvec[i]->get_neighbour(j);
+      const unsigned char ngb_level = levels[original_ngb];
+      // check how the neighbour level compares to the subgrid level
+      if (ngb_level == level) {
+        // same, easy: just make copies mutual neighbours
+        for (unsigned int k = 1; k < number_of_copies; ++k) {
+          const unsigned int copy = copy_offsets[i] + k - 1;
+          const unsigned int ngb_copy = copy_offsets[original_ngb] + k - 1;
+          gridvec[copy]->set_neighbour(j, ngb_copy);
+          const unsigned int active_buffer = new_buffers.get_free_buffer();
+          new_buffers[active_buffer]._sub_grid_index = ngb_copy;
+          new_buffers[active_buffer]._direction = output_to_input_direction(j);
+          gridvec[copy]->set_active_buffer(j, active_buffer);
+        }
+      } else {
+        // not the same: there are 2 options
+        if (level > ngb_level) {
+          // we have less neighbour copies, so some of our copies need to share
+          // the same neighbour
+          const unsigned int number_of_ngb_copies = 1 << (level - ngb_level);
+          for (unsigned int k = 1; k < number_of_copies; ++k) {
+            const unsigned int copy = copy_offsets[i] + k - 1;
+            // the second term will always round down, which is what we want
+            const unsigned int ngb_copy =
+                copy_offsets[original_ngb] + (k - 1) / number_of_ngb_copies;
+            gridvec[copy]->set_neighbour(j, ngb_copy);
+            const unsigned int active_buffer = new_buffers.get_free_buffer();
+            new_buffers[active_buffer]._sub_grid_index = ngb_copy;
+            new_buffers[active_buffer]._direction =
+                output_to_input_direction(j);
+            gridvec[copy]->set_active_buffer(j, active_buffer);
+          }
+        } else {
+          // we have more neighbour copies: pick a subset
+          const unsigned int number_of_own_copies = 1 << (ngb_level - level);
+          for (unsigned int k = 1; k < number_of_copies; ++k) {
+            const unsigned int copy = copy_offsets[i] + k - 1;
+            // the second term will skip some neighbour copies, which is what we
+            // want
+            const unsigned int ngb_copy =
+                copy_offsets[original_ngb] + (k - 1) * number_of_own_copies;
+            gridvec[copy]->set_neighbour(j, ngb_copy);
+            const unsigned int active_buffer = new_buffers.get_free_buffer();
+            new_buffers[active_buffer]._sub_grid_index = ngb_copy;
+            new_buffers[active_buffer]._direction =
+                output_to_input_direction(j);
+            gridvec[copy]->set_active_buffer(j, active_buffer);
+          }
+        }
+      }
+    }
+  }
+}
+
+/**
  * @brief Create a copy of the subgrid with the given index.
  *
  * @param original Original subgrid index.
@@ -371,9 +492,9 @@ inline static void do_reemission(PhotonBuffer &buffer,
  * @param duplicates List of copies.
  */
 inline void
-make_copy(const unsigned int original, std::vector< DensitySubGrid * > &gridvec,
+make_copy(const unsigned int original, std::vector<DensitySubGrid *> &gridvec,
           MemorySpace &new_buffers,
-          std::vector< std::pair< unsigned int, unsigned int > > &duplicates) {
+          std::vector<std::pair<unsigned int, unsigned int>> &duplicates) {
   // copy subgrids 29 and 30, as we know they are very computationally expensive
   const unsigned int copy = gridvec.size();
   duplicates.push_back(std::make_pair(original, copy));
@@ -412,7 +533,7 @@ inline void ensure_neighbours(const unsigned int original_A,
                               const unsigned int original_B,
                               const unsigned int copy_A,
                               const unsigned int copy_B,
-                              std::vector< DensitySubGrid * > &gridvec,
+                              std::vector<DensitySubGrid *> &gridvec,
                               MemorySpace &new_buffers) {
   for (int i = 1; i < 27; ++i) {
     if (gridvec[original_A]->get_neighbour(i) == original_B) {
@@ -605,7 +726,7 @@ int main(int argc, char **argv) {
   logmessage("Running with " << num_threads << " threads.", 0);
 
   // set up the queues
-  std::vector< NewQueue * > new_queues(num_threads, nullptr);
+  std::vector<NewQueue *> new_queues(num_threads, nullptr);
   for (int i = 0; i < num_threads; ++i) {
     new_queues[i] = new NewQueue(2000);
   }
@@ -613,7 +734,7 @@ int main(int argc, char **argv) {
   // set up the memory space
   MemorySpace new_buffers(10000);
   // set up the task space
-  ThreadSafeVector< Task > tasks(400000);
+  ThreadSafeVector<Task> tasks(400000);
 
   Timer program_timer;
   program_timer.start();
@@ -621,7 +742,7 @@ int main(int argc, char **argv) {
   // set up the grid of smaller grids used for the algorithm
   // each smaller grid stores a fraction of the total grid and has information
   // about the neighbouring subgrids
-  std::vector< DensitySubGrid * > gridvec(
+  std::vector<DensitySubGrid *> gridvec(
       num_subgrid[0] * num_subgrid[1] * num_subgrid[2], nullptr);
   const double subbox_side[3] = {box[3] / num_subgrid[0],
                                  box[4] / num_subgrid[1],
@@ -712,7 +833,7 @@ int main(int argc, char **argv) {
   // at the start of each iteration, the copy needs to be synced with the
   // original, while at the end of the iteration the contributions from the copy
   // need to be added to the original
-  std::vector< std::pair< unsigned int, unsigned int > > duplicates;
+  std::vector<std::pair<unsigned int, unsigned int>> duplicates;
 
   // make copies of the 2 central subgrids, so that multiple threads can work
   // on them simultaneously
@@ -761,7 +882,7 @@ int main(int argc, char **argv) {
   const unsigned int central_index[4] = {30, 61, 63, 65};
 
   // set up the random number generators
-  std::vector< RandomGenerator > random_generator(num_threads);
+  std::vector<RandomGenerator> random_generator(num_threads);
   for (int i = 0; i < num_threads; ++i) {
     // make sure every thread on every process has a different seed
     random_generator[i].set_seed(42 + MPI_rank * num_threads + i);
@@ -1061,8 +1182,8 @@ int main(int argc, char **argv) {
 
   struct rusage resource_usage;
   getrusage(RUSAGE_SELF, &resource_usage);
-  size_t max_memory = static_cast< size_t >(resource_usage.ru_maxrss) *
-                      static_cast< size_t >(1024);
+  size_t max_memory =
+      static_cast<size_t>(resource_usage.ru_maxrss) * static_cast<size_t>(1024);
   logmessage("Maximum memory usage: " << human_readable_bytes(max_memory), 0);
 
   // OUTPUT:

@@ -37,7 +37,7 @@
 class MemorySpace {
 private:
   /*! @brief Memory space itself. */
-  ThreadSafeVector< PhotonBuffer > _memory_space;
+  ThreadSafeVector<PhotonBuffer> _memory_space;
 
 public:
   /**

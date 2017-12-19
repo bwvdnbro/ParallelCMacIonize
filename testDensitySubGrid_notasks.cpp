@@ -165,7 +165,7 @@ int main(int argc, char **argv) {
   program_timer.start();
 
   // set up the random number generators
-  std::vector< RandomGenerator > random_generator(num_threads);
+  std::vector<RandomGenerator> random_generator(num_threads);
   for (int i = 0; i < num_threads; ++i) {
     // make sure every thread on every process has a different seed
     random_generator[i].set_seed(42 + i);
@@ -215,8 +215,8 @@ int main(int argc, char **argv) {
 
   struct rusage resource_usage;
   getrusage(RUSAGE_SELF, &resource_usage);
-  size_t max_memory = static_cast< size_t >(resource_usage.ru_maxrss) *
-                      static_cast< size_t >(1024);
+  size_t max_memory =
+      static_cast<size_t>(resource_usage.ru_maxrss) * static_cast<size_t>(1024);
   logmessage("Maximum memory usage: " << human_readable_bytes(max_memory), 0);
 
   std::ofstream bfile("intensities.dat");
