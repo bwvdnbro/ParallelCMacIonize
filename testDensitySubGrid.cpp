@@ -385,11 +385,13 @@ inline static void do_reemission(PhotonBuffer &buffer,
  * @param levels Desired copy level of each subgrid.
  * @param new_buffers Photon buffer space to add newly created copy buffers to.
  * @param originals List of originals for the newly created copies.
+ * @param copies Index of the first copy of each subgrid.
  */
 inline void create_copies(std::vector<DensitySubGrid *> &gridvec,
                           std::vector<unsigned char> &levels,
                           MemorySpace &new_buffers,
-                          std::vector<unsigned int> &originals) {
+                          std::vector<unsigned int> &originals,
+                          std::vector<unsigned int> &copies) {
 
   // we need to do 2 loops:
   //  - one loop to create the copies and store the offset of the first copy
@@ -408,6 +410,7 @@ inline void create_copies(std::vector<DensitySubGrid *> &gridvec,
     // create the copies
     if (number_of_copies > 1) {
       copy_offsets.push_back(gridvec.size());
+      copies[i] = gridvec.size();
     }
     for (unsigned int j = 1; j < number_of_copies; ++j) {
       gridvec.push_back(new DensitySubGrid(*gridvec[i]));
@@ -489,15 +492,20 @@ inline void create_copies(std::vector<DensitySubGrid *> &gridvec,
  * @param original Original subgrid index.
  * @param gridvec Subgrids.
  * @param new_buffers Photon buffer space.
- * @param duplicates List of copies.
+ * @param originals Indices of the original subgrids.
+ * @param copies Indices of the first copies.
  */
-inline void
-make_copy(const unsigned int original, std::vector<DensitySubGrid *> &gridvec,
-          MemorySpace &new_buffers,
-          std::vector<std::pair<unsigned int, unsigned int>> &duplicates) {
-  // copy subgrids 29 and 30, as we know they are very computationally expensive
+inline void make_copy(const unsigned int original,
+                      std::vector<DensitySubGrid *> &gridvec,
+                      MemorySpace &new_buffers,
+                      std::vector<unsigned int> &originals,
+                      std::vector<unsigned int> &copies) {
+
   const unsigned int copy = gridvec.size();
-  duplicates.push_back(std::make_pair(original, copy));
+  originals.push_back(original);
+  if (copies[original] == 0xffffffff) {
+    copies[original] = copy;
+  }
 
   gridvec.push_back(new DensitySubGrid(*gridvec[original]));
   for (int i = 0; i < 27; ++i) {
@@ -828,24 +836,22 @@ int main(int argc, char **argv) {
     }               // for ix
   }                 // end parallel region
 
-  // duplicated subgrids
-  // the first index corresponds to the original, the second index to the copy
-  // at the start of each iteration, the copy needs to be synced with the
-  // original, while at the end of the iteration the contributions from the copy
-  // need to be added to the original
-  std::vector<std::pair<unsigned int, unsigned int>> duplicates;
+  // keep track of the original subgrids of which the copies made below are
+  // copies
+  std::vector<unsigned int> originals;
+  std::vector<unsigned int> copies(tot_num_subgrid, 0xffffffff);
 
   // make copies of the 2 central subgrids, so that multiple threads can work
   // on them simultaneously
-  make_copy(29, gridvec, new_buffers, duplicates);
-  make_copy(30, gridvec, new_buffers, duplicates);
-  make_copy(29, gridvec, new_buffers, duplicates);
-  make_copy(30, gridvec, new_buffers, duplicates);
-  make_copy(29, gridvec, new_buffers, duplicates);
-  make_copy(30, gridvec, new_buffers, duplicates);
-  ensure_neighbours(29, 30, 60, 61, gridvec, new_buffers);
-  ensure_neighbours(29, 30, 62, 63, gridvec, new_buffers);
-  ensure_neighbours(29, 30, 64, 65, gridvec, new_buffers);
+  make_copy(29, gridvec, new_buffers, originals, copies);
+  make_copy(29, gridvec, new_buffers, originals, copies);
+  make_copy(29, gridvec, new_buffers, originals, copies);
+  make_copy(30, gridvec, new_buffers, originals, copies);
+  make_copy(30, gridvec, new_buffers, originals, copies);
+  make_copy(30, gridvec, new_buffers, originals, copies);
+  ensure_neighbours(29, 30, 60, 63, gridvec, new_buffers);
+  ensure_neighbours(29, 30, 61, 64, gridvec, new_buffers);
+  ensure_neighbours(29, 30, 62, 65, gridvec, new_buffers);
 
   std::ifstream initial_costs("costs_00.txt");
   if (initial_costs.good()) {
@@ -869,17 +875,30 @@ int main(int argc, char **argv) {
     }
     costs.add_cost(29, 10000);
     costs.add_cost(60, 10000);
+    costs.add_cost(61, 10000);
     costs.add_cost(62, 10000);
-    costs.add_cost(64, 10000);
     costs.add_cost(30, 11000);
-    costs.add_cost(61, 11000);
     costs.add_cost(63, 11000);
+    costs.add_cost(64, 11000);
     costs.add_cost(65, 11000);
   }
   costs.redistribute();
 
   // get the central subgrid indices
-  const unsigned int central_index[4] = {30, 61, 63, 65};
+  const unsigned int source_indices[3] = {
+      (unsigned int)((-box[0] / box[3]) * num_subgrid[0]),
+      (unsigned int)((-box[1] / box[4]) * num_subgrid[1]),
+      (unsigned int)((-box[2] / box[5]) * num_subgrid[2])};
+  std::vector<unsigned int> central_index;
+  central_index.push_back(source_indices[0] * num_subgrid[1] * num_subgrid[2] +
+                          source_indices[1] * num_subgrid[2] +
+                          source_indices[2]);
+  unsigned int copy = copies[central_index[0]];
+  while (originals[copy - tot_num_subgrid] == central_index[0]) {
+    central_index.push_back(copy);
+    ++copy;
+  }
+  logmessage("Number of central subgrid copies: " << central_index.size(), 0);
 
   // set up the random number generators
   std::vector<RandomGenerator> random_generator(num_threads);
@@ -892,19 +911,22 @@ int main(int argc, char **argv) {
   //  - shoots num_photon photons through the grid to get intensity estimates
   //  - computes the ionization equilibrium
   for (unsigned int iloop = 0; iloop < number_of_iterations; ++iloop) {
-    const int central_queue[4] = {
-        costs.get_thread(central_index[0]), costs.get_thread(central_index[1]),
-        costs.get_thread(central_index[2]), costs.get_thread(central_index[3])};
+
+    std::vector<int> central_queue(central_index.size());
+    for (unsigned int i = 0; i < central_index.size(); ++i) {
+      central_queue[i] = costs.get_thread(central_index[i]);
+    }
+
     // STEP 0: log output
     logmessage("Loop " << iloop + 1, 0);
 
-    for (unsigned int i = 0; i < duplicates.size(); ++i) {
-      logmessage("Updating neutral fractions for " << duplicates[i].second
-                                                   << ", copy of "
-                                                   << duplicates[i].first,
+    for (unsigned int i = 0; i < originals.size(); ++i) {
+      const unsigned int original = originals[i];
+      const unsigned int copy = tot_num_subgrid + i;
+      logmessage("Updating neutral fractions for " << copy << ", copy of "
+                                                   << original,
                  0);
-      gridvec[duplicates[i].second]->update_neutral_fractions(
-          *gridvec[duplicates[i].first]);
+      gridvec[copy]->update_neutral_fractions(*gridvec[original]);
     }
 
     // STEP 1: photon shooting
@@ -1027,10 +1049,11 @@ int main(int argc, char **argv) {
                 unsigned int buffer_index = new_buffers.get_free_buffer();
                 // no need to lock this buffer
                 PhotonBuffer &input_buffer = new_buffers[buffer_index];
-                int which_central_index =
+                unsigned int which_central_index =
                     random_generator[thread_id].get_uniform_random_double() *
-                    4.;
-                myassert(which_central_index >= 0 && which_central_index < 4,
+                    central_index.size();
+                myassert(which_central_index >= 0 &&
+                             which_central_index < central_index.size(),
                          "Oopsie!");
                 unsigned int this_central_index =
                     central_index[which_central_index];
@@ -1145,13 +1168,13 @@ int main(int argc, char **argv) {
     } // parallel region
     logmessage("Total number of tasks: " << tasks.size(), 0);
 
-    for (unsigned int i = 0; i < duplicates.size(); ++i) {
-      logmessage("Updating ionization integrals for " << duplicates[i].first
-                                                      << " using copy "
-                                                      << duplicates[i].second,
+    for (unsigned int i = 0; i < originals.size(); ++i) {
+      const unsigned int original = originals[i];
+      const unsigned int copy = tot_num_subgrid + i;
+      logmessage("Updating ionization integrals for " << original
+                                                      << " using copy " << copy,
                  0);
-      gridvec[duplicates[i].first]->update_intensities(
-          *gridvec[duplicates[i].second]);
+      gridvec[original]->update_intensities(*gridvec[copy]);
     }
 
     // STEP 2: update the ionization structure for each subgrid
