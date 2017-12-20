@@ -862,7 +862,7 @@ int main(int argc, char **argv) {
     unsigned int index;
     unsigned long cost;
     int rank, thread;
-    for (unsigned int i = 0; i < gridvec.size(); ++i) {
+    for (unsigned int i = 0; i < tot_num_subgrid; ++i) {
       initial_costs >> index >> cost >> rank >> thread;
       myassert(index == i, "Wrong index!");
       costs.add_cost(index, cost);
@@ -870,18 +870,34 @@ int main(int argc, char **argv) {
   } else {
     // no previous information available: use a very basic initial cost guess
     // (good enough to get the idle fraction below 50%)
-    for (unsigned int i = 0; i < gridvec.size(); ++i) {
+    for (unsigned int i = 0; i < tot_num_subgrid; ++i) {
       costs.add_cost(i, 1);
     }
-    costs.add_cost(29, 10000);
-    costs.add_cost(60, 10000);
-    costs.add_cost(61, 10000);
-    costs.add_cost(62, 10000);
-    costs.add_cost(30, 11000);
-    costs.add_cost(63, 11000);
-    costs.add_cost(64, 11000);
-    costs.add_cost(65, 11000);
+    costs.add_cost(29, 40000);
+    costs.add_cost(30, 44000);
   }
+
+  // add copy cost data: divide original cost by number of copies
+  for (unsigned int igrid = 0; igrid < tot_num_subgrid; ++igrid) {
+    std::vector<unsigned int> this_copies;
+    unsigned int copy = copies[igrid];
+    if (copy < 0xffffffff) {
+      while (copy < gridvec.size() &&
+             originals[copy - tot_num_subgrid] == igrid) {
+        this_copies.push_back(copy);
+        ++copy;
+      }
+    }
+    if (this_copies.size() > 0) {
+      const unsigned long cost =
+          costs.get_cost(igrid) / (this_copies.size() + 1);
+      costs.set_cost(igrid, cost);
+      for (unsigned int i = 0; i < this_copies.size(); ++i) {
+        costs.set_cost(this_copies[i], cost);
+      }
+    }
+  }
+
   costs.redistribute();
 
   // get the central subgrid indices
@@ -894,9 +910,12 @@ int main(int argc, char **argv) {
                           source_indices[1] * num_subgrid[2] +
                           source_indices[2]);
   unsigned int copy = copies[central_index[0]];
-  while (originals[copy - tot_num_subgrid] == central_index[0]) {
-    central_index.push_back(copy);
-    ++copy;
+  if (copy < 0xffffffff) {
+    while (copy < gridvec.size() &&
+           originals[copy - tot_num_subgrid] == central_index[0]) {
+      central_index.push_back(copy);
+      ++copy;
+    }
   }
   logmessage("Number of central subgrid copies: " << central_index.size(), 0);
 
