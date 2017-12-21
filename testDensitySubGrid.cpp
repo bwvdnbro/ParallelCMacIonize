@@ -415,14 +415,12 @@ inline void create_copies(std::vector<DensitySubGrid *> &gridvec,
   const unsigned int number_of_unique_subgrids = gridvec.size();
 
   // array to store the offsets of new copies in
-  std::vector<unsigned int> copy_offsets(gridvec.size(), 0);
   copies.resize(gridvec.size(), 0xffffffff);
   for (unsigned int i = 0; i < number_of_unique_subgrids; ++i) {
     const unsigned char level = levels[i];
     const unsigned int number_of_copies = 1 << level;
     // create the copies
     if (number_of_copies > 1) {
-      copy_offsets.push_back(gridvec.size());
       copies[i] = gridvec.size();
     }
     for (unsigned int j = 1; j < number_of_copies; ++j) {
@@ -437,7 +435,7 @@ inline void create_copies(std::vector<DensitySubGrid *> &gridvec,
     const unsigned int number_of_copies = 1 << level;
     // first do the self-reference for each copy (if there are copies)
     for (unsigned int j = 1; j < number_of_copies; ++j) {
-      const unsigned int copy = copy_offsets[i] + j - 1;
+      const unsigned int copy = copies[i] + j - 1;
       gridvec[copy]->set_neighbour(0, copy);
       const unsigned int active_buffer = new_buffers.get_free_buffer();
       new_buffers[active_buffer]._sub_grid_index = copy;
@@ -452,9 +450,10 @@ inline void create_copies(std::vector<DensitySubGrid *> &gridvec,
         // check how the neighbour level compares to the subgrid level
         if (ngb_level == level) {
           // same, easy: just make copies mutual neighbours
+          // and leave the original grid as is
           for (unsigned int k = 1; k < number_of_copies; ++k) {
-            const unsigned int copy = copy_offsets[i] + k - 1;
-            const unsigned int ngb_copy = copy_offsets[original_ngb] + k - 1;
+            const unsigned int copy = copies[i] + k - 1;
+            const unsigned int ngb_copy = copies[original_ngb] + k - 1;
             gridvec[copy]->set_neighbour(j, ngb_copy);
             const unsigned int active_buffer = new_buffers.get_free_buffer();
             new_buffers[active_buffer]._sub_grid_index = ngb_copy;
@@ -466,14 +465,17 @@ inline void create_copies(std::vector<DensitySubGrid *> &gridvec,
           // not the same: there are 2 options
           if (level > ngb_level) {
             // we have less neighbour copies, so some of our copies need to
-            // share
-            // the same neighbour
+            // share the same neighbour
+            // some of our copies might also need to share the original
+            // neighbour
             const unsigned int number_of_ngb_copies = 1 << (level - ngb_level);
             for (unsigned int k = 1; k < number_of_copies; ++k) {
-              const unsigned int copy = copy_offsets[i] + k - 1;
-              // the second term will always round down, which is what we want
+              const unsigned int copy = copies[i] + k - 1;
+              // this term will round down, which is what we want
+              const unsigned int ngb_index = k / number_of_ngb_copies;
               const unsigned int ngb_copy =
-                  copy_offsets[original_ngb] + (k - 1) / number_of_ngb_copies;
+                  (ngb_index > 0) ? copies[original_ngb] + ngb_index - 1
+                                  : original_ngb;
               gridvec[copy]->set_neighbour(j, ngb_copy);
               const unsigned int active_buffer = new_buffers.get_free_buffer();
               new_buffers[active_buffer]._sub_grid_index = ngb_copy;
@@ -485,12 +487,11 @@ inline void create_copies(std::vector<DensitySubGrid *> &gridvec,
             // we have more neighbour copies: pick a subset
             const unsigned int number_of_own_copies = 1 << (ngb_level - level);
             for (unsigned int k = 1; k < number_of_copies; ++k) {
-              const unsigned int copy = copy_offsets[i] + k - 1;
+              const unsigned int copy = copies[i] + k - 1;
               // the second term will skip some neighbour copies, which is what
-              // we
-              // want
+              // we want
               const unsigned int ngb_copy =
-                  copy_offsets[original_ngb] + (k - 1) * number_of_own_copies;
+                  copies[original_ngb] + (k - 1) * number_of_own_copies;
               gridvec[copy]->set_neighbour(j, ngb_copy);
               const unsigned int active_buffer = new_buffers.get_free_buffer();
               new_buffers[active_buffer]._sub_grid_index = ngb_copy;
@@ -499,6 +500,12 @@ inline void create_copies(std::vector<DensitySubGrid *> &gridvec,
               gridvec[copy]->set_active_buffer(j, active_buffer);
             }
           }
+        }
+      } else {
+        // flag this neighbour as NEIGHBOUR_OUTSIDE for all copies
+        for (unsigned int k = 1; k < number_of_copies; ++k) {
+          const unsigned int copy = copies[i] + k - 1;
+          gridvec[copy]->set_neighbour(j, NEIGHBOUR_OUTSIDE);
         }
       }
     }
@@ -862,25 +869,22 @@ int main(int argc, char **argv) {
 
   // make copies of the 2 central subgrids, so that multiple threads can work
   // on them simultaneously
-  make_copy(29, gridvec, new_buffers, originals, copies);
-  make_copy(29, gridvec, new_buffers, originals, copies);
-  make_copy(29, gridvec, new_buffers, originals, copies);
-  make_copy(30, gridvec, new_buffers, originals, copies);
-  make_copy(30, gridvec, new_buffers, originals, copies);
-  make_copy(30, gridvec, new_buffers, originals, copies);
-  ensure_neighbours(29, 30, 60, 63, gridvec, new_buffers);
-  ensure_neighbours(29, 30, 61, 64, gridvec, new_buffers);
-  ensure_neighbours(29, 30, 62, 65, gridvec, new_buffers);
+  std::vector<unsigned char> levels(tot_num_subgrid, 0);
+  levels[29] = 2;
+  levels[30] = 2;
+  create_copies(gridvec, levels, new_buffers, originals, copies);
 
-  //  std::vector<unsigned char> levels(tot_num_subgrid, 0);
-  //  levels[29] = 2;
-  //  levels[30] = 2;
-  //  create_copies(gridvec, levels, new_buffers, originals, copies);
-
-  //  logmessage("Number of copies: " << originals.size(), 0);
-  //  for(unsigned int i = 0; i < originals.size(); ++i){
-  //    logmessage("originals[" << i << "] = " << originals[i], 0);
+  // we keep this code for later debugging when we have more complex copy
+  // hiearchies
+  //  std::ofstream ngbfile("initial_ngbs.txt");
+  //  for(unsigned int i = 0; i < gridvec.size(); ++i){
+  //    ngbfile << i << "\n";
+  //    for(int j = 0; j < 27; ++j){
+  //      ngbfile << gridvec[i]->get_neighbour(j) << "\n";
+  //    }
+  //    ngbfile << "\n";
   //  }
+  //  ngbfile.close();
 
   std::ifstream initial_costs("costs_00.txt");
   if (initial_costs.good()) {
