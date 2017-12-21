@@ -788,7 +788,7 @@ int main(int argc, char **argv) {
       num_subgrid[0] * num_subgrid[1] * num_subgrid[2];
 
   // +6 for the 6 subgrid copies we make below
-  CostVector costs(tot_num_subgrid + 6, num_threads, MPI_size);
+  CostVector start_costs(tot_num_subgrid, num_threads, MPI_size);
 
 // set up the subgrids (in parallel)
 #pragma omp parallel default(shared)
@@ -800,7 +800,7 @@ int main(int argc, char **argv) {
         for (int iz = 0; iz < num_subgrid[2]; ++iz) {
           const unsigned int index =
               ix * num_subgrid[1] * num_subgrid[2] + iy * num_subgrid[2] + iz;
-          if (costs.get_thread(index) == thread_id) {
+          if (start_costs.get_thread(index) == thread_id) {
             const double subbox[6] = {box[0] + ix * subbox_side[0],
                                       box[1] + iy * subbox_side[1],
                                       box[2] + iz * subbox_side[2],
@@ -885,6 +885,9 @@ int main(int argc, char **argv) {
   //    ngbfile << "\n";
   //  }
   //  ngbfile.close();
+
+  // initialize cost vector
+  CostVector costs(gridvec.size(), num_threads, MPI_size);
 
   std::ifstream initial_costs("costs_00.txt");
   if (initial_costs.good()) {
