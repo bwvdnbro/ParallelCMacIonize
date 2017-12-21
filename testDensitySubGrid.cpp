@@ -862,6 +862,28 @@ int main(int argc, char **argv) {
     }               // for ix
   }                 // end parallel region
 
+  std::vector<unsigned long> initial_cost_vector(tot_num_subgrid, 0);
+  std::ifstream initial_costs("costs_00.txt");
+  if (initial_costs.good()) {
+    // use cost information from a previous run as initial guess for the cost
+    // skip the initial comment line
+    std::string line;
+    std::getline(initial_costs, line);
+    unsigned int index;
+    unsigned long cost;
+    int rank, thread;
+    while (std::getline(initial_costs, line)) {
+      std::istringstream lstream(line);
+      lstream >> index >> cost >> rank >> thread;
+      initial_cost_vector[index] += cost;
+    }
+  } else {
+    // no initial cost information: assume a uniform cost
+    for (unsigned int i = 0; i < tot_num_subgrid; ++i) {
+      initial_cost_vector[i] = 1;
+    }
+  }
+
   // keep track of the original subgrids of which the copies made below are
   // copies
   std::vector<unsigned int> originals;
@@ -889,25 +911,9 @@ int main(int argc, char **argv) {
   // initialize cost vector
   CostVector costs(gridvec.size(), num_threads, MPI_size);
 
-  std::ifstream initial_costs("costs_00.txt");
-  if (initial_costs.good()) {
-    // use cost information from a previous run as initial guess for the cost
-    // skip the initial comment line
-    std::string line;
-    std::getline(initial_costs, line);
-    unsigned int index;
-    unsigned long cost;
-    int rank, thread;
-    while (std::getline(initial_costs, line)) {
-      std::istringstream lstream(line);
-      lstream >> index >> cost >> rank >> thread;
-      costs.add_cost(index, cost);
-    }
-  } else {
-    // no initial cost information: assume a uniform cost
-    for (unsigned int i = 0; i < tot_num_subgrid; ++i) {
-      costs.add_cost(i, 1);
-    }
+  // no initial cost information: assume a uniform cost
+  for (unsigned int i = 0; i < tot_num_subgrid; ++i) {
+    costs.add_cost(i, initial_cost_vector[i]);
   }
 
   // add copy cost data: divide original cost by number of copies
