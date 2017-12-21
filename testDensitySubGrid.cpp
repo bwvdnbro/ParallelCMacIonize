@@ -884,16 +884,35 @@ int main(int argc, char **argv) {
     }
   }
 
-  // keep track of the original subgrids of which the copies made below are
-  // copies
+  // make copies of the most expensive subgrids, so that multiple threads can
+  // work on them simultaneously
   std::vector<unsigned int> originals;
   std::vector<unsigned int> copies(tot_num_subgrid, 0xffffffff);
-
-  // make copies of the 2 central subgrids, so that multiple threads can work
-  // on them simultaneously
   std::vector<unsigned char> levels(tot_num_subgrid, 0);
-  levels[29] = 2;
-  levels[30] = 2;
+
+  // get the average cost per thread
+  unsigned long avg_cost_per_thread = 0;
+  for (unsigned int i = 0; i < tot_num_subgrid; ++i) {
+    avg_cost_per_thread += initial_cost_vector[i];
+  }
+  avg_cost_per_thread /= num_threads;
+  // now set the levels accordingly
+  for (unsigned int i = 0; i < tot_num_subgrid; ++i) {
+    if (initial_cost_vector[i] > avg_cost_per_thread) {
+      // note that this in principle should be 1 higher. However, we do not
+      // count the original.
+      unsigned int number_of_copies =
+          initial_cost_vector[i] / avg_cost_per_thread;
+      // get the highest bit
+      unsigned int level = 0;
+      while (number_of_copies > 0) {
+        number_of_copies >>= 1;
+        ++level;
+      }
+      levels[i] = level;
+    }
+  }
+
   create_copies(gridvec, levels, new_buffers, originals, copies);
 
   // we keep this code for later debugging when we have more complex copy
