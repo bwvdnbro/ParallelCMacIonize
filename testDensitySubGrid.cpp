@@ -1148,7 +1148,7 @@ int main(int argc, char **argv) {
             // add none empty buffers to the appropriate queues
             // we go backwards, so that the local queue is added to the task
             // list last
-            for (int i = 27; i >= 0; --i) {
+            for (int i = 26; i >= 0; --i) {
               if (local_buffer_flags[i]) {
                 if (local_buffers[i]._actual_size > 0) {
                   const unsigned int ngb = this_grid.get_neighbour(i);
