@@ -167,9 +167,13 @@ inline void output_tasks(const unsigned int iloop,
  * @param ngrid Number of subgrids.
  * @param nthread Number of threads.
  * @param costs CostVector to print.
+ * @param copies List that links subgrids to copies.
+ * @param original List that links subgrid copies to originals.
  */
 inline void output_costs(const unsigned int iloop, const unsigned int ngrid,
-                         const int nthread, const CostVector &costs) {
+                         const int nthread, const CostVector &costs,
+                         const std::vector<unsigned int> &copies,
+                         const std::vector<unsigned int> &originals) {
 #ifdef COST_OUTPUT
   std::stringstream filename;
   filename << "costs_";
@@ -181,9 +185,17 @@ inline void output_costs(const unsigned int iloop, const unsigned int ngrid,
   std::ofstream ofile(filename.str());
   ofile << "# subgrid\tcost\trank\tthread\n";
   for (unsigned int i = 0; i < ngrid; ++i) {
-    ofile << i << "\t" << costs.get_cost(i) << "\t"
-          << "\t" << costs.get_process(i) << "\t" << costs.get_thread(i)
-          << "\n";
+    ofile << i << "\t" << costs.get_cost(i) << "\t" << costs.get_process(i)
+          << "\t" << costs.get_thread(i) << "\n";
+    if (copies[i] < 0xffffffff) {
+      unsigned int copy = copies[i];
+      while (copy - ngrid < originals.size() && originals[copy - ngrid] == i) {
+        ofile << i << "\t" << costs.get_cost(copy) << "\t"
+              << costs.get_process(copy) << "\t" << costs.get_thread(copy)
+              << "\n";
+        ++copy;
+      }
+    }
   }
 #endif
 }
@@ -404,6 +416,7 @@ inline void create_copies(std::vector<DensitySubGrid *> &gridvec,
 
   // array to store the offsets of new copies in
   std::vector<unsigned int> copy_offsets(gridvec.size(), 0);
+  copies.resize(gridvec.size(), 0xffffffff);
   for (unsigned int i = 0; i < number_of_unique_subgrids; ++i) {
     const unsigned char level = levels[i];
     const unsigned int number_of_copies = 1 << level;
@@ -414,6 +427,7 @@ inline void create_copies(std::vector<DensitySubGrid *> &gridvec,
     }
     for (unsigned int j = 1; j < number_of_copies; ++j) {
       gridvec.push_back(new DensitySubGrid(*gridvec[i]));
+      originals.push_back(i);
     }
   }
 
@@ -424,39 +438,23 @@ inline void create_copies(std::vector<DensitySubGrid *> &gridvec,
     // first do the self-reference for each copy (if there are copies)
     for (unsigned int j = 1; j < number_of_copies; ++j) {
       const unsigned int copy = copy_offsets[i] + j - 1;
-      gridvec[copy]->set_neighbour(i, copy);
+      gridvec[copy]->set_neighbour(0, copy);
       const unsigned int active_buffer = new_buffers.get_free_buffer();
       new_buffers[active_buffer]._sub_grid_index = copy;
       new_buffers[active_buffer]._direction = TRAVELDIRECTION_INSIDE;
-      gridvec[copy]->set_active_buffer(i, active_buffer);
+      gridvec[copy]->set_active_buffer(0, active_buffer);
     }
     // now do the actual neighbours
     for (int j = 1; j < 27; ++j) {
       const unsigned int original_ngb = gridvec[i]->get_neighbour(j);
-      const unsigned char ngb_level = levels[original_ngb];
-      // check how the neighbour level compares to the subgrid level
-      if (ngb_level == level) {
-        // same, easy: just make copies mutual neighbours
-        for (unsigned int k = 1; k < number_of_copies; ++k) {
-          const unsigned int copy = copy_offsets[i] + k - 1;
-          const unsigned int ngb_copy = copy_offsets[original_ngb] + k - 1;
-          gridvec[copy]->set_neighbour(j, ngb_copy);
-          const unsigned int active_buffer = new_buffers.get_free_buffer();
-          new_buffers[active_buffer]._sub_grid_index = ngb_copy;
-          new_buffers[active_buffer]._direction = output_to_input_direction(j);
-          gridvec[copy]->set_active_buffer(j, active_buffer);
-        }
-      } else {
-        // not the same: there are 2 options
-        if (level > ngb_level) {
-          // we have less neighbour copies, so some of our copies need to share
-          // the same neighbour
-          const unsigned int number_of_ngb_copies = 1 << (level - ngb_level);
+      if (original_ngb != NEIGHBOUR_OUTSIDE) {
+        const unsigned char ngb_level = levels[original_ngb];
+        // check how the neighbour level compares to the subgrid level
+        if (ngb_level == level) {
+          // same, easy: just make copies mutual neighbours
           for (unsigned int k = 1; k < number_of_copies; ++k) {
             const unsigned int copy = copy_offsets[i] + k - 1;
-            // the second term will always round down, which is what we want
-            const unsigned int ngb_copy =
-                copy_offsets[original_ngb] + (k - 1) / number_of_ngb_copies;
+            const unsigned int ngb_copy = copy_offsets[original_ngb] + k - 1;
             gridvec[copy]->set_neighbour(j, ngb_copy);
             const unsigned int active_buffer = new_buffers.get_free_buffer();
             new_buffers[active_buffer]._sub_grid_index = ngb_copy;
@@ -465,20 +463,41 @@ inline void create_copies(std::vector<DensitySubGrid *> &gridvec,
             gridvec[copy]->set_active_buffer(j, active_buffer);
           }
         } else {
-          // we have more neighbour copies: pick a subset
-          const unsigned int number_of_own_copies = 1 << (ngb_level - level);
-          for (unsigned int k = 1; k < number_of_copies; ++k) {
-            const unsigned int copy = copy_offsets[i] + k - 1;
-            // the second term will skip some neighbour copies, which is what we
-            // want
-            const unsigned int ngb_copy =
-                copy_offsets[original_ngb] + (k - 1) * number_of_own_copies;
-            gridvec[copy]->set_neighbour(j, ngb_copy);
-            const unsigned int active_buffer = new_buffers.get_free_buffer();
-            new_buffers[active_buffer]._sub_grid_index = ngb_copy;
-            new_buffers[active_buffer]._direction =
-                output_to_input_direction(j);
-            gridvec[copy]->set_active_buffer(j, active_buffer);
+          // not the same: there are 2 options
+          if (level > ngb_level) {
+            // we have less neighbour copies, so some of our copies need to
+            // share
+            // the same neighbour
+            const unsigned int number_of_ngb_copies = 1 << (level - ngb_level);
+            for (unsigned int k = 1; k < number_of_copies; ++k) {
+              const unsigned int copy = copy_offsets[i] + k - 1;
+              // the second term will always round down, which is what we want
+              const unsigned int ngb_copy =
+                  copy_offsets[original_ngb] + (k - 1) / number_of_ngb_copies;
+              gridvec[copy]->set_neighbour(j, ngb_copy);
+              const unsigned int active_buffer = new_buffers.get_free_buffer();
+              new_buffers[active_buffer]._sub_grid_index = ngb_copy;
+              new_buffers[active_buffer]._direction =
+                  output_to_input_direction(j);
+              gridvec[copy]->set_active_buffer(j, active_buffer);
+            }
+          } else {
+            // we have more neighbour copies: pick a subset
+            const unsigned int number_of_own_copies = 1 << (ngb_level - level);
+            for (unsigned int k = 1; k < number_of_copies; ++k) {
+              const unsigned int copy = copy_offsets[i] + k - 1;
+              // the second term will skip some neighbour copies, which is what
+              // we
+              // want
+              const unsigned int ngb_copy =
+                  copy_offsets[original_ngb] + (k - 1) * number_of_own_copies;
+              gridvec[copy]->set_neighbour(j, ngb_copy);
+              const unsigned int active_buffer = new_buffers.get_free_buffer();
+              new_buffers[active_buffer]._sub_grid_index = ngb_copy;
+              new_buffers[active_buffer]._direction =
+                  output_to_input_direction(j);
+              gridvec[copy]->set_active_buffer(j, active_buffer);
+            }
           }
         }
       }
@@ -853,6 +872,16 @@ int main(int argc, char **argv) {
   ensure_neighbours(29, 30, 61, 64, gridvec, new_buffers);
   ensure_neighbours(29, 30, 62, 65, gridvec, new_buffers);
 
+  //  std::vector<unsigned char> levels(tot_num_subgrid, 0);
+  //  levels[29] = 2;
+  //  levels[30] = 2;
+  //  create_copies(gridvec, levels, new_buffers, originals, copies);
+
+  //  logmessage("Number of copies: " << originals.size(), 0);
+  //  for(unsigned int i = 0; i < originals.size(); ++i){
+  //    logmessage("originals[" << i << "] = " << originals[i], 0);
+  //  }
+
   std::ifstream initial_costs("costs_00.txt");
   if (initial_costs.good()) {
     // use cost information from a previous run as initial guess for the cost
@@ -862,19 +891,16 @@ int main(int argc, char **argv) {
     unsigned int index;
     unsigned long cost;
     int rank, thread;
-    for (unsigned int i = 0; i < tot_num_subgrid; ++i) {
-      initial_costs >> index >> cost >> rank >> thread;
-      myassert(index == i, "Wrong index!");
+    while (std::getline(initial_costs, line)) {
+      std::istringstream lstream(line);
+      lstream >> index >> cost >> rank >> thread;
       costs.add_cost(index, cost);
     }
   } else {
-    // no previous information available: use a very basic initial cost guess
-    // (good enough to get the idle fraction below 50%)
+    // no initial cost information: assume a uniform cost
     for (unsigned int i = 0; i < tot_num_subgrid; ++i) {
       costs.add_cost(i, 1);
     }
-    costs.add_cost(29, 40000);
-    costs.add_cost(30, 44000);
   }
 
   // add copy cost data: divide original cost by number of copies
@@ -966,6 +992,7 @@ int main(int argc, char **argv) {
       for (int i = 0; i < 27; ++i) {
         local_buffers[i]._direction = output_to_input_direction(i);
         local_buffers[i]._actual_size = 0;
+        local_buffer_flags[i] = true;
       }
       // set up the initial source photon task
       {
@@ -1210,7 +1237,7 @@ int main(int argc, char **argv) {
 
     // output useful information about this iteration
     output_tasks(iloop, tasks);
-    output_costs(iloop, gridvec.size(), num_threads, costs);
+    output_costs(iloop, tot_num_subgrid, num_threads, costs, copies, originals);
 
     // clear task buffer
     tasks.clear();
