@@ -963,18 +963,6 @@ int main(int argc, char **argv) {
       (unsigned int)((-box[1] / box[4]) * num_subgrid[1]),
       (unsigned int)((-box[2] / box[5]) * num_subgrid[2])};
   std::vector<unsigned int> central_index;
-  central_index.push_back(source_indices[0] * num_subgrid[1] * num_subgrid[2] +
-                          source_indices[1] * num_subgrid[2] +
-                          source_indices[2]);
-  unsigned int copy = copies[central_index[0]];
-  if (copy < 0xffffffff) {
-    while (copy < gridvec.size() &&
-           originals[copy - tot_num_subgrid] == central_index[0]) {
-      central_index.push_back(copy);
-      ++copy;
-    }
-  }
-  logmessage("Number of central subgrid copies: " << central_index.size(), 0);
 
   // set up the random number generators
   std::vector<RandomGenerator> random_generator(num_threads);
@@ -987,6 +975,20 @@ int main(int argc, char **argv) {
   //  - shoots num_photon photons through the grid to get intensity estimates
   //  - computes the ionization equilibrium
   for (unsigned int iloop = 0; iloop < number_of_iterations; ++iloop) {
+
+    central_index.clear();
+    central_index.push_back(
+        source_indices[0] * num_subgrid[1] * num_subgrid[2] +
+        source_indices[1] * num_subgrid[2] + source_indices[2]);
+    unsigned int copy = copies[central_index[0]];
+    if (copy < 0xffffffff) {
+      while (copy < gridvec.size() &&
+             originals[copy - tot_num_subgrid] == central_index[0]) {
+        central_index.push_back(copy);
+        ++copy;
+      }
+    }
+    logmessage("Number of central subgrid copies: " << central_index.size(), 0);
 
     std::vector<int> central_queue(central_index.size());
     for (unsigned int i = 0; i < central_index.size(); ++i) {
@@ -1272,6 +1274,74 @@ int main(int argc, char **argv) {
 
     // clear task buffer
     tasks.clear();
+
+    // fill initial_cost_vector with costs
+    unsigned long avg_cost_per_thread = 0;
+    for (unsigned int i = 0; i < tot_num_subgrid; ++i) {
+      initial_cost_vector[i] = costs.get_cost(i);
+      avg_cost_per_thread += initial_cost_vector[i];
+    }
+    for (unsigned int i = 0; i < originals.size(); ++i) {
+      initial_cost_vector[originals[i]] = costs.get_cost(tot_num_subgrid + i);
+      avg_cost_per_thread += initial_cost_vector[i];
+    }
+    avg_cost_per_thread /= num_threads;
+
+    // get new levels
+    for (unsigned int i = 0; i < tot_num_subgrid; ++i) {
+      if (initial_cost_vector[i] > avg_cost_per_thread) {
+        // note that this in principle should be 1 higher. However, we do not
+        // count the original.
+        unsigned int number_of_copies =
+            initial_cost_vector[i] / avg_cost_per_thread;
+        // get the highest bit
+        unsigned int level = 0;
+        while (number_of_copies > 0) {
+          number_of_copies >>= 1;
+          ++level;
+        }
+        levels[i] = level;
+      }
+    }
+
+    // delete copies
+    for (unsigned int i = 0; i < originals.size(); ++i) {
+      // free all associated buffers
+      for (int j = 0; j < 27; ++j) {
+        new_buffers.free_buffer(
+            gridvec[tot_num_subgrid + i]->get_active_buffer(j));
+      }
+      delete gridvec[tot_num_subgrid + i];
+    }
+    gridvec.resize(tot_num_subgrid);
+
+    // make new copies
+    originals.clear();
+    copies.clear();
+    copies.resize(tot_num_subgrid, 0xffffffff);
+    create_copies(gridvec, levels, new_buffers, originals, copies);
+
+    // make sure costs are up to date
+    for (unsigned int igrid = 0; igrid < tot_num_subgrid; ++igrid) {
+      std::vector<unsigned int> this_copies;
+      unsigned int copy = copies[igrid];
+      if (copy < 0xffffffff) {
+        while (copy < gridvec.size() &&
+               originals[copy - tot_num_subgrid] == igrid) {
+          this_copies.push_back(copy);
+          ++copy;
+        }
+      }
+      if (this_copies.size() > 0) {
+        const unsigned long cost =
+            initial_cost_vector[igrid] / (this_copies.size() + 1);
+        costs.set_cost(igrid, cost);
+        for (unsigned int i = 0; i < this_copies.size(); ++i) {
+          costs.set_cost(this_copies[i], cost);
+        }
+      }
+    }
+
     // redistribute the subgrids among the threads to balance the computational
     // costs (based on this iteration)
     costs.redistribute();
