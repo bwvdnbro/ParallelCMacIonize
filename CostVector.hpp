@@ -56,7 +56,7 @@ inline std::vector<size_t> argsort(const _datatype_ *v, const size_t size) {
 class CostVector {
 private:
   /*! @brief Number of elements. */
-  const size_t _size;
+  size_t _size;
 
   /*! @brief Number of threads. */
   const int _number_of_threads;
@@ -105,6 +105,30 @@ public:
     delete[] _costs;
     delete[] _thread_list;
     delete[] _process_list;
+  }
+
+  /**
+   * @brief Reset the size of the cost vector.
+   *
+   * @param size New size.
+   */
+  inline void reset(const size_t size) {
+    _size = size;
+
+    delete[] _costs;
+    delete[] _thread_list;
+    delete[] _process_list;
+
+    _costs = new unsigned long[size];
+    _thread_list = new int[size];
+    _process_list = new int[size];
+
+    for (size_t i = 0; i < size; ++i) {
+      _costs[i] = 0;
+      // our initial decomposition
+      _thread_list[i] = i % _number_of_threads;
+      _process_list[i] = i % _number_of_processes;
+    }
   }
 
   /**
