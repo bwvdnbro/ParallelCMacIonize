@@ -26,6 +26,8 @@
 
 # import modules
 import numpy as np
+import matplotlib
+matplotlib.use("Agg")
 import pylab as pl
 import scipy.stats as stats
 import sys

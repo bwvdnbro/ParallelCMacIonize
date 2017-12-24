@@ -36,6 +36,10 @@
 /*! @brief Enable this to activate cost output. */
 #define COST_OUTPUT
 
+/*! @brief Maximum fraction of the total computational cost per thread that can
+ *  be taken by a single subgrid. */
+#define COPY_FACTOR 4
+
 /*! @brief Activate this to unit test the directional algorithms. */
 //#define TEST_DIRECTIONS
 
@@ -897,11 +901,11 @@ int main(int argc, char **argv) {
   avg_cost_per_thread /= num_threads;
   // now set the levels accordingly
   for (unsigned int i = 0; i < tot_num_subgrid; ++i) {
-    if (2 * initial_cost_vector[i] > avg_cost_per_thread) {
+    if (COPY_FACTOR * initial_cost_vector[i] > avg_cost_per_thread) {
       // note that this in principle should be 1 higher. However, we do not
       // count the original.
       unsigned int number_of_copies =
-          2 * initial_cost_vector[i] / avg_cost_per_thread;
+          COPY_FACTOR * initial_cost_vector[i] / avg_cost_per_thread;
       // get the highest bit
       unsigned int level = 0;
       while (number_of_copies > 0) {
@@ -1289,11 +1293,11 @@ int main(int argc, char **argv) {
 
     // get new levels
     for (unsigned int i = 0; i < tot_num_subgrid; ++i) {
-      if (2 * initial_cost_vector[i] > avg_cost_per_thread) {
+      if (COPY_FACTOR * initial_cost_vector[i] > avg_cost_per_thread) {
         // note that this in principle should be 1 higher. However, we do not
         // count the original.
         unsigned int number_of_copies =
-            2 * initial_cost_vector[i] / avg_cost_per_thread;
+            COPY_FACTOR * initial_cost_vector[i] / avg_cost_per_thread;
         // get the highest bit
         unsigned int level = 0;
         while (number_of_copies > 0) {
