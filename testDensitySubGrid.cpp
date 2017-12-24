@@ -1323,8 +1323,11 @@ int main(int argc, char **argv) {
     for (unsigned int i = 0; i < originals.size(); ++i) {
       // free all associated buffers
       for (int j = 0; j < 27; ++j) {
-        new_buffers.free_buffer(
-            gridvec[tot_num_subgrid + i]->get_active_buffer(j));
+        if (gridvec[tot_num_subgrid + i]->get_neighbour(j) !=
+            NEIGHBOUR_OUTSIDE) {
+          new_buffers.free_buffer(
+              gridvec[tot_num_subgrid + i]->get_active_buffer(j));
+        }
       }
       delete gridvec[tot_num_subgrid + i];
     }
