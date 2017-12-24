@@ -1011,6 +1011,7 @@ int main(int argc, char **argv) {
       gridvec[copy]->update_neutral_fractions(*gridvec[original]);
     }
 
+    logmessage("Starting photon shoot loop", 0);
     // STEP 1: photon shooting
     // control variables (these are shared and updated atomically):
     //  - number of photon packets that has been created at the source
@@ -1260,6 +1261,7 @@ int main(int argc, char **argv) {
       gridvec[original]->update_intensities(*gridvec[copy]);
     }
 
+    logmessage("Updating ionisation structure", 0);
     // STEP 2: update the ionization structure for each subgrid
     unsigned int igrid = 0;
 #pragma omp parallel default(shared)
@@ -1272,6 +1274,7 @@ int main(int argc, char **argv) {
       }
     }
 
+    logmessage("Writing task and cost information", 0);
     // output useful information about this iteration
     output_tasks(iloop, tasks);
     output_costs(iloop, tot_num_subgrid, num_threads, costs, copies, originals);
@@ -1279,6 +1282,7 @@ int main(int argc, char **argv) {
     // clear task buffer
     tasks.clear();
 
+    logmessage("Rebalancing", 0);
     // fill initial_cost_vector with costs
     unsigned long avg_cost_per_thread = 0;
     for (unsigned int i = 0; i < tot_num_subgrid; ++i) {
