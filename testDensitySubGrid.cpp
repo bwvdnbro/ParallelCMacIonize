@@ -897,11 +897,11 @@ int main(int argc, char **argv) {
   avg_cost_per_thread /= num_threads;
   // now set the levels accordingly
   for (unsigned int i = 0; i < tot_num_subgrid; ++i) {
-    if (initial_cost_vector[i] > avg_cost_per_thread) {
+    if (2 * initial_cost_vector[i] > avg_cost_per_thread) {
       // note that this in principle should be 1 higher. However, we do not
       // count the original.
       unsigned int number_of_copies =
-          initial_cost_vector[i] / avg_cost_per_thread;
+          2 * initial_cost_vector[i] / avg_cost_per_thread;
       // get the highest bit
       unsigned int level = 0;
       while (number_of_copies > 0) {
@@ -1282,18 +1282,18 @@ int main(int argc, char **argv) {
       avg_cost_per_thread += initial_cost_vector[i];
     }
     for (unsigned int i = 0; i < originals.size(); ++i) {
-      initial_cost_vector[originals[i]] = costs.get_cost(tot_num_subgrid + i);
-      avg_cost_per_thread += initial_cost_vector[i];
+      initial_cost_vector[originals[i]] += costs.get_cost(tot_num_subgrid + i);
+      avg_cost_per_thread += initial_cost_vector[originals[i]];
     }
     avg_cost_per_thread /= num_threads;
 
     // get new levels
     for (unsigned int i = 0; i < tot_num_subgrid; ++i) {
-      if (initial_cost_vector[i] > avg_cost_per_thread) {
+      if (2 * initial_cost_vector[i] > avg_cost_per_thread) {
         // note that this in principle should be 1 higher. However, we do not
         // count the original.
         unsigned int number_of_copies =
-            initial_cost_vector[i] / avg_cost_per_thread;
+            2 * initial_cost_vector[i] / avg_cost_per_thread;
         // get the highest bit
         unsigned int level = 0;
         while (number_of_copies > 0) {
@@ -1304,7 +1304,18 @@ int main(int argc, char **argv) {
       }
     }
 
-    // delete copies
+    // reset neighbours to old values before we make new copies
+    for (unsigned int i = 0; i < tot_num_subgrid; ++i) {
+      for (int j = 1; j < 27; ++j) {
+        if (gridvec[i]->get_neighbour(j) != NEIGHBOUR_OUTSIDE) {
+          if (gridvec[i]->get_neighbour(j) >= tot_num_subgrid) {
+            gridvec[i]->set_neighbour(j, originals[i - tot_num_subgrid]);
+          }
+        }
+      }
+    }
+
+    // delete old copies
     for (unsigned int i = 0; i < originals.size(); ++i) {
       // free all associated buffers
       for (int j = 0; j < 27; ++j) {
@@ -1321,6 +1332,7 @@ int main(int argc, char **argv) {
     copies.resize(tot_num_subgrid, 0xffffffff);
     create_copies(gridvec, levels, new_buffers, originals, copies);
 
+    costs.reset(gridvec.size());
     // make sure costs are up to date
     for (unsigned int igrid = 0; igrid < tot_num_subgrid; ++igrid) {
       std::vector<unsigned int> this_copies;
@@ -1339,6 +1351,8 @@ int main(int argc, char **argv) {
         for (unsigned int i = 0; i < this_copies.size(); ++i) {
           costs.set_cost(this_copies[i], cost);
         }
+      } else {
+        costs.set_cost(igrid, initial_cost_vector[igrid]);
       }
     }
 
