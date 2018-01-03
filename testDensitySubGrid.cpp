@@ -409,7 +409,7 @@ inline static void do_reemission(PhotonBuffer &buffer,
  * @param originals List of originals for the newly created copies.
  * @param copies Index of the first copy of each subgrid.
  */
-inline void create_copies(std::vector<DensitySubGrid *> &gridvec,
+inline void create_copies(std::vector<SubGrid *> &gridvec,
                           std::vector<unsigned char> &levels,
                           MemorySpace &new_buffers,
                           std::vector<unsigned int> &originals,
@@ -434,7 +434,8 @@ inline void create_copies(std::vector<DensitySubGrid *> &gridvec,
       copies[i] = gridvec.size();
     }
     for (unsigned int j = 1; j < number_of_copies; ++j) {
-      gridvec.push_back(new DensitySubGrid(*gridvec[i]));
+      gridvec.push_back(
+          new DensitySubGrid(*static_cast<DensitySubGrid *>(gridvec[i])));
       originals.push_back(i);
     }
   }
@@ -880,7 +881,7 @@ int main(int argc, char **argv) {
   // set up the grid of smaller grids used for the algorithm
   // each smaller grid stores a fraction of the total grid and has information
   // about the neighbouring subgrids
-  std::vector<DensitySubGrid *> gridvec(
+  std::vector<SubGrid *> gridvec(
       num_subgrid[0] * num_subgrid[1] * num_subgrid[2], nullptr);
   const double subbox_side[3] = {box[3] / num_subgrid[0],
                                  box[4] / num_subgrid[1],
@@ -911,7 +912,8 @@ int main(int argc, char **argv) {
                                       subbox_side[1],
                                       subbox_side[2]};
             gridvec[index] = new DensitySubGrid(subbox, subbox_ncell);
-            DensitySubGrid &this_grid = *gridvec[index];
+            DensitySubGrid &this_grid =
+                *static_cast<DensitySubGrid *>(gridvec[index]);
             // set up neighbouring information. We first make sure all
             // neighbours are initialized to NEIGHBOUR_OUTSIDE, indicating no
             // neighbour
@@ -1108,7 +1110,9 @@ int main(int argc, char **argv) {
       logmessage("Updating neutral fractions for " << copy << ", copy of "
                                                    << original,
                  0);
-      gridvec[copy]->update_neutral_fractions(*gridvec[original]);
+      static_cast<DensitySubGrid *>(gridvec[copy])
+          ->update_neutral_fractions(
+              *static_cast<DensitySubGrid *>(gridvec[original]));
     }
 
     logmessage("Starting photon shoot loop", 0);
@@ -1263,7 +1267,8 @@ int main(int argc, char **argv) {
             // now
             PhotonBuffer &buffer = new_buffers[current_buffer_index];
             const unsigned int igrid = buffer._sub_grid_index;
-            DensitySubGrid &this_grid = *gridvec[buffer._sub_grid_index];
+            DensitySubGrid &this_grid =
+                *static_cast<DensitySubGrid *>(gridvec[buffer._sub_grid_index]);
             // prepare output buffers
             for (int i = 0; i < 27; ++i) {
               const unsigned int ngb = this_grid.get_neighbour(i);
@@ -1358,7 +1363,8 @@ int main(int argc, char **argv) {
       logmessage("Updating ionization integrals for " << original
                                                       << " using copy " << copy,
                  0);
-      gridvec[original]->update_intensities(*gridvec[copy]);
+      static_cast<DensitySubGrid *>(gridvec[original])
+          ->update_intensities(*static_cast<DensitySubGrid *>(gridvec[copy]));
     }
 
     logmessage("Updating ionisation structure", 0);
@@ -1369,7 +1375,8 @@ int main(int argc, char **argv) {
       while (igrid < tot_num_subgrid) {
         const unsigned int current_igrid = atomic_post_increment(igrid);
         if (current_igrid < tot_num_subgrid) {
-          gridvec[current_igrid]->compute_neutral_fraction(num_photon);
+          static_cast<DensitySubGrid *>(gridvec[current_igrid])
+              ->compute_neutral_fraction(num_photon);
         }
       }
     }
@@ -1485,13 +1492,13 @@ int main(int argc, char **argv) {
   //  - ASCII output (for the VisIt plot script)
   std::ofstream ofile("intensities.txt");
   for (unsigned int igrid = 0; igrid < tot_num_subgrid; ++igrid) {
-    gridvec[igrid]->print_intensities(ofile);
+    static_cast<DensitySubGrid *>(gridvec[igrid])->print_intensities(ofile);
   }
   ofile.close();
   //  - binary output (for the Python plot script)
   std::ofstream bfile("intensities.dat");
   for (unsigned int igrid = 0; igrid < tot_num_subgrid; ++igrid) {
-    gridvec[igrid]->output_intensities(bfile);
+    static_cast<DensitySubGrid *>(gridvec[igrid])->output_intensities(bfile);
   }
   bfile.close();
 

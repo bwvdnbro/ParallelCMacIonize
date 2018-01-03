@@ -390,10 +390,67 @@ inline bool is_compatible_input_direction(const double *direction,
   }
 
 /**
+ * @brief Common interface for actual subgrids and dummy subgrids.
+ */
+class SubGrid {
+public:
+  /*! @brief Indices of the neighbouring subgrids. */
+  unsigned int _ngbs[27];
+
+  /*! @brief Indices of the active buffers. */
+  unsigned int _active_buffers[27];
+
+  /**
+   * @brief Get the neighbour for the given direction.
+   *
+   * @param output_direction TravelDirection.
+   * @return Index of the neighbouring subgrid for that direction.
+   */
+  inline unsigned int get_neighbour(const int output_direction) const {
+    myassert(output_direction >= 0 && output_direction < 27,
+             "output_direction: " << output_direction);
+    return _ngbs[output_direction];
+  }
+
+  /**
+   * @brief Set the neighbour for the given direction.
+   *
+   * @param output_direction TravelDirection.
+   * @param ngb Neighbour index.
+   */
+  inline void set_neighbour(const int output_direction,
+                            const unsigned int ngb) {
+    myassert(output_direction >= 0 && output_direction < 27,
+             "output_direction: " << output_direction);
+    _ngbs[output_direction] = ngb;
+  }
+
+  inline unsigned int get_active_buffer(const int direction) const {
+    return _active_buffers[direction];
+  }
+
+  inline void set_active_buffer(const int direction, const unsigned int index) {
+    _active_buffers[direction] = index;
+  }
+};
+
+/**
+ * @brief DensitySubGrid that is not present on the current MPI rank.
+ */
+class DummySubGrid : public SubGrid {
+public:
+  /*! @brief Rank that holds the actual DensitySubGrid. */
+  int _rank;
+
+  /*! @brief Index of the actual DensitySubGrid on its home rank. */
+  unsigned int _actual_index;
+};
+
+/**
  * @brief Small fraction of a density grid that acts as an individual density
  * grid.
  */
-class DensitySubGrid {
+class DensitySubGrid : public SubGrid {
 public:
   /*! @brief Computational cost of this subgrid. */
   unsigned long _computational_cost;
@@ -424,12 +481,6 @@ public:
    * ```
    */
   int _number_of_cells[4];
-
-  /*! @brief Indices of the neighbouring subgrids. */
-  unsigned int _ngbs[27];
-
-  /*! @brief Indices of the active buffers. */
-  unsigned int _active_buffers[27];
 
   /*! @brief Number density for each cell (in m^-3). */
   double *_number_density;
@@ -1007,39 +1058,6 @@ public:
     for (int i = 0; i < tot_ncell; ++i) {
       _intensity_integral[i] += copy._intensity_integral[i];
     }
-  }
-
-  /**
-   * @brief Get the neighbour for the given direction.
-   *
-   * @param output_direction TravelDirection.
-   * @return Index of the neighbouring subgrid for that direction.
-   */
-  inline unsigned int get_neighbour(const int output_direction) const {
-    myassert(output_direction >= 0 && output_direction < 27,
-             "output_direction: " << output_direction);
-    return _ngbs[output_direction];
-  }
-
-  /**
-   * @brief Set the neighbour for the given direction.
-   *
-   * @param output_direction TravelDirection.
-   * @param ngb Neighbour index.
-   */
-  inline void set_neighbour(const int output_direction,
-                            const unsigned int ngb) {
-    myassert(output_direction >= 0 && output_direction < 27,
-             "output_direction: " << output_direction);
-    _ngbs[output_direction] = ngb;
-  }
-
-  inline unsigned int get_active_buffer(const int direction) const {
-    return _active_buffers[direction];
-  }
-
-  inline void set_active_buffer(const int direction, const unsigned int index) {
-    _active_buffers[direction] = index;
   }
 
   /**
