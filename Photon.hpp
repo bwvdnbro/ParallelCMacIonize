@@ -26,6 +26,39 @@
 #ifndef PHOTON_HPP
 #define PHOTON_HPP
 
+/*! @brief Size of the MPI buffer necessary to store a single Photon. */
+#define PHOTON_MPI_SIZE (13 * sizeof(double))
+
+/**
+ * @brief Check if the given Photons are the same.
+ *
+ * @param a First Photon.
+ * @param b Second Photon.
+ */
+#define photon_check_equal(a, b)                                               \
+  myassert(a._position[0] == b._position[0], "Positions do not match!");       \
+  myassert(a._position[1] == b._position[1], "Positions do not match!");       \
+  myassert(a._position[2] == b._position[2], "Positions do not match!");       \
+  myassert(a._direction[0] == b._direction[0], "Directions do not match!");    \
+  myassert(a._direction[1] == b._direction[1], "Directions do not match!");    \
+  myassert(a._direction[2] == b._direction[2], "Directions do not match!");    \
+  myassert(a._inverse_direction[0] == b._inverse_direction[0],                 \
+           "Inverse directions do not match!");                                \
+  myassert(a._inverse_direction[1] == b._inverse_direction[1],                 \
+           "Inverse directions do not match!");                                \
+  myassert(a._inverse_direction[2] == b._inverse_direction[2],                 \
+           "Inverse directions do not match!");                                \
+  myassert(a._current_optical_depth == b._current_optical_depth,               \
+           "Current optical depths do not match!");                            \
+  myassert(a._target_optical_depth == b._target_optical_depth,                 \
+           "Target optical depths do not match!");                             \
+  myassert(a._photoionization_cross_section ==                                 \
+               b._photoionization_cross_section,                               \
+           "Cross sections do not match!");                                    \
+  myassert(a._weight == b._weight, "Weights do not match!");
+
+#include <mpi.h>
+
 /**
  * @brief Photon packet.
  *
@@ -55,6 +88,56 @@ public:
 
   /*! @brief Weight of the photon packet. */
   double _weight;
+
+  /**
+   * @brief Store the contents of the Photon in the given MPI communication
+   * buffer.
+   *
+   * @param buffer Buffer to use (should be preallocated and have at least size
+   * PHOTON_MPI_SIZE).
+   */
+  inline void pack(char buffer[PHOTON_MPI_SIZE]) const {
+    int buffer_position = 0;
+    MPI_Pack(_position, 3, MPI_DOUBLE, buffer, PHOTON_MPI_SIZE,
+             &buffer_position, MPI_COMM_WORLD);
+    MPI_Pack(_direction, 3, MPI_DOUBLE, buffer, PHOTON_MPI_SIZE,
+             &buffer_position, MPI_COMM_WORLD);
+    MPI_Pack(_inverse_direction, 3, MPI_DOUBLE, buffer, PHOTON_MPI_SIZE,
+             &buffer_position, MPI_COMM_WORLD);
+    MPI_Pack(&_current_optical_depth, 1, MPI_DOUBLE, buffer, PHOTON_MPI_SIZE,
+             &buffer_position, MPI_COMM_WORLD);
+    MPI_Pack(&_target_optical_depth, 1, MPI_DOUBLE, buffer, PHOTON_MPI_SIZE,
+             &buffer_position, MPI_COMM_WORLD);
+    MPI_Pack(&_photoionization_cross_section, 1, MPI_DOUBLE, buffer,
+             PHOTON_MPI_SIZE, &buffer_position, MPI_COMM_WORLD);
+    MPI_Pack(&_weight, 1, MPI_DOUBLE, buffer, PHOTON_MPI_SIZE, &buffer_position,
+             MPI_COMM_WORLD);
+  }
+
+  /**
+   * @brief Copy the contents of the given MPI communication buffer into this
+   * Photon.
+   *
+   * @param buffer MPI communication buffer (should have at least size
+   * PHOTON_MPI_SIZE).
+   */
+  inline void unpack(char buffer[PHOTON_MPI_SIZE]) {
+    int buffer_position = 0;
+    MPI_Unpack(buffer, PHOTON_MPI_SIZE, &buffer_position, _position, 3,
+               MPI_DOUBLE, MPI_COMM_WORLD);
+    MPI_Unpack(buffer, PHOTON_MPI_SIZE, &buffer_position, _direction, 3,
+               MPI_DOUBLE, MPI_COMM_WORLD);
+    MPI_Unpack(buffer, PHOTON_MPI_SIZE, &buffer_position, _inverse_direction, 3,
+               MPI_DOUBLE, MPI_COMM_WORLD);
+    MPI_Unpack(buffer, PHOTON_MPI_SIZE, &buffer_position,
+               &_current_optical_depth, 1, MPI_DOUBLE, MPI_COMM_WORLD);
+    MPI_Unpack(buffer, PHOTON_MPI_SIZE, &buffer_position,
+               &_target_optical_depth, 1, MPI_DOUBLE, MPI_COMM_WORLD);
+    MPI_Unpack(buffer, PHOTON_MPI_SIZE, &buffer_position,
+               &_photoionization_cross_section, 1, MPI_DOUBLE, MPI_COMM_WORLD);
+    MPI_Unpack(buffer, PHOTON_MPI_SIZE, &buffer_position, &_weight, 1,
+               MPI_DOUBLE, MPI_COMM_WORLD);
+  }
 };
 
 #endif // PHOTON_HPP

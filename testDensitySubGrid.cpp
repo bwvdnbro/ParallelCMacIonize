@@ -38,7 +38,10 @@
 
 /*! @brief Maximum fraction of the total computational cost per thread that can
  *  be taken by a single subgrid. */
-#define COPY_FACTOR 4
+#define COPY_FACTOR 10
+
+/*! @brief Activate this to unit test the MPI PhotonBuffer communication. */
+#define MPI_BUFFER_TEST
 
 /*! @brief Activate this to unit test the directional algorithms. */
 //#define TEST_DIRECTIONS
@@ -616,6 +619,44 @@ int main(int argc, char **argv) {
     }
   }
 
+#ifdef MPI_BUFFER_TEST
+  /// test MPI PhotonBuffer communication
+  {
+    // make sure we have at least 2 processes
+    myassert(MPI_size > 1, "Not running in MPI mode!");
+
+    // set up a random PhotonBuffer
+    PhotonBuffer test_buffer;
+    RandomGenerator random_generator(42);
+    fill_buffer(test_buffer, PHOTONBUFFER_SIZE, random_generator, 0);
+
+    // now communicate:
+    //  - rank 0 sends the buffer
+    //  - rank 1 receives and checks if the buffer is what it should be
+    char MPI_buffer[PHOTONBUFFER_MPI_SIZE];
+    if (MPI_rank == 0) {
+      // pack...
+      test_buffer.pack(MPI_buffer);
+      // ...and send
+      MPI_Send(MPI_buffer, PHOTONBUFFER_MPI_SIZE, MPI_PACKED, 1, 101010,
+               MPI_COMM_WORLD);
+    } else if (MPI_rank == 1) {
+      // receive...
+      MPI_Status status;
+      MPI_Recv(MPI_buffer, PHOTONBUFFER_MPI_SIZE, MPI_PACKED, 0, 101010,
+               MPI_COMM_WORLD, &status);
+      // ...and unpack
+      PhotonBuffer recv_buffer;
+      recv_buffer.unpack(MPI_buffer);
+
+      // check if the result is what it should be
+      photonbuffer_check_equal(test_buffer, recv_buffer);
+    } // other ranks do nothing
+
+    return MPI_Finalize();
+  }
+#endif // MPI_BUFFER_TEST
+
 #ifdef TEST_DIRECTIONS
   /// test directional routines
   {
@@ -685,7 +726,7 @@ int main(int argc, char **argv) {
     check_input(test_grid, position, TRAVELDIRECTION_CORNER_PNP, 9, 0, 9);
     check_input(test_grid, position, TRAVELDIRECTION_CORNER_PPN, 9, 9, 0);
     check_input(test_grid, position, TRAVELDIRECTION_CORNER_PPP, 9, 9, 9);
-    return 0;
+    return MPI_Finalize();
   }
 #endif
 
@@ -709,7 +750,7 @@ int main(int argc, char **argv) {
       ofile << i << "\t" << cost_list[i] << "\t" << costs.get_process(i) << "\t"
             << costs.get_thread(i) << "\n";
     }
-    return 0;
+    return MPI_Finalize();
   }
 #endif
 
@@ -1400,5 +1441,5 @@ int main(int argc, char **argv) {
     delete gridvec[igrid];
   }
 
-  return 0;
+  return MPI_Finalize();
 }
