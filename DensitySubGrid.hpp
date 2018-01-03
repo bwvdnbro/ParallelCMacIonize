@@ -38,6 +38,7 @@
 #include <cfloat>
 #include <cmath>
 #include <iostream>
+#include <mpi.h>
 #include <omp.h>
 #include <ostream>
 
@@ -334,15 +335,66 @@ inline bool is_compatible_input_direction(const double *direction,
   }
 }
 
+/*! @brief Size of the DensitySubGrid variables whose size is known at compile
+ *  time. */
+#define DENSITYSUBGRID_FIXED_MPI_SIZE                                          \
+  (sizeof(unsigned long) + 9 * sizeof(double) + 4 * sizeof(int) +              \
+   54 * sizeof(unsigned int))
+
+/*! @brief Number of variables stored in each cell of the DensitySubGrid
+ *  (excluding potential lock variables). */
+#define DENSITYSUBGRID_NUMBER_OF_CELL_VARIABLES 3
+
+/**
+ * @brief Check if the given DensitySubGrids are the same.
+ *
+ * @param a First DensitySubGrid.
+ * @param b Second DensitySubGrid.
+ */
+#define densitysubgrid_check_equal(a, b)                                       \
+  myassert(a._computational_cost == b._computational_cost,                     \
+           "Costs not the same!");                                             \
+  myassert(a._anchor[0] == b._anchor[0], "Anchor not the same!");              \
+  myassert(a._anchor[1] == b._anchor[1], "Anchor not the same!");              \
+  myassert(a._anchor[2] == b._anchor[2], "Anchor not the same!");              \
+  myassert(a._cell_size[0] == b._cell_size[0], "Cell size not the same!");     \
+  myassert(a._cell_size[1] == b._cell_size[1], "Cell size not the same!");     \
+  myassert(a._cell_size[2] == b._cell_size[2], "Cell size not the same!");     \
+  myassert(a._inv_cell_size[0] == b._inv_cell_size[0],                         \
+           "Inverse cell size not the same!");                                 \
+  myassert(a._inv_cell_size[1] == b._inv_cell_size[1],                         \
+           "Inverse cell size not the same!");                                 \
+  myassert(a._inv_cell_size[2] == b._inv_cell_size[2],                         \
+           "Inverse cell size not the same!");                                 \
+  myassert(a._number_of_cells[0] == b._number_of_cells[0],                     \
+           "Number of cells not the same!");                                   \
+  myassert(a._number_of_cells[1] == b._number_of_cells[1],                     \
+           "Number of cells not the same!");                                   \
+  myassert(a._number_of_cells[2] == b._number_of_cells[2],                     \
+           "Number of cells not the same!");                                   \
+  myassert(a._number_of_cells[3] == b._number_of_cells[3],                     \
+           "Number of cells not the same!");                                   \
+  for (unsigned int i = 0; i < 27; ++i) {                                      \
+    myassert(a._ngbs[i] == b._ngbs[i], "Neighbours not the same!");            \
+    myassert(a._active_buffers[i] == b._active_buffers[i],                     \
+             "Active buffers not the same!");                                  \
+  }                                                                            \
+  const int tot_num_cells = a._number_of_cells[0] * a._number_of_cells[3];     \
+  for (int i = 0; i < tot_num_cells; ++i) {                                    \
+    myassert(a._number_density[i] == b._number_density[i],                     \
+             "Number density not the same!");                                  \
+    myassert(a._neutral_fraction[i] == b._neutral_fraction[i],                 \
+             "Neutral fraction not the same!");                                \
+    myassert(a._intensity_integral[i] == b._intensity_integral[i],             \
+             "Intensity integral not the same!");                              \
+  }
+
 /**
  * @brief Small fraction of a density grid that acts as an individual density
  * grid.
  */
 class DensitySubGrid {
-private:
-  /*! @brief Lock flag that ensures thread safe access to this subgrid. */
-  omp_lock_t _lock;
-
+public:
   /*! @brief Computational cost of this subgrid. */
   unsigned long _computational_cost;
 
@@ -793,8 +845,6 @@ public:
       _neutral_fraction[i] = 1.e-6;
       _intensity_integral[i] = 0.;
     }
-
-    omp_init_lock(&_lock);
   }
 
   /**
@@ -825,8 +875,6 @@ public:
       _neutral_fraction[i] = original._neutral_fraction[i];
       _intensity_integral[i] = 0.;
     }
-
-    omp_init_lock(&_lock);
   }
 
   /**
@@ -838,7 +886,102 @@ public:
     delete[] _neutral_fraction;
     delete[] _intensity_integral;
     subgrid_cell_lock_destroy();
-    omp_destroy_lock(&_lock);
+  }
+
+  /**
+   * @brief Get the size of a DensitySubGrid when it is communicated over MPI.
+   *
+   * @return Size of a DensitySubGrid that is communicated over MPI.
+   */
+  inline int get_MPI_size() const {
+    return DENSITYSUBGRID_FIXED_MPI_SIZE +
+           DENSITYSUBGRID_NUMBER_OF_CELL_VARIABLES * _number_of_cells[0] *
+               _number_of_cells[3] * sizeof(double);
+  }
+
+  /**
+   * @brief Pack the DensitySubGrid into the given MPI buffer for communication.
+   *
+   * @param buffer MPI buffer (should at least have size get_MPI_size()).
+   * @param buffer_size Actual size of the buffer.
+   */
+  inline void pack(char *buffer, const int buffer_size) const {
+    myassert(buffer_size >= get_MPI_size(), "Buffer too small!");
+
+    int buffer_position = 0;
+    MPI_Pack(&_computational_cost, 1, MPI_UNSIGNED_LONG, buffer, buffer_size,
+             &buffer_position, MPI_COMM_WORLD);
+    MPI_Pack(_anchor, 3, MPI_DOUBLE, buffer, buffer_size, &buffer_position,
+             MPI_COMM_WORLD);
+    MPI_Pack(_cell_size, 3, MPI_DOUBLE, buffer, buffer_size, &buffer_position,
+             MPI_COMM_WORLD);
+    MPI_Pack(_inv_cell_size, 3, MPI_DOUBLE, buffer, buffer_size,
+             &buffer_position, MPI_COMM_WORLD);
+    MPI_Pack(_number_of_cells, 4, MPI_INT, buffer, buffer_size,
+             &buffer_position, MPI_COMM_WORLD);
+    MPI_Pack(_ngbs, 27, MPI_UNSIGNED, buffer, buffer_size, &buffer_position,
+             MPI_COMM_WORLD);
+    MPI_Pack(_active_buffers, 27, MPI_UNSIGNED, buffer, buffer_size,
+             &buffer_position, MPI_COMM_WORLD);
+
+    const int tot_num_cells = _number_of_cells[0] * _number_of_cells[3];
+    MPI_Pack(_number_density, tot_num_cells, MPI_DOUBLE, buffer, buffer_size,
+             &buffer_position, MPI_COMM_WORLD);
+    MPI_Pack(_neutral_fraction, tot_num_cells, MPI_DOUBLE, buffer, buffer_size,
+             &buffer_position, MPI_COMM_WORLD);
+    MPI_Pack(_intensity_integral, tot_num_cells, MPI_DOUBLE, buffer,
+             buffer_size, &buffer_position, MPI_COMM_WORLD);
+  }
+
+  /**
+   * @brief Unpack the given MPI communication buffer into this DensitySubGrid.
+   *
+   * Note that we cannot check if the buffer is big enough to contain the
+   * correct number of variables.
+   *
+   * @param buffer MPI buffer.
+   * @param buffer_size Actual size of the buffer.
+   */
+  inline void unpack(char *buffer, const int buffer_size) {
+    int buffer_position = 0;
+    MPI_Unpack(buffer, buffer_size, &buffer_position, &_computational_cost, 1,
+               MPI_UNSIGNED_LONG, MPI_COMM_WORLD);
+    MPI_Unpack(buffer, buffer_size, &buffer_position, _anchor, 3, MPI_DOUBLE,
+               MPI_COMM_WORLD);
+    MPI_Unpack(buffer, buffer_size, &buffer_position, _cell_size, 3, MPI_DOUBLE,
+               MPI_COMM_WORLD);
+    MPI_Unpack(buffer, buffer_size, &buffer_position, _inv_cell_size, 3,
+               MPI_DOUBLE, MPI_COMM_WORLD);
+    unsigned int new_number_of_cells[4];
+    MPI_Unpack(buffer, buffer_size, &buffer_position, new_number_of_cells, 4,
+               MPI_INT, MPI_COMM_WORLD);
+    MPI_Unpack(buffer, buffer_size, &buffer_position, _ngbs, 27, MPI_UNSIGNED,
+               MPI_COMM_WORLD);
+    MPI_Unpack(buffer, buffer_size, &buffer_position, _active_buffers, 27,
+               MPI_UNSIGNED, MPI_COMM_WORLD);
+
+    const int tot_num_cells = new_number_of_cells[0] * new_number_of_cells[3];
+    // DensitySubgrids don't necessarily have the same size, so we make sure
+    // we adjust the size of the cell arrays if they are different
+    const int old_num_cells = _number_of_cells[0] * _number_of_cells[3];
+    if (tot_num_cells != old_num_cells) {
+      _number_of_cells[0] = new_number_of_cells[0];
+      _number_of_cells[1] = new_number_of_cells[1];
+      _number_of_cells[2] = new_number_of_cells[2];
+      _number_of_cells[3] = new_number_of_cells[3];
+      delete[] _number_density;
+      delete[] _neutral_fraction;
+      delete[] _intensity_integral;
+      _number_density = new double[tot_num_cells];
+      _neutral_fraction = new double[tot_num_cells];
+      _intensity_integral = new double[tot_num_cells];
+    }
+    MPI_Unpack(buffer, buffer_size, &buffer_position, _number_density,
+               tot_num_cells, MPI_DOUBLE, MPI_COMM_WORLD);
+    MPI_Unpack(buffer, buffer_size, &buffer_position, _neutral_fraction,
+               tot_num_cells, MPI_DOUBLE, MPI_COMM_WORLD);
+    MPI_Unpack(buffer, buffer_size, &buffer_position, _intensity_integral,
+               tot_num_cells, MPI_DOUBLE, MPI_COMM_WORLD);
   }
 
   /**
@@ -865,25 +1008,6 @@ public:
       _intensity_integral[i] += copy._intensity_integral[i];
     }
   }
-
-  /**
-   * @brief Try to lock the cell.
-   *
-   * @return True if the lock succeeded.
-   */
-  inline bool try_lock() { return omp_test_lock(&_lock); }
-
-  /**
-   * @brief Lock the cell.
-   *
-   * Blocks until the lock succeeds.
-   */
-  inline void lock() { return omp_set_lock(&_lock); }
-
-  /**
-   * @brief Unlock the cell.
-   */
-  inline void unlock() { omp_unset_lock(&_lock); }
 
   /**
    * @brief Get the neighbour for the given direction.
