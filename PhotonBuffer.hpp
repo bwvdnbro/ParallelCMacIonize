@@ -83,7 +83,7 @@ public:
    * @param buffer Buffer to use (should be preallocated and have at least size
    * PHOTONBUFFER_MPI_SIZE).
    */
-  inline void pack(char buffer[PHOTONBUFFER_MPI_SIZE]) const {
+  inline void pack(char buffer[PHOTONBUFFER_MPI_SIZE]) {
     int buffer_position = 0;
     MPI_Pack(&_sub_grid_index, 1, MPI_UNSIGNED, buffer, PHOTONBUFFER_MPI_SIZE,
              &buffer_position, MPI_COMM_WORLD);

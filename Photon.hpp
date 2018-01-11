@@ -96,7 +96,7 @@ public:
    * @param buffer Buffer to use (should be preallocated and have at least size
    * PHOTON_MPI_SIZE).
    */
-  inline void pack(char buffer[PHOTON_MPI_SIZE]) const {
+  inline void pack(char buffer[PHOTON_MPI_SIZE]) {
     int buffer_position = 0;
     MPI_Pack(_position, 3, MPI_DOUBLE, buffer, PHOTON_MPI_SIZE,
              &buffer_position, MPI_COMM_WORLD);

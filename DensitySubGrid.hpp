@@ -956,7 +956,7 @@ public:
    * @param buffer MPI buffer (should at least have size get_MPI_size()).
    * @param buffer_size Actual size of the buffer.
    */
-  inline void pack(char *buffer, const int buffer_size) const {
+  inline void pack(char *buffer, const int buffer_size) {
     myassert(buffer_size >= get_MPI_size(), "Buffer too small!");
 
     int buffer_position = 0;
@@ -1306,10 +1306,10 @@ public:
           double pos_z = _anchor[2] + (iz + 0.5) * _cell_size[2];
           const int three_index[3] = {ix, iy, iz};
           const int index = get_one_index(three_index);
-          stream.write(reinterpret_cast<char *>(&pos_x), sizeof(double));
-          stream.write(reinterpret_cast<char *>(&pos_y), sizeof(double));
-          stream.write(reinterpret_cast<char *>(&pos_z), sizeof(double));
-          stream.write(reinterpret_cast<char *>(&_neutral_fraction[index]),
+          stream.write(reinterpret_cast< char * >(&pos_x), sizeof(double));
+          stream.write(reinterpret_cast< char * >(&pos_y), sizeof(double));
+          stream.write(reinterpret_cast< char * >(&pos_z), sizeof(double));
+          stream.write(reinterpret_cast< char * >(&_neutral_fraction[index]),
                        sizeof(double));
         }
       }

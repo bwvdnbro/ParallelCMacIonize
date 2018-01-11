@@ -149,7 +149,7 @@
  * @param tasks Tasks to print.
  */
 inline void output_tasks(const unsigned int iloop,
-                         const ThreadSafeVector<Task> &tasks) {
+                         const ThreadSafeVector< Task > &tasks) {
 #ifdef TASK_OUTPUT
   std::stringstream filename;
   filename << "tasks_";
@@ -182,8 +182,8 @@ inline void output_tasks(const unsigned int iloop,
  */
 inline void output_costs(const unsigned int iloop, const unsigned int ngrid,
                          const int nthread, const CostVector &costs,
-                         const std::vector<unsigned int> &copies,
-                         const std::vector<unsigned int> &originals) {
+                         const std::vector< unsigned int > &copies,
+                         const std::vector< unsigned int > &originals) {
 #ifdef COST_OUTPUT
   std::stringstream filename;
   filename << "costs_";
@@ -325,6 +325,12 @@ inline static void do_photon_traversal(PhotonBuffer &input_buffer,
                                        DensitySubGrid &subgrid,
                                        PhotonBuffer *output_buffers,
                                        bool *output_buffer_flags) {
+
+  for (int i = 0; i < 27; ++i) {
+    myassert(!output_buffer_flags[i] || output_buffers[i]._actual_size == 0,
+             "Non-empty starting output buffer!");
+  }
+
   for (unsigned int i = 0; i < input_buffer._actual_size; ++i) {
     Photon &photon = input_buffer._photons[i];
     myassert(photon._direction[0] != 0. || photon._direction[1] != 0. ||
@@ -350,7 +356,7 @@ inline static void do_photon_traversal(PhotonBuffer &input_buffer,
                "size: " << output_buffer._actual_size);
 
       ++output_buffer._actual_size;
-      myassert(output_buffer._actual_size < PHOTONBUFFER_SIZE,
+      myassert(output_buffer._actual_size <= PHOTONBUFFER_SIZE,
                "output buffer size: " << output_buffer._actual_size);
     }
   }
@@ -409,11 +415,11 @@ inline static void do_reemission(PhotonBuffer &buffer,
  * @param originals List of originals for the newly created copies.
  * @param copies Index of the first copy of each subgrid.
  */
-inline void create_copies(std::vector<SubGrid *> &gridvec,
-                          std::vector<unsigned char> &levels,
+inline void create_copies(std::vector< SubGrid * > &gridvec,
+                          std::vector< unsigned char > &levels,
                           MemorySpace &new_buffers,
-                          std::vector<unsigned int> &originals,
-                          std::vector<unsigned int> &copies) {
+                          std::vector< unsigned int > &originals,
+                          std::vector< unsigned int > &copies) {
 
   // we need to do 2 loops:
   //  - one loop to create the copies and store the offset of the first copy
@@ -435,7 +441,7 @@ inline void create_copies(std::vector<SubGrid *> &gridvec,
     }
     for (unsigned int j = 1; j < number_of_copies; ++j) {
       gridvec.push_back(
-          new DensitySubGrid(*static_cast<DensitySubGrid *>(gridvec[i])));
+          new DensitySubGrid(*static_cast< DensitySubGrid * >(gridvec[i])));
       originals.push_back(i);
     }
   }
@@ -533,10 +539,10 @@ inline void create_copies(std::vector<SubGrid *> &gridvec,
  * @param copies Indices of the first copies.
  */
 inline void make_copy(const unsigned int original,
-                      std::vector<DensitySubGrid *> &gridvec,
+                      std::vector< DensitySubGrid * > &gridvec,
                       MemorySpace &new_buffers,
-                      std::vector<unsigned int> &originals,
-                      std::vector<unsigned int> &copies) {
+                      std::vector< unsigned int > &originals,
+                      std::vector< unsigned int > &copies) {
 
   const unsigned int copy = gridvec.size();
   originals.push_back(original);
@@ -578,7 +584,7 @@ inline void ensure_neighbours(const unsigned int original_A,
                               const unsigned int original_B,
                               const unsigned int copy_A,
                               const unsigned int copy_B,
-                              std::vector<DensitySubGrid *> &gridvec,
+                              std::vector< DensitySubGrid * > &gridvec,
                               MemorySpace &new_buffers) {
   for (int i = 1; i < 27; ++i) {
     if (gridvec[original_A]->get_neighbour(i) == original_B) {
@@ -819,13 +825,13 @@ int main(int argc, char **argv) {
   const double box[6] = {-1.543e17, -1.543e17, -1.543e17,
                          3.086e17,  3.086e17,  3.086e17};
   // number of cells: 60^3
-  const int ncell[3] = {60, 60, 60};
+  const int ncell[3] = {128, 128, 128};
   // number of photons to shoot per iteration: 10^6
-  const unsigned int num_photon = 1000000;
+  const unsigned int num_photon = 10000000;
   // number of iterations: 10
   const unsigned int number_of_iterations = 10;
   // number of subgrids: 3^3
-  const int num_subgrid[3] = {3, 5, 4};
+  const int num_subgrid[3] = {8, 8, 8};
   // reemission probability
   //  const double reemission_probability = 0.364;
   const double reemission_probability = 0.;
@@ -865,15 +871,15 @@ int main(int argc, char **argv) {
   logmessage("Running with " << num_threads << " threads.", 0);
 
   // set up the queues
-  std::vector<NewQueue *> new_queues(num_threads, nullptr);
+  std::vector< NewQueue * > new_queues(num_threads, nullptr);
   for (int i = 0; i < num_threads; ++i) {
-    new_queues[i] = new NewQueue(2000);
+    new_queues[i] = new NewQueue(20000);
   }
 
   // set up the memory space
-  MemorySpace new_buffers(10000);
+  MemorySpace new_buffers(40000);
   // set up the task space
-  ThreadSafeVector<Task> tasks(400000);
+  ThreadSafeVector< Task > tasks(400000);
 
   Timer program_timer;
   program_timer.start();
@@ -881,7 +887,7 @@ int main(int argc, char **argv) {
   // set up the grid of smaller grids used for the algorithm
   // each smaller grid stores a fraction of the total grid and has information
   // about the neighbouring subgrids
-  std::vector<SubGrid *> gridvec(
+  std::vector< SubGrid * > gridvec(
       num_subgrid[0] * num_subgrid[1] * num_subgrid[2], nullptr);
   const double subbox_side[3] = {box[3] / num_subgrid[0],
                                  box[4] / num_subgrid[1],
@@ -913,7 +919,7 @@ int main(int argc, char **argv) {
                                       subbox_side[2]};
             gridvec[index] = new DensitySubGrid(subbox, subbox_ncell);
             DensitySubGrid &this_grid =
-                *static_cast<DensitySubGrid *>(gridvec[index]);
+                *static_cast< DensitySubGrid * >(gridvec[index]);
             // set up neighbouring information. We first make sure all
             // neighbours are initialized to NEIGHBOUR_OUTSIDE, indicating no
             // neighbour
@@ -967,7 +973,7 @@ int main(int argc, char **argv) {
     }               // for ix
   }                 // end parallel region
 
-  std::vector<unsigned long> initial_cost_vector(tot_num_subgrid, 0);
+  std::vector< unsigned long > initial_cost_vector(tot_num_subgrid, 0);
   std::ifstream initial_costs("costs_00.txt");
   if (initial_costs.good()) {
     // use cost information from a previous run as initial guess for the cost
@@ -980,7 +986,9 @@ int main(int argc, char **argv) {
     while (std::getline(initial_costs, line)) {
       std::istringstream lstream(line);
       lstream >> index >> cost >> rank >> thread;
-      initial_cost_vector[index] += cost;
+      if (index < tot_num_subgrid) {
+        initial_cost_vector[index] += cost;
+      }
     }
   } else {
     // no initial cost information: assume a uniform cost
@@ -991,9 +999,9 @@ int main(int argc, char **argv) {
 
   // make copies of the most expensive subgrids, so that multiple threads can
   // work on them simultaneously
-  std::vector<unsigned int> originals;
-  std::vector<unsigned int> copies(tot_num_subgrid, 0xffffffff);
-  std::vector<unsigned char> levels(tot_num_subgrid, 0);
+  std::vector< unsigned int > originals;
+  std::vector< unsigned int > copies(tot_num_subgrid, 0xffffffff);
+  std::vector< unsigned char > levels(tot_num_subgrid, 0);
 
   // get the average cost per thread
   unsigned long avg_cost_per_thread = 0;
@@ -1042,7 +1050,7 @@ int main(int argc, char **argv) {
 
   // add copy cost data: divide original cost by number of copies
   for (unsigned int igrid = 0; igrid < tot_num_subgrid; ++igrid) {
-    std::vector<unsigned int> this_copies;
+    std::vector< unsigned int > this_copies;
     unsigned int copy = copies[igrid];
     if (copy < 0xffffffff) {
       while (copy < gridvec.size() &&
@@ -1068,10 +1076,10 @@ int main(int argc, char **argv) {
       (unsigned int)((-box[0] / box[3]) * num_subgrid[0]),
       (unsigned int)((-box[1] / box[4]) * num_subgrid[1]),
       (unsigned int)((-box[2] / box[5]) * num_subgrid[2])};
-  std::vector<unsigned int> central_index;
+  std::vector< unsigned int > central_index;
 
   // set up the random number generators
-  std::vector<RandomGenerator> random_generator(num_threads);
+  std::vector< RandomGenerator > random_generator(num_threads);
   for (int i = 0; i < num_threads; ++i) {
     // make sure every thread on every process has a different seed
     random_generator[i].set_seed(42 + MPI_rank * num_threads + i);
@@ -1096,7 +1104,7 @@ int main(int argc, char **argv) {
     }
     logmessage("Number of central subgrid copies: " << central_index.size(), 0);
 
-    std::vector<int> central_queue(central_index.size());
+    std::vector< int > central_queue(central_index.size());
     for (unsigned int i = 0; i < central_index.size(); ++i) {
       central_queue[i] = costs.get_thread(central_index[i]);
     }
@@ -1110,9 +1118,9 @@ int main(int argc, char **argv) {
       logmessage("Updating neutral fractions for " << copy << ", copy of "
                                                    << original,
                  0);
-      static_cast<DensitySubGrid *>(gridvec[copy])
+      static_cast< DensitySubGrid * >(gridvec[copy])
           ->update_neutral_fractions(
-              *static_cast<DensitySubGrid *>(gridvec[original]));
+              *static_cast< DensitySubGrid * >(gridvec[original]));
     }
 
     logmessage("Starting photon shoot loop", 0);
@@ -1267,8 +1275,8 @@ int main(int argc, char **argv) {
             // now
             PhotonBuffer &buffer = new_buffers[current_buffer_index];
             const unsigned int igrid = buffer._sub_grid_index;
-            DensitySubGrid &this_grid =
-                *static_cast<DensitySubGrid *>(gridvec[buffer._sub_grid_index]);
+            DensitySubGrid &this_grid = *static_cast< DensitySubGrid * >(
+                gridvec[buffer._sub_grid_index]);
             // prepare output buffers
             for (int i = 0; i < 27; ++i) {
               const unsigned int ngb = this_grid.get_neighbour(i);
@@ -1363,8 +1371,8 @@ int main(int argc, char **argv) {
       logmessage("Updating ionization integrals for " << original
                                                       << " using copy " << copy,
                  0);
-      static_cast<DensitySubGrid *>(gridvec[original])
-          ->update_intensities(*static_cast<DensitySubGrid *>(gridvec[copy]));
+      static_cast< DensitySubGrid * >(gridvec[original])
+          ->update_intensities(*static_cast< DensitySubGrid * >(gridvec[copy]));
     }
 
     logmessage("Updating ionisation structure", 0);
@@ -1375,7 +1383,7 @@ int main(int argc, char **argv) {
       while (igrid < tot_num_subgrid) {
         const unsigned int current_igrid = atomic_post_increment(igrid);
         if (current_igrid < tot_num_subgrid) {
-          static_cast<DensitySubGrid *>(gridvec[current_igrid])
+          static_cast< DensitySubGrid * >(gridvec[current_igrid])
               ->compute_neutral_fraction(num_photon);
         }
       }
@@ -1453,7 +1461,7 @@ int main(int argc, char **argv) {
     costs.reset(gridvec.size());
     // make sure costs are up to date
     for (unsigned int igrid = 0; igrid < tot_num_subgrid; ++igrid) {
-      std::vector<unsigned int> this_copies;
+      std::vector< unsigned int > this_copies;
       unsigned int copy = copies[igrid];
       if (copy < 0xffffffff) {
         while (copy < gridvec.size() &&
@@ -1484,21 +1492,21 @@ int main(int argc, char **argv) {
 
   struct rusage resource_usage;
   getrusage(RUSAGE_SELF, &resource_usage);
-  size_t max_memory =
-      static_cast<size_t>(resource_usage.ru_maxrss) * static_cast<size_t>(1024);
+  size_t max_memory = static_cast< size_t >(resource_usage.ru_maxrss) *
+                      static_cast< size_t >(1024);
   logmessage("Maximum memory usage: " << human_readable_bytes(max_memory), 0);
 
   // OUTPUT:
   //  - ASCII output (for the VisIt plot script)
   std::ofstream ofile("intensities.txt");
   for (unsigned int igrid = 0; igrid < tot_num_subgrid; ++igrid) {
-    static_cast<DensitySubGrid *>(gridvec[igrid])->print_intensities(ofile);
+    static_cast< DensitySubGrid * >(gridvec[igrid])->print_intensities(ofile);
   }
   ofile.close();
   //  - binary output (for the Python plot script)
   std::ofstream bfile("intensities.dat");
   for (unsigned int igrid = 0; igrid < tot_num_subgrid; ++igrid) {
-    static_cast<DensitySubGrid *>(gridvec[igrid])->output_intensities(bfile);
+    static_cast< DensitySubGrid * >(gridvec[igrid])->output_intensities(bfile);
   }
   bfile.close();
 

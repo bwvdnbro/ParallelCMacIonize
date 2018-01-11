@@ -50,15 +50,15 @@ for iproc in range(nproc):
       texts.append("{0} ({1:.2f})".format(
         thread[i][0], thread[i][1] * 1. / avgcost))
     ax[iproc].broken_barh(bars, (ithread - 0.5, 0.4), facecolors = bar_colors)
-    for i in range(len(texts)):
-      ax[iproc].text(textpos[i], ithread, texts[i],
-                     horizontalalignment = "center",
-                     bbox = dict(facecolor = bar_colors[i], edgecolor = "none"))
+#    for i in range(len(texts)):
+#      ax[iproc].text(textpos[i], ithread, texts[i],
+#                     horizontalalignment = "center",
+#                     bbox = dict(facecolor = bar_colors[i], edgecolor = "none"))
 
 for a in ax:
   a.axvline(x = 1.)
   a.set_yticks([])
 ax[-1].set_xlabel("Fractional cost")
-ax[-1].set_xlim(0., max(ax[-1].get_xlim()[1], maxtext))
+#ax[-1].set_xlim(0., max(ax[-1].get_xlim()[1], maxtext))
 pl.tight_layout()
 pl.savefig("{0}.png".format(name[:-4]))

@@ -40,9 +40,9 @@
  * @return std::vector<size_t> containing the indices of the array in an order
  * that would sort the array.
  */
-template <typename _datatype_>
-inline std::vector<size_t> argsort(const _datatype_ *v, const size_t size) {
-  std::vector<size_t> indices(size, 0);
+template < typename _datatype_ >
+inline std::vector< size_t > argsort(const _datatype_ *v, const size_t size) {
+  std::vector< size_t > indices(size, 0);
   std::iota(indices.begin(), indices.end(), 0);
   std::sort(indices.begin(), indices.end(),
             [v](size_t i1, size_t i2) { return v[i1] < v[i2]; });
@@ -188,11 +188,11 @@ public:
   inline void redistribute() {
 
     // argsort the elements based on cost
-    std::vector<size_t> indices = argsort(_costs, _size);
+    std::vector< size_t > indices = argsort(_costs, _size);
     // store the cost per thread for later
-    std::vector<std::vector<unsigned long>> threadcost(
+    std::vector< std::vector< unsigned long > > threadcost(
         _number_of_processes,
-        std::vector<unsigned long>(_number_of_threads, 0));
+        std::vector< unsigned long >(_number_of_threads, 0));
     // loop over the subgrids in descending cost order
     size_t index = 0;
     const size_t max_index = _size - 1;

@@ -35,7 +35,7 @@ import sys
 ## run parameters
 # number of cells in one coordinate dimension
 # should be synced with the values used in the unit test
-ncell = 60
+ncell = 128
 # number of bins to use to bin the results
 nbin = 100
 

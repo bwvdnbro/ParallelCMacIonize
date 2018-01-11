@@ -31,7 +31,7 @@
 /**
  * @brief Thread safe fixed size vector.
  */
-template <typename _datatype_> class ThreadSafeVector {
+template < typename _datatype_ > class ThreadSafeVector {
 private:
   /*! @brief Current active index in the vector. */
   size_t _current_index;
