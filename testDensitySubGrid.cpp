@@ -1146,7 +1146,8 @@ int main(int argc, char **argv) {
       }
       // set up the initial source photon task
       {
-        const size_t task_index = tasks.get_free_element();
+        const size_t task_index = tasks.get_free_element_safe();
+        myassert(task_index < tasks.max_size(), "Task buffer overflow!");
         tasks[task_index]._type = TASKTYPE_SOURCE_PHOTON;
         // buffer is ready to be processed: add to the queue
         new_queues[thread_id]->add_task(task_index);
@@ -1221,7 +1222,9 @@ int main(int argc, char **argv) {
               if (num_photon_done_now < num_photon) {
                 // spawn a new source photon task
                 {
-                  const size_t task_index = tasks.get_free_element();
+                  const size_t task_index = tasks.get_free_element_safe();
+                  myassert(task_index < tasks.max_size(),
+                           "Task buffer overflow!");
                   tasks[task_index]._type = TASKTYPE_SOURCE_PHOTON;
                   // buffer is ready to be processed: add to the queue
                   new_queues[thread_id]->add_task(task_index);
@@ -1256,7 +1259,9 @@ int main(int argc, char **argv) {
                 fill_buffer(input_buffer, num_photon_this_loop,
                             random_generator[thread_id], this_central_index);
 
-                const size_t task_index = tasks.get_free_element();
+                const size_t task_index = tasks.get_free_element_safe();
+                myassert(task_index < tasks.max_size(),
+                         "Task buffer overflow!");
                 tasks[task_index]._type = TASKTYPE_PHOTON_TRAVERSAL;
                 tasks[task_index]._cell = this_central_index;
                 tasks[task_index]._buffer = buffer_index;
@@ -1309,7 +1314,9 @@ int main(int argc, char **argv) {
                   if (add_index != new_index) {
                     // add buffer to queue
                     atomic_pre_increment(num_active_buffers);
-                    const size_t task_index = tasks.get_free_element();
+                    const size_t task_index = tasks.get_free_element_safe();
+                    myassert(task_index < tasks.max_size(),
+                             "Task buffer overflow!");
                     if (i > 0) {
                       tasks[task_index]._type = TASKTYPE_PHOTON_TRAVERSAL;
                     } else {
@@ -1347,7 +1354,8 @@ int main(int argc, char **argv) {
             PhotonBuffer &buffer = new_buffers[current_buffer_index];
             do_reemission(buffer, random_generator[thread_id],
                           reemission_probability);
-            const size_t task_index = tasks.get_free_element();
+            const size_t task_index = tasks.get_free_element_safe();
+            myassert(task_index < tasks.max_size(), "Task buffer overflow!");
             tasks[task_index]._type = TASKTYPE_PHOTON_TRAVERSAL;
             tasks[task_index]._cell = task._cell;
             tasks[task_index]._buffer = current_buffer_index;

@@ -125,6 +125,28 @@ public:
   }
 
   /**
+   * @brief Get the index of a free element in the vector, if available.
+   *
+   * This element will be locked and needs to be freed later by calling
+   * free_element(). If no free element is available, this function returns
+   * max_size().
+   *
+   * @return Index of a free element.
+   */
+  inline size_t get_free_element_safe() {
+    if (_number_taken < _size) {
+      size_t index = atomic_post_increment(_current_index) % _size;
+      while (!atomic_lock(_locks[index])) {
+        index = atomic_post_increment(_current_index) % _size;
+      }
+      atomic_pre_increment(_number_taken);
+      return index;
+    } else {
+      return _size;
+    }
+  }
+
+  /**
    * @brief Free the element with the given index.
    *
    * The element can be overwritten after this method has been called.
@@ -149,6 +171,13 @@ public:
     myassert(_number_taken == _current_index, "Non continuous vector!");
     return _number_taken;
   }
+
+  /**
+   * @brief Maximum number of elements in the vector.
+   *
+   * @return Maximum number of elements that can be stored in the vector.
+   */
+  inline const size_t max_size() const { return _size; }
 };
 
 #endif // THREADSAFEVECTOR_HPP

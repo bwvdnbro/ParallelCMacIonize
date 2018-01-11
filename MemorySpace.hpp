@@ -59,7 +59,12 @@ public:
    *
    * @return Index of a free buffer.
    */
-  inline size_t get_free_buffer() { return _memory_space.get_free_element(); }
+  inline size_t get_free_buffer() {
+    const size_t index = _memory_space.get_free_element_safe();
+    myassert(index < _memory_space.max_size(),
+             "No more free element in memory space!");
+    return index;
+  }
 
   /**
    * @brief Free the buffer with the given index.
