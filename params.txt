@@ -1,13 +1,42 @@
+## Physical parameters
+# simulation box dimensions
 box:
   anchor: [-5. pc, -5. pc, -5. pc]
   sides: [10. pc, 10. pc, 10. pc]
+# grid resolution
 ncell: [128, 128, 128]
+# number of photon packets
 num_photon: 1e7
+# number of iterations
 number_of_iterations: 10
-num_subgrid: [8, 8, 8]
+# reemission probability
 reemission_probability: 0.
 
+## Algorithm parameters
+# number of subgrids
+# this is a coarser version of the total grid and determines the way the grid is
+# split across different threads and processes
+# in the current implementation, the coarse grid resolution numbers should be
+# factors of the total grid resolution, to make sure all subgrids have the same
+# resolution
+# for good performance, the total number of subgrids should be significantly
+# larger than the number of threads used for the run
+num_subgrid: [8, 8, 8]
+# number of tasks that can be stored in the queue for a single thread
+# the code will crash if more tasks are assigned to a thread at any given
+# moment
 queue_size_per_thread: 20000
+# number of photon buffers that can be stored simultaneously
+# the code will crash if more photon buffers are needed at any given moment
 memoryspace_size: 40000
+# total number of tasks that can be performed by all threads together during
+# a single iteration of the algorithm
+# the code will crash if the total number of tasks exceeds this number
 number_of_tasks: 400000
+# inverse fraction of the work load per thread that can be taken by a single
+# subgrid. If the work load for a subgrid exceeds this limit, the subgrid will
+# be split across multiple copies that can be processed independently
+# setting this number to a value less than 1 will disable subgrid copies
+# to get reasonable performance, this value should be at least > 2
+# note that larger values will require more memory to run
 copy_factor: 10
