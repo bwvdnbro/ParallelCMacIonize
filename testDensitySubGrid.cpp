@@ -59,6 +59,7 @@
 #include "Task.hpp"
 #include "Timer.hpp"
 #include "Utilities.hpp"
+#include "YAMLDictionary.hpp"
 
 // standard library includes
 #include <cmath>
@@ -442,21 +443,45 @@ int main(int argc, char **argv) {
     }
   }
 
+  std::ifstream paramfile("params.txt");
+  YAMLDictionary parameters(paramfile);
+  const CoordinateVector<> param_box_anchor =
+      parameters.get_physical_vector< QUANTITY_LENGTH >("box:anchor");
+  const CoordinateVector<> param_box_sides =
+      parameters.get_physical_vector< QUANTITY_LENGTH >("box:sides");
+  const CoordinateVector< int > param_ncell =
+      parameters.get_value< CoordinateVector< int > >("ncell");
+  const unsigned int param_num_photon =
+      parameters.get_value< unsigned int >("num_photon");
+  const unsigned int param_number_of_iterations =
+      parameters.get_value< unsigned int >("number_of_iterations");
+  const CoordinateVector< int > param_num_subgrid =
+      parameters.get_value< CoordinateVector< int > >("num_subgrid");
+  const double param_reemission_probability =
+      parameters.get_value< double >("reemission_probability");
+  const unsigned int param_queue_size_per_thread =
+      parameters.get_value< unsigned int >("queue_size_per_thread");
+  const unsigned int param_memoryspace_size =
+      parameters.get_value< unsigned int >("memoryspace_size");
+  const unsigned int param_number_of_tasks =
+      parameters.get_value< unsigned int >("number_of_tasks");
+
+  logmessage("\n##\n# Parameters:\n##", 0);
+  parameters.print_contents(std::cout, true);
+  logmessage("##\n", 0);
+
   /// Main simulation parameters
-  // size of the box (corresponds to a -5 pc -> 5 pc cube)
-  const double box[6] = {-1.543e17, -1.543e17, -1.543e17,
-                         3.086e17,  3.086e17,  3.086e17};
-  // number of cells: 60^3
-  const int ncell[3] = {128, 128, 128};
-  // number of photons to shoot per iteration: 10^6
-  const unsigned int num_photon = 10000000;
-  // number of iterations: 10
-  const unsigned int number_of_iterations = 10;
-  // number of subgrids: 3^3
-  const int num_subgrid[3] = {8, 8, 8};
+  const double box[6] = {param_box_anchor.x(), param_box_anchor.y(),
+                         param_box_anchor.z(), param_box_sides.x(),
+                         param_box_sides.y(),  param_box_sides.z()};
+  const int ncell[3] = {param_ncell.x(), param_ncell.y(), param_ncell.z()};
+  const unsigned int num_photon = param_num_photon;
+  const unsigned int number_of_iterations = param_number_of_iterations;
+  const int num_subgrid[3] = {param_num_subgrid.x(), param_num_subgrid.y(),
+                              param_num_subgrid.z()};
   // reemission probability
   //  const double reemission_probability = 0.364;
-  const double reemission_probability = 0.;
+  const double reemission_probability = param_reemission_probability;
 
   // set up the number of threads to use
   // we first determine the number of threads available (either by system
@@ -495,13 +520,13 @@ int main(int argc, char **argv) {
   // set up the queues
   std::vector< NewQueue * > new_queues(num_threads, nullptr);
   for (int i = 0; i < num_threads; ++i) {
-    new_queues[i] = new NewQueue(20000);
+    new_queues[i] = new NewQueue(param_queue_size_per_thread);
   }
 
   // set up the memory space
-  MemorySpace new_buffers(40000);
+  MemorySpace new_buffers(param_memoryspace_size);
   // set up the task space
-  ThreadSafeVector< Task > tasks(400000);
+  ThreadSafeVector< Task > tasks(param_number_of_tasks);
 
   Timer program_timer;
   program_timer.start();
@@ -1124,7 +1149,9 @@ int main(int argc, char **argv) {
   getrusage(RUSAGE_SELF, &resource_usage);
   size_t max_memory = static_cast< size_t >(resource_usage.ru_maxrss) *
                       static_cast< size_t >(1024);
-  logmessage("Maximum memory usage: " << human_readable_bytes(max_memory), 0);
+  logmessage(
+      "Maximum memory usage: " << Utilities::human_readable_bytes(max_memory),
+      0);
 
   // OUTPUT:
   //  - ASCII output (for the VisIt plot script)
