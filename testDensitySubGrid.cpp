@@ -43,9 +43,6 @@
  *  be taken by a single subgrid. */
 #define COPY_FACTOR 10
 
-/*! @brief Activate this to unit test the directional algorithms. */
-//#define TEST_DIRECTIONS
-
 /*! @brief Activate this to unit test the CostVector. */
 //#define TEST_COSTVECTOR
 
@@ -57,6 +54,7 @@
 // Project includes
 #include "CostVector.hpp"
 #include "DensitySubGrid.hpp"
+#include "Log.hpp"
 #include "MemorySpace.hpp"
 #include "NewQueue.hpp"
 #include "PhotonBuffer.hpp"
@@ -73,55 +71,6 @@
 #include <sstream>
 #include <sys/resource.h>
 #include <vector>
-
-/**
- * @brief Check the get_output_direction method of the given grid with the given
- * input parameters and expected output.
- *
- * @param grid DensitySubGrid to test on.
- * @param ix x index.
- * @param iy y index.
- * @param iz z index.
- * @param ref Expected output.
- */
-#define check_direction(grid, ix, iy, iz, ref)                                 \
-  {                                                                            \
-    const int three_index[3] = {ix, iy, iz};                                   \
-    const int result = grid.get_output_direction(three_index);                 \
-    if (result != ref) {                                                       \
-      std::cerr << "Wrong output direction!" << std::endl;                     \
-      std::cerr << "Three index: " << ix << " " << iy << " " << iz             \
-                << std::endl;                                                  \
-      std::cerr << "Expected: " << ref << ", got: " << result << std::endl;    \
-      return 1;                                                                \
-    }                                                                          \
-  }
-
-/**
- * @brief Check the get_start_index function of the given grid againts the given
- * reference output.
- *
- * @param grid DensitySubGrid to test.
- * @param position Input position (in m).
- * @param input_direction Input TravelDirection.
- * @param rx Expected x index output.
- * @param ry Expected y index output.
- * @param rz Expected z index output.
- */
-#define check_input(grid, position, input_direction, rx, ry, rz)               \
-  {                                                                            \
-    int three_index[3];                                                        \
-    grid.get_start_index(position, input_direction, three_index);              \
-    if (!(three_index[0] == rx && three_index[1] == ry &&                      \
-          three_index[2] == rz)) {                                             \
-      std::cerr << "Wrong input three index!" << std::endl;                    \
-      std::cerr << "Input direction: " << input_direction << std::endl;        \
-      std::cerr << "Expected: " << rx << " " << ry << " " << rz << std::endl;  \
-      std::cerr << "Got: " << three_index[0] << " " << three_index[1] << " "   \
-                << three_index[2] << std::endl;                                \
-      return 1;                                                                \
-    }                                                                          \
-  }
 
 /**
  * @brief Write a file with the start and end times of all tasks.
@@ -609,79 +558,6 @@ int main(int argc, char **argv) {
       logmessage("Running on a single process.", 0);
     }
   }
-
-#ifdef TEST_DIRECTIONS
-  /// test directional routines
-  {
-    const double testbox[6] = {0., 0., 0., 1., 1., 1.};
-    const int testncell[3] = {10, 10, 10};
-    DensitySubGrid test_grid(testbox, testncell);
-
-    check_direction(test_grid, 4, 5, 3, TRAVELDIRECTION_INSIDE);
-
-    check_direction(test_grid, -1, 5, 3, TRAVELDIRECTION_FACE_X_N);
-    check_direction(test_grid, 10, 5, 3, TRAVELDIRECTION_FACE_X_P);
-    check_direction(test_grid, 4, -1, 3, TRAVELDIRECTION_FACE_Y_N);
-    check_direction(test_grid, 4, 10, 3, TRAVELDIRECTION_FACE_Y_P);
-    check_direction(test_grid, 4, 5, -1, TRAVELDIRECTION_FACE_Z_N);
-    check_direction(test_grid, 4, 5, 10, TRAVELDIRECTION_FACE_Z_P);
-
-    check_direction(test_grid, -1, -1, 3, TRAVELDIRECTION_EDGE_Z_NN);
-    check_direction(test_grid, -1, 10, 3, TRAVELDIRECTION_EDGE_Z_NP);
-    check_direction(test_grid, 10, -1, 3, TRAVELDIRECTION_EDGE_Z_PN);
-    check_direction(test_grid, 10, 10, 3, TRAVELDIRECTION_EDGE_Z_PP);
-    check_direction(test_grid, -1, 5, -1, TRAVELDIRECTION_EDGE_Y_NN);
-    check_direction(test_grid, -1, 5, 10, TRAVELDIRECTION_EDGE_Y_NP);
-    check_direction(test_grid, 10, 5, -1, TRAVELDIRECTION_EDGE_Y_PN);
-    check_direction(test_grid, 10, 5, 10, TRAVELDIRECTION_EDGE_Y_PP);
-    check_direction(test_grid, 4, -1, -1, TRAVELDIRECTION_EDGE_X_NN);
-    check_direction(test_grid, 4, -1, 10, TRAVELDIRECTION_EDGE_X_NP);
-    check_direction(test_grid, 4, 10, -1, TRAVELDIRECTION_EDGE_X_PN);
-    check_direction(test_grid, 4, 10, 10, TRAVELDIRECTION_EDGE_X_PP);
-
-    check_direction(test_grid, -1, -1, -1, TRAVELDIRECTION_CORNER_NNN);
-    check_direction(test_grid, -1, -1, 10, TRAVELDIRECTION_CORNER_NNP);
-    check_direction(test_grid, -1, 10, -1, TRAVELDIRECTION_CORNER_NPN);
-    check_direction(test_grid, -1, 10, 10, TRAVELDIRECTION_CORNER_NPP);
-    check_direction(test_grid, 10, -1, -1, TRAVELDIRECTION_CORNER_PNN);
-    check_direction(test_grid, 10, -1, 10, TRAVELDIRECTION_CORNER_PNP);
-    check_direction(test_grid, 10, 10, -1, TRAVELDIRECTION_CORNER_PPN);
-    check_direction(test_grid, 10, 10, 10, TRAVELDIRECTION_CORNER_PPP);
-
-    const double position[3] = {0.5, 0.5, 0.5};
-    check_input(test_grid, position, TRAVELDIRECTION_INSIDE, 5, 5, 5);
-
-    check_input(test_grid, position, TRAVELDIRECTION_FACE_X_N, 0, 5, 5);
-    check_input(test_grid, position, TRAVELDIRECTION_FACE_X_P, 9, 5, 5);
-    check_input(test_grid, position, TRAVELDIRECTION_FACE_Y_N, 5, 0, 5);
-    check_input(test_grid, position, TRAVELDIRECTION_FACE_Y_P, 5, 9, 5);
-    check_input(test_grid, position, TRAVELDIRECTION_FACE_Z_N, 5, 5, 0);
-    check_input(test_grid, position, TRAVELDIRECTION_FACE_Z_P, 5, 5, 9);
-
-    check_input(test_grid, position, TRAVELDIRECTION_EDGE_X_NN, 5, 0, 0);
-    check_input(test_grid, position, TRAVELDIRECTION_EDGE_X_NP, 5, 0, 9);
-    check_input(test_grid, position, TRAVELDIRECTION_EDGE_X_PN, 5, 9, 0);
-    check_input(test_grid, position, TRAVELDIRECTION_EDGE_X_PP, 5, 9, 9);
-    check_input(test_grid, position, TRAVELDIRECTION_EDGE_Y_NN, 0, 5, 0);
-    check_input(test_grid, position, TRAVELDIRECTION_EDGE_Y_NP, 0, 5, 9);
-    check_input(test_grid, position, TRAVELDIRECTION_EDGE_Y_PN, 9, 5, 0);
-    check_input(test_grid, position, TRAVELDIRECTION_EDGE_Y_PP, 9, 5, 9);
-    check_input(test_grid, position, TRAVELDIRECTION_EDGE_Z_NN, 0, 0, 5);
-    check_input(test_grid, position, TRAVELDIRECTION_EDGE_Z_NP, 0, 9, 5);
-    check_input(test_grid, position, TRAVELDIRECTION_EDGE_Z_PN, 9, 0, 5);
-    check_input(test_grid, position, TRAVELDIRECTION_EDGE_Z_PP, 9, 9, 5);
-
-    check_input(test_grid, position, TRAVELDIRECTION_CORNER_NNN, 0, 0, 0);
-    check_input(test_grid, position, TRAVELDIRECTION_CORNER_NNP, 0, 0, 9);
-    check_input(test_grid, position, TRAVELDIRECTION_CORNER_NPN, 0, 9, 0);
-    check_input(test_grid, position, TRAVELDIRECTION_CORNER_NPP, 0, 9, 9);
-    check_input(test_grid, position, TRAVELDIRECTION_CORNER_PNN, 9, 0, 0);
-    check_input(test_grid, position, TRAVELDIRECTION_CORNER_PNP, 9, 0, 9);
-    check_input(test_grid, position, TRAVELDIRECTION_CORNER_PPN, 9, 9, 0);
-    check_input(test_grid, position, TRAVELDIRECTION_CORNER_PPP, 9, 9, 9);
-    return MPI_Finalize();
-  }
-#endif
 
 #ifdef TEST_COSTVECTOR
   {
