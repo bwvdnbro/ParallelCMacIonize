@@ -42,6 +42,44 @@
  * how many completed, and we can use this information to deduce how many cells
  * are still active. This can be used to set up an uncoordinated communication
  * scheme.
+ *
+ * The way this works is as follows: as long as a process has work to do, it
+ * does work and occasionally (e.g. after a cell has been processed) checks if
+ * an MPI communication is coming in (non-blocking). As soon as there is no more
+ * work, the process notifies a master process (process 0) that it is ready, and
+ * then enters a blocking communication loop (since a process can only be woken
+ * up again through an incoming communication). The master process gathers the
+ * number of interactions that has been created (either from the start, or by
+ * interaction with a neighbour), and the number of interactions that has been
+ * completed, globally for all processes. If the master process has no more
+ * work, it performs a preliminary check on these values to see if they are
+ * equal. If they are, there is a possibility that we finished, and a more
+ * strict test needs to be performed (since the values might accidentally be
+ * equal for other reasons). The more strict test is initiated by the master by
+ * sending a dedicated message to all other processes. All other processes
+ * receive this message when they have time and upon receiving it enter a
+ * blocking collective communication to gather the actual total number of
+ * created and completed interactions. If these values match, the master sends
+ * a final signal to all processes to inform them that the simulation finished.
+ * If not, the master goes into a blocking receive until at least another
+ * process finished, or it receives more interactions itself, after which the
+ * whole process repeats.
+ *
+ * There are some key aspects for this algorithm to work:
+ *   - we know how many interactions need to be done at any given time, and how
+ *     many completed. If one process has access to this information for all
+ *     processes, it can decide whether we finished or not.
+ *   - a process can get a good guess of whether a finish is likely by gathering
+ *     these numbers from individual processes, without the need for a global
+ *     (blocking) communication
+ *   - we need to keep track of how many interactions were created and completed
+ *     between individual sends to master to make sure the master does not need
+ *     to store an individual counter per process: a contribution that has been
+ *     send to master cannot be send again
+ *   - the master needs to inform the other processes that we really finished in
+ *     a separate message, so that we have a clean way of exiting the
+ *     communication loop (and so that we can use a unilateral collective
+ *     communication)
  */
 
 /*! @brief Threshold probability \f$p\f$ of a cell to affect one of its
@@ -327,7 +365,7 @@ int main(int argc, char **argv) {
     // we might be able to replace the first condition with a while though...
     // doesn't really matter...
     if (number_active == 0) {
-      // no more local work to do, check if other processes are still working...
+      // no more local work to do, notify master...
       if (rank != 0) {
         // send statistics to the master process (rank 0)
         if (created_since_last > 0 || completed_since_last > 0) {
