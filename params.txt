@@ -1,0 +1,13 @@
+box:
+  anchor: [-5. pc, -5. pc, -5. pc]
+  sides: [10. pc, 10. pc, 10. pc]
+ncell: [128, 128, 128]
+num_photon: 1e7
+number_of_iterations: 10
+num_subgrid: [8, 8, 8]
+reemission_probability: 0.
+
+queue_size_per_thread: 20000
+memoryspace_size: 40000
+number_of_tasks: 400000
+copy_factor: 10
