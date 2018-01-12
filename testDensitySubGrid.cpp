@@ -43,9 +43,6 @@
  *  be taken by a single subgrid. */
 #define COPY_FACTOR 10
 
-/*! @brief Activate this to unit test the MPI DensitySubGrid communication. */
-//#define MPI_SUBGRID_TEST
-
 /*! @brief Activate this to unit test the directional algorithms. */
 //#define TEST_DIRECTIONS
 
@@ -612,62 +609,6 @@ int main(int argc, char **argv) {
       logmessage("Running on a single process.", 0);
     }
   }
-
-#ifdef MPI_SUBGRID_TEST
-  /// test MPI DensitySubGrid communication
-  {
-    // make sure we have at least 2 processes
-    myassert(MPI_size > 1, "Not running in MPI mode!");
-
-    // set up a random DensitySubGrid
-    const double box[6] = {-0.5, -0.5, -0.5, 1., 1., 1.};
-    const int ncell[3] = {3, 4, 5};
-    DensitySubGrid test_grid(box, ncell);
-    RandomGenerator random_generator(42);
-    test_grid._computational_cost = random_generator.get_random_integer();
-    for (unsigned int i = 0; i < 27; ++i) {
-      test_grid._ngbs[i] = random_generator.get_random_integer();
-      test_grid._active_buffers[i] = random_generator.get_random_integer();
-    }
-    const int tot_ncell = ncell[0] * ncell[1] * ncell[2];
-    for (int i = 0; i < tot_ncell; ++i) {
-      test_grid._number_density[i] =
-          random_generator.get_uniform_random_double();
-      test_grid._neutral_fraction[i] =
-          random_generator.get_uniform_random_double();
-      test_grid._intensity_integral[i] =
-          random_generator.get_uniform_random_double();
-    }
-
-    // now communicate:
-    //  - rank 0 sends the subgrid
-    //  - rank 1 receives and checks if the subgrid is what it should be
-    char MPI_buffer[DENSITYSUBGRID_FIXED_MPI_SIZE + 180 * sizeof(double)];
-    const int buffer_size =
-        DENSITYSUBGRID_FIXED_MPI_SIZE + 180 * sizeof(double);
-    if (MPI_rank == 0) {
-      // pack...
-      test_grid.pack(MPI_buffer, buffer_size);
-      // ...and send
-      MPI_Send(MPI_buffer, buffer_size, MPI_PACKED, 1, 101010, MPI_COMM_WORLD);
-    } else if (MPI_rank == 1) {
-      // receive...
-      MPI_Status status;
-      MPI_Recv(MPI_buffer, buffer_size, MPI_PACKED, 0, 101010, MPI_COMM_WORLD,
-               &status);
-      // ...and unpack (we deliberately make the receiving grid too small to
-      //  check the reallocation)
-      const int recv_ncell[3] = {1, 1, 1};
-      DensitySubGrid recv_grid(box, recv_ncell);
-      recv_grid.unpack(MPI_buffer, buffer_size);
-
-      // check if the result is what it should be
-      densitysubgrid_check_equal(test_grid, recv_grid);
-    } // other ranks do nothing
-
-    return MPI_Finalize();
-  }
-#endif // MPI_SUBGRID_TEST
 
 #ifdef TEST_DIRECTIONS
   /// test directional routines
