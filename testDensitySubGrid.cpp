@@ -58,6 +58,7 @@
 #include "RandomGenerator.hpp"
 #include "Task.hpp"
 #include "Timer.hpp"
+#include "Utilities.hpp"
 
 // standard library includes
 #include <cmath>
@@ -135,50 +136,6 @@ inline void output_costs(const unsigned int iloop, const unsigned int ngrid,
     }
   }
 #endif
-}
-
-/**
- * @brief Get the unit of @f$2^{10e}@f$ bytes.
- *
- * @param exponent Exponent @f$e@f$.
- * @return Name for @f$2^{10e}@f$ bytes: (@f$2^{10}@f$ bytes = KB, ...).
- */
-inline std::string byte_unit(uint_fast8_t exponent) {
-  switch (exponent) {
-  case 0:
-    return "bytes";
-  case 1:
-    return "KB";
-  case 2:
-    return "MB";
-  case 3:
-    return "GB";
-  case 4:
-    return "TB";
-  default:
-    return "";
-  }
-}
-
-/**
- * @brief Convert the given number of bytes to a human readable string.
- *
- * @param bytes Number of bytes.
- * @return std::string containing the given number of bytes in "bytes", "KB",
- * "MB", "GB"...
- */
-inline std::string human_readable_bytes(size_t bytes) {
-  uint_fast8_t sizecount = 0;
-  double bytefloat = bytes;
-  while ((bytes >> 10) > 0) {
-    bytes >>= 10;
-    ++sizecount;
-    bytefloat /= 1024.;
-  }
-  std::stringstream bytestream;
-  bytefloat = std::round(100. * bytefloat) * 0.01;
-  bytestream << bytefloat << " " << byte_unit(sizecount);
-  return bytestream.str();
 }
 
 /**
@@ -452,77 +409,6 @@ inline void create_copies(std::vector< SubGrid * > &gridvec,
           gridvec[copy]->set_neighbour(j, NEIGHBOUR_OUTSIDE);
         }
       }
-    }
-  }
-}
-
-/**
- * @brief Create a copy of the subgrid with the given index.
- *
- * @param original Original subgrid index.
- * @param gridvec Subgrids.
- * @param new_buffers Photon buffer space.
- * @param originals Indices of the original subgrids.
- * @param copies Indices of the first copies.
- */
-inline void make_copy(const unsigned int original,
-                      std::vector< DensitySubGrid * > &gridvec,
-                      MemorySpace &new_buffers,
-                      std::vector< unsigned int > &originals,
-                      std::vector< unsigned int > &copies) {
-
-  const unsigned int copy = gridvec.size();
-  originals.push_back(original);
-  if (copies[original] == 0xffffffff) {
-    copies[original] = copy;
-  }
-
-  gridvec.push_back(new DensitySubGrid(*gridvec[original]));
-  for (int i = 0; i < 27; ++i) {
-    if (i > 0) {
-      const unsigned int original_ngb = gridvec[original]->get_neighbour(i);
-      gridvec[copy]->set_neighbour(i, original_ngb);
-      const unsigned int active_buffer = new_buffers.get_free_buffer();
-      new_buffers[active_buffer]._sub_grid_index = original_ngb;
-      new_buffers[active_buffer]._direction = output_to_input_direction(i);
-      gridvec[copy]->set_active_buffer(i, active_buffer);
-    } else {
-      gridvec[copy]->set_neighbour(i, copy);
-      const unsigned int active_buffer = new_buffers.get_free_buffer();
-      new_buffers[active_buffer]._sub_grid_index = copy;
-      new_buffers[active_buffer]._direction = TRAVELDIRECTION_INSIDE;
-      gridvec[copy]->set_active_buffer(i, active_buffer);
-    }
-  }
-}
-
-/**
- * @brief Make sure the given copies of the given original subgrids are mutual
- * neighbours.
- *
- * @param original_A First original.
- * @param original_B Second original.
- * @param copy_A First copy.
- * @param copy_B Second copy.
- * @param gridvec Subgrids.
- * @param new_buffers Photon buffer space.
- */
-inline void ensure_neighbours(const unsigned int original_A,
-                              const unsigned int original_B,
-                              const unsigned int copy_A,
-                              const unsigned int copy_B,
-                              std::vector< DensitySubGrid * > &gridvec,
-                              MemorySpace &new_buffers) {
-  for (int i = 1; i < 27; ++i) {
-    if (gridvec[original_A]->get_neighbour(i) == original_B) {
-      gridvec[copy_A]->set_neighbour(i, copy_B);
-      unsigned int active_buffer = gridvec[copy_A]->get_active_buffer(i);
-      new_buffers[active_buffer]._sub_grid_index = copy_B;
-      gridvec[copy_B]->set_neighbour(output_to_input_direction(i), copy_A);
-      active_buffer =
-          gridvec[copy_B]->get_active_buffer(output_to_input_direction(i));
-      new_buffers[active_buffer]._sub_grid_index = copy_A;
-      break;
     }
   }
 }
