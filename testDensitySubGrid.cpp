@@ -45,6 +45,7 @@
 #endif
 
 // Project includes
+#include "CommandLineParser.hpp"
 #include "CostVector.hpp"
 #include "DensitySubGrid.hpp"
 #include "Log.hpp"
@@ -423,6 +424,8 @@ inline void create_copies(std::vector< SubGrid * > &gridvec,
  */
 int main(int argc, char **argv) {
 
+  /// initialisation
+
   // MPI initialisation
   MPI_Init(&argc, &argv);
   int rank_get, size_get;
@@ -439,7 +442,25 @@ int main(int argc, char **argv) {
     }
   }
 
-  std::ifstream paramfile("params.txt");
+  // parse the command line options
+  CommandLineParser commandlineparser("testDensitySubGrid");
+  commandlineparser.add_required_option< int_fast32_t >(
+      "threads", 't', "Number of shared memory threads to use.");
+  commandlineparser.add_required_option< std::string >(
+      "params", 'p', "Name of the parameter file.");
+  commandlineparser.parse_arguments(argc, argv);
+
+  int num_threads_request =
+      commandlineparser.get_value< int_fast32_t >("threads");
+  const std::string paramfile_name =
+      commandlineparser.get_value< std::string >("params");
+
+  // read the parameter file
+  std::ifstream paramfile(paramfile_name);
+  if (!paramfile) {
+    cmac_error("Unable to open parameter file \"%s\"!", paramfile_name.c_str());
+  }
+
   YAMLDictionary parameters(paramfile);
   const CoordinateVector<> param_box_anchor =
       parameters.get_physical_vector< QUANTITY_LENGTH >("box:anchor");
@@ -494,11 +515,6 @@ int main(int argc, char **argv) {
   {
 #pragma omp single
     num_threads_available = omp_get_num_threads();
-  }
-
-  int num_threads_request = num_threads_available;
-  if (argc > 1) {
-    num_threads_request = atoi(argv[1]);
   }
 
   if (num_threads_request > num_threads_available) {
