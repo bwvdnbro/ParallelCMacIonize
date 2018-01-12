@@ -39,10 +39,6 @@
 /*! @brief Enable this to activate cost output. */
 #define COST_OUTPUT
 
-/*! @brief Maximum fraction of the total computational cost per thread that can
- *  be taken by a single subgrid. */
-#define COPY_FACTOR 10
-
 #ifdef TASK_OUTPUT
 // activate task output in Task.hpp
 #define TASK_PLOT
@@ -465,6 +461,8 @@ int main(int argc, char **argv) {
       parameters.get_value< unsigned int >("memoryspace_size");
   const unsigned int param_number_of_tasks =
       parameters.get_value< unsigned int >("number_of_tasks");
+  const double param_copy_factor =
+      parameters.get_value< double >("copy_factor");
 
   logmessage("\n##\n# Parameters:\n##", 0);
   parameters.print_contents(std::cout, true);
@@ -658,11 +656,11 @@ int main(int argc, char **argv) {
   avg_cost_per_thread /= num_threads;
   // now set the levels accordingly
   for (unsigned int i = 0; i < tot_num_subgrid; ++i) {
-    if (COPY_FACTOR * initial_cost_vector[i] > avg_cost_per_thread) {
+    if (param_copy_factor * initial_cost_vector[i] > avg_cost_per_thread) {
       // note that this in principle should be 1 higher. However, we do not
       // count the original.
       unsigned int number_of_copies =
-          COPY_FACTOR * initial_cost_vector[i] / avg_cost_per_thread;
+          param_copy_factor * initial_cost_vector[i] / avg_cost_per_thread;
       // get the highest bit
       unsigned int level = 0;
       while (number_of_copies > 0) {
@@ -764,7 +762,7 @@ int main(int argc, char **argv) {
       const unsigned int copy = tot_num_subgrid + i;
       logmessage("Updating neutral fractions for " << copy << ", copy of "
                                                    << original,
-                 0);
+                 1);
       static_cast< DensitySubGrid * >(gridvec[copy])
           ->update_neutral_fractions(
               *static_cast< DensitySubGrid * >(gridvec[original]));
@@ -1025,7 +1023,7 @@ int main(int argc, char **argv) {
       const unsigned int copy = tot_num_subgrid + i;
       logmessage("Updating ionization integrals for " << original
                                                       << " using copy " << copy,
-                 0);
+                 1);
       static_cast< DensitySubGrid * >(gridvec[original])
           ->update_intensities(*static_cast< DensitySubGrid * >(gridvec[copy]));
     }
@@ -1067,11 +1065,11 @@ int main(int argc, char **argv) {
 
     // get new levels
     for (unsigned int i = 0; i < tot_num_subgrid; ++i) {
-      if (COPY_FACTOR * initial_cost_vector[i] > avg_cost_per_thread) {
+      if (param_copy_factor * initial_cost_vector[i] > avg_cost_per_thread) {
         // note that this in principle should be 1 higher. However, we do not
         // count the original.
         unsigned int number_of_copies =
-            COPY_FACTOR * initial_cost_vector[i] / avg_cost_per_thread;
+            param_copy_factor * initial_cost_vector[i] / avg_cost_per_thread;
         // get the highest bit
         unsigned int level = 0;
         while (number_of_copies > 0) {
