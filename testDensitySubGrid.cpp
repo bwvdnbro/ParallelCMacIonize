@@ -43,9 +43,6 @@
  *  be taken by a single subgrid. */
 #define COPY_FACTOR 10
 
-/*! @brief Activate this to unit test the CostVector. */
-//#define TEST_COSTVECTOR
-
 #ifdef TASK_OUTPUT
 // activate task output in Task.hpp
 #define TASK_PLOT
@@ -558,30 +555,6 @@ int main(int argc, char **argv) {
       logmessage("Running on a single process.", 0);
     }
   }
-
-#ifdef TEST_COSTVECTOR
-  {
-    RandomGenerator random_generator;
-    CostVector costs(100, 16, 4);
-    unsigned long cost_list[100];
-    for (size_t i = 0; i < 100; ++i) {
-      cost_list[i] = random_generator.get_uniform_random_double() * 0xffffffff;
-      costs.add_cost(i, cost_list[i]);
-    }
-    // add an element with a ridiculously high cost to see how the algorithm
-    // copes
-    cost_list[42] = 0xfffffffff;
-    costs.set_cost(42, cost_list[42]);
-    costs.redistribute();
-    std::ofstream ofile("cost_test.txt");
-    ofile << "# element\tcost\trank\tthread\n";
-    for (size_t i = 0; i < 100; ++i) {
-      ofile << i << "\t" << cost_list[i] << "\t" << costs.get_process(i) << "\t"
-            << costs.get_thread(i) << "\n";
-    }
-    return MPI_Finalize();
-  }
-#endif
 
   /// Main simulation parameters
   // size of the box (corresponds to a -5 pc -> 5 pc cube)
