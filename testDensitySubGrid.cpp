@@ -146,14 +146,22 @@ inline void output_costs(const unsigned int iloop, const unsigned int ngrid,
 inline static void get_random_direction(RandomGenerator &random_generator,
                                         double *direction,
                                         double *inverse_direction) {
+
+  // draw two pseudo random numbers
   const double cost = 2. * random_generator.get_uniform_random_double() - 1.;
-  const double sint = std::sqrt(std::max(1. - cost * cost, 0.));
   const double phi = 2. * M_PI * random_generator.get_uniform_random_double();
+
+  // now use them to get all directional angles
+  const double sint = std::sqrt(std::max(1. - cost * cost, 0.));
   const double cosp = std::cos(phi);
   const double sinp = std::sin(phi);
+
+  // set the direction...
   direction[0] = sint * cosp;
   direction[1] = sint * sinp;
   direction[2] = cost;
+
+  // ...and its inverse
   inverse_direction[0] = 1. / direction[0];
   inverse_direction[1] = 1. / direction[1];
   inverse_direction[2] = 1. / direction[2];
@@ -171,24 +179,38 @@ inline static void fill_buffer(PhotonBuffer &buffer,
                                const unsigned int number_of_photons,
                                RandomGenerator &random_generator,
                                const unsigned int source_index) {
+
+  // set general buffer information
   buffer._actual_size = number_of_photons;
   buffer._sub_grid_index = source_index;
   buffer._direction = TRAVELDIRECTION_INSIDE;
+
   // draw random photons and store them in the buffer
   for (unsigned int i = 0; i < number_of_photons; ++i) {
+
     Photon &photon = buffer._photons[i];
+
+    // initial position: we currently assume a single source at the origin
     photon._position[0] = 0.;
     photon._position[1] = 0.;
     photon._position[2] = 0.;
+
+    // initial direction: isotropic distribution
     get_random_direction(random_generator, photon._direction,
                          photon._inverse_direction);
+
     // we currently assume equal weight for all photons
     photon._weight = 1.;
+
+    // current optical depth (always zero) and target (exponential distribution)
     photon._current_optical_depth = 0.;
     photon._target_optical_depth =
         -std::log(random_generator.get_uniform_random_double());
+
     // this is the fixed cross section we use for the moment
     photon._photoionization_cross_section = 6.3e-22;
+
+    // make sure the photon is moving in *a* direction
     myassert(photon._direction[0] != 0. || photon._direction[1] != 0. ||
                  photon._direction[2] != 0.,
              "fail");
@@ -208,24 +230,42 @@ inline static void do_photon_traversal(PhotonBuffer &input_buffer,
                                        PhotonBuffer *output_buffers,
                                        bool *output_buffer_flags) {
 
+  // make sure all output buffers are empty initially
   for (int i = 0; i < 27; ++i) {
     myassert(!output_buffer_flags[i] || output_buffers[i]._actual_size == 0,
              "Non-empty starting output buffer!");
   }
 
+  // now loop over the input buffer photons and traverse them one by one
   for (unsigned int i = 0; i < input_buffer._actual_size; ++i) {
+
+    // active photon
     Photon &photon = input_buffer._photons[i];
+
+    // make sure the photon is moving in *a* direction
     myassert(photon._direction[0] != 0. || photon._direction[1] != 0. ||
                  photon._direction[2] != 0.,
              "size: " << input_buffer._actual_size);
+
+    // traverse the photon through the active subgrid
     const int result = subgrid.interact(photon, input_buffer._direction);
+
+    // check that the photon ended up in a valid output buffer
     myassert(result >= 0 && result < 27, "fail");
-    // add the photon to an output buffer, if it still exists
+
+    // add the photon to an output buffer, if it still exists (if the
+    // corresponding output buffer does not exist, this means the photon left
+    // the simulation box)
     if (output_buffer_flags[result]) {
+
+      // get the correct output buffer
       PhotonBuffer &output_buffer = output_buffers[result];
-      // add the photon to the correct output buffer
+
+      // add the photon
       const unsigned int index = output_buffer._actual_size;
       output_buffer._photons[index] = photon;
+
+      // make sure we actually added this photon
       myassert(
           output_buffer._photons[index]._position[0] == photon._position[0] &&
               output_buffer._photons[index]._position[1] ==
@@ -237,7 +277,10 @@ inline static void do_photon_traversal(PhotonBuffer &input_buffer,
                    output_buffer._photons[index]._direction[2] != 0.,
                "size: " << output_buffer._actual_size);
 
+      // increase the active size of the output buffer by 1 (we added a photon)
       ++output_buffer._actual_size;
+
+      // check that the output buffer did not overflow
       myassert(output_buffer._actual_size <= PHOTONBUFFER_SIZE,
                "output buffer size: " << output_buffer._actual_size);
     }
@@ -254,21 +297,31 @@ inline static void do_photon_traversal(PhotonBuffer &input_buffer,
 inline static void do_reemission(PhotonBuffer &buffer,
                                  RandomGenerator &random_generator,
                                  const double reemission_probability) {
+
+  // loop over the active buffer and decide which photons to reemit
+  // we will be overwriting non-reemitted photons, that's why we need two index
+  // variables
   unsigned int index = 0;
   for (unsigned int i = 0; i < buffer._actual_size; ++i) {
+    // only a fraction (= 'reemission_probability') of the photons is actually
+    // reemitted
     if (random_generator.get_uniform_random_double() < reemission_probability) {
+      // give the photon a new random isotropic direction
       Photon &photon = buffer._photons[i];
       get_random_direction(random_generator, photon._direction,
                            photon._inverse_direction);
+      // reset the current optical depth (always zero) and target
       photon._current_optical_depth = 0.;
       photon._target_optical_depth =
           -std::log(random_generator.get_uniform_random_double());
-      // we never overwrite a photon that should be preserved (we either
-      // overwrite the photon itself, or a photon that is absorbed)
+      // NOTE: we can never overwrite a photon that should be preserved (we
+      // either overwrite the photon itself, or a photon that was not reemitted)
       buffer._photons[index] = photon;
       ++index;
     }
   }
+  // update the active size of the buffer: some photons were not reemitted, so
+  // the active size will shrink
   buffer._actual_size = index;
 }
 
@@ -412,6 +465,173 @@ inline void create_copies(std::vector< SubGrid * > &gridvec,
 }
 
 /**
+ * @brief Initialize MPI.
+ *
+ * @param argc Number of command line arguments.
+ * @param argv Command line arguments.
+ * @param MPI_rank Variable to store the active MPI rank in.
+ * @param MPI_size Variable to store the total MPI size in.
+ */
+inline void initialize_MPI(int &argc, char **argv, int &MPI_rank,
+                           int &MPI_size) {
+
+  MPI_Init(&argc, &argv);
+  MPI_Comm_rank(MPI_COMM_WORLD, &MPI_rank);
+  MPI_Comm_size(MPI_COMM_WORLD, &MPI_size);
+
+  if (MPI_rank == 0) {
+    if (MPI_size > 1) {
+      logmessage("Running on " << MPI_size << " processes.", 0);
+    } else {
+      logmessage("Running on a single process.", 0);
+    }
+  }
+}
+
+/**
+ * @brief Parse the command line options.
+ *
+ * @param argc Number of command line options.
+ * @param argv Command line options.
+ * @param num_threads_request Variable to store the requested number of threads
+ * in.
+ * @param paramfile_name Variable to store the parameter file name in.
+ */
+inline void parse_command_line(int argc, char **argv, int &num_threads_request,
+                               std::string &paramfile_name) {
+
+  CommandLineParser commandlineparser("testDensitySubGrid");
+  commandlineparser.add_required_option< int_fast32_t >(
+      "threads", 't', "Number of shared memory threads to use.");
+  commandlineparser.add_required_option< std::string >(
+      "params", 'p', "Name of the parameter file.");
+  commandlineparser.parse_arguments(argc, argv);
+
+  num_threads_request = commandlineparser.get_value< int_fast32_t >("threads");
+  paramfile_name = commandlineparser.get_value< std::string >("params");
+}
+
+/**
+ * @brief Read the parameter file.
+ *
+ * @param paramfile_name Name of the parameter file.
+ * @param box Variable to store the box anchor and size in.
+ * @param reemission_probability Variable to store the reemission probability
+ * in.
+ * @param ncell Variable to store the total number of cells in.
+ * @param num_subgrid Variable to store the total number of subgrids in.
+ * @param num_photon Variable to store the number of photon packets in.
+ * @param number_of_iterations Variable to store the number of iterations in.
+ * @param queue_size_per_thread Variable to store the size of the queue for
+ * each thread in.
+ * @param memoryspace_size Variable to store the size of the memory space in.
+ * @param number_of_tasks Variable to store the size of the task space in.
+ * @param MPI_buffer_size Variable to store the size of the MPI buffer in.
+ * @param copy_factor Variable to store the copy factor in.
+ */
+inline void read_parameters(
+    std::string paramfile_name, double box[6], double &reemission_probability,
+    int ncell[3], int num_subgrid[3], unsigned int &num_photon,
+    unsigned int &number_of_iterations, unsigned int &queue_size_per_thread,
+    unsigned int &memoryspace_size, unsigned int &number_of_tasks,
+    unsigned int &MPI_buffer_size, double &copy_factor) {
+
+  std::ifstream paramfile(paramfile_name);
+  if (!paramfile) {
+    cmac_error("Unable to open parameter file \"%s\"!", paramfile_name.c_str());
+  }
+
+  YAMLDictionary parameters(paramfile);
+
+  const CoordinateVector<> param_box_anchor =
+      parameters.get_physical_vector< QUANTITY_LENGTH >("box:anchor");
+  const CoordinateVector<> param_box_sides =
+      parameters.get_physical_vector< QUANTITY_LENGTH >("box:sides");
+
+  box[0] = param_box_anchor.x();
+  box[1] = param_box_anchor.y();
+  box[2] = param_box_anchor.z();
+  box[3] = param_box_sides.x();
+  box[4] = param_box_sides.y();
+  box[5] = param_box_sides.z();
+
+  reemission_probability =
+      parameters.get_value< double >("reemission_probability");
+
+  const CoordinateVector< int > param_ncell =
+      parameters.get_value< CoordinateVector< int > >("ncell");
+
+  ncell[0] = param_ncell.x();
+  ncell[1] = param_ncell.y();
+  ncell[2] = param_ncell.z();
+
+  const CoordinateVector< int > param_num_subgrid =
+      parameters.get_value< CoordinateVector< int > >("num_subgrid");
+
+  num_subgrid[0] = param_num_subgrid.x();
+  num_subgrid[1] = param_num_subgrid.y();
+  num_subgrid[2] = param_num_subgrid.z();
+
+  num_photon = parameters.get_value< unsigned int >("num_photon");
+  number_of_iterations =
+      parameters.get_value< unsigned int >("number_of_iterations");
+
+  queue_size_per_thread =
+      parameters.get_value< unsigned int >("queue_size_per_thread");
+  memoryspace_size = parameters.get_value< unsigned int >("memoryspace_size");
+  number_of_tasks = parameters.get_value< unsigned int >("number_of_tasks");
+  MPI_buffer_size = parameters.get_value< unsigned int >("MPI_buffer_size");
+  copy_factor = parameters.get_value< double >("copy_factor");
+
+  logmessage("\n##\n# Parameters:\n##", 0);
+  parameters.print_contents(std::cout, true);
+  logmessage("##\n", 0);
+}
+
+/**
+ * @brief Set the number of threads to use during the simulation.
+ *
+ * We first determine the number of threads available (either by system default,
+ * or because the user has set the OMP_NUM_THREADS environment variable). We
+ * then check if a number of threads was specified on the command line. We don't
+ * allow setting the number of threads to a value larger than available, and use
+ * the available number as default if no value was given on the command line. If
+ * the requested number of threads is larger than what is available, we display
+ * a message.
+ *
+ * @param num_threads_request Requested number of threads.
+ * @param num_threads Variable to store the actual number of threads that will
+ * be used in.
+ */
+inline void set_number_of_threads(int num_threads_request, int &num_threads) {
+
+  // check how many threads are available
+  int num_threads_available;
+#pragma omp parallel
+  {
+#pragma omp single
+    num_threads_available = omp_get_num_threads();
+  }
+
+  // now check if this is compatible with what was requested
+  if (num_threads_request > num_threads_available) {
+    // NO: warn the user
+    logmessage("More threads requested ("
+                   << num_threads_request << ") than available ("
+                   << num_threads_available
+                   << "). Resetting to maximum available number of threads.",
+               0);
+    num_threads_request = num_threads_available;
+  }
+
+  // set the number of threads to the requested/maximal allowed value
+  omp_set_num_threads(num_threads_request);
+  num_threads = num_threads_request;
+
+  logmessage("Running with " << num_threads << " threads.", 0);
+}
+
+/**
  * @brief Unit test for the DensitySubGrid class.
  *
  * Runs a simple Stromgren sphere test with a homogeneous density field, a
@@ -424,215 +644,215 @@ inline void create_copies(std::vector< SubGrid * > &gridvec,
  */
 int main(int argc, char **argv) {
 
-  /// initialisation
-
-  // MPI initialisation
-  MPI_Init(&argc, &argv);
-  int rank_get, size_get;
-  MPI_Comm_rank(MPI_COMM_WORLD, &rank_get);
-  MPI_Comm_size(MPI_COMM_WORLD, &size_get);
-  const int MPI_rank = rank_get;
-  const int MPI_size = size_get;
-
-  if (MPI_rank == 0) {
-    if (MPI_size > 1) {
-      logmessage("Running on " << MPI_size << " processes.", 0);
-    } else {
-      logmessage("Running on a single process.", 0);
-    }
-  }
-
-  // parse the command line options
-  CommandLineParser commandlineparser("testDensitySubGrid");
-  commandlineparser.add_required_option< int_fast32_t >(
-      "threads", 't', "Number of shared memory threads to use.");
-  commandlineparser.add_required_option< std::string >(
-      "params", 'p', "Name of the parameter file.");
-  commandlineparser.parse_arguments(argc, argv);
-
-  int num_threads_request =
-      commandlineparser.get_value< int_fast32_t >("threads");
-  const std::string paramfile_name =
-      commandlineparser.get_value< std::string >("params");
-
-  // read the parameter file
-  std::ifstream paramfile(paramfile_name);
-  if (!paramfile) {
-    cmac_error("Unable to open parameter file \"%s\"!", paramfile_name.c_str());
-  }
-
-  YAMLDictionary parameters(paramfile);
-  const CoordinateVector<> param_box_anchor =
-      parameters.get_physical_vector< QUANTITY_LENGTH >("box:anchor");
-  const CoordinateVector<> param_box_sides =
-      parameters.get_physical_vector< QUANTITY_LENGTH >("box:sides");
-  const CoordinateVector< int > param_ncell =
-      parameters.get_value< CoordinateVector< int > >("ncell");
-  const unsigned int param_num_photon =
-      parameters.get_value< unsigned int >("num_photon");
-  const unsigned int param_number_of_iterations =
-      parameters.get_value< unsigned int >("number_of_iterations");
-  const CoordinateVector< int > param_num_subgrid =
-      parameters.get_value< CoordinateVector< int > >("num_subgrid");
-  const double param_reemission_probability =
-      parameters.get_value< double >("reemission_probability");
-  const unsigned int param_queue_size_per_thread =
-      parameters.get_value< unsigned int >("queue_size_per_thread");
-  const unsigned int param_memoryspace_size =
-      parameters.get_value< unsigned int >("memoryspace_size");
-  const unsigned int param_number_of_tasks =
-      parameters.get_value< unsigned int >("number_of_tasks");
-  const double param_copy_factor =
-      parameters.get_value< double >("copy_factor");
-
-  logmessage("\n##\n# Parameters:\n##", 0);
-  parameters.print_contents(std::cout, true);
-  logmessage("##\n", 0);
-
-  /// Main simulation parameters
-  const double box[6] = {param_box_anchor.x(), param_box_anchor.y(),
-                         param_box_anchor.z(), param_box_sides.x(),
-                         param_box_sides.y(),  param_box_sides.z()};
-  const int ncell[3] = {param_ncell.x(), param_ncell.y(), param_ncell.z()};
-  const unsigned int num_photon = param_num_photon;
-  const unsigned int number_of_iterations = param_number_of_iterations;
-  const int num_subgrid[3] = {param_num_subgrid.x(), param_num_subgrid.y(),
-                              param_num_subgrid.z()};
-  // reemission probability
-  //  const double reemission_probability = 0.364;
-  const double reemission_probability = param_reemission_probability;
-
-  // set up the number of threads to use
-  // we first determine the number of threads available (either by system
-  // default, or because the user has set the OMP_NUM_THREADS environment
-  // variable). We then check if a number of threads was specified on the
-  // command line. We don't allow setting the number of threads to a value
-  // larger than available, and use the available number as default if no value
-  // was given on the command line. If the requested number of threads is larger
-  // than what is available, we display a message.
-  int num_threads_available;
-#pragma omp parallel
-  {
-#pragma omp single
-    num_threads_available = omp_get_num_threads();
-  }
-
-  if (num_threads_request > num_threads_available) {
-    logmessage("More threads requested ("
-                   << num_threads_request << ") than available ("
-                   << num_threads_available
-                   << "). Resetting to maximum available number of threads.",
-               0);
-    num_threads_request = num_threads_available;
-  }
-
-  omp_set_num_threads(num_threads_request);
-  const int num_threads = num_threads_request;
-
-  logmessage("Running with " << num_threads << " threads.", 0);
-
-  // set up the queues
-  std::vector< NewQueue * > new_queues(num_threads, nullptr);
-  for (int i = 0; i < num_threads; ++i) {
-    new_queues[i] = new NewQueue(param_queue_size_per_thread);
-  }
-
-  // set up the memory space
-  MemorySpace new_buffers(param_memoryspace_size);
-  // set up the task space
-  ThreadSafeVector< Task > tasks(param_number_of_tasks);
-
+  // first: start timing
   Timer program_timer;
   program_timer.start();
+
+  //////////////////////////////////////////////////////////////////////////////
+  /// Initialization
+  //////////////////////////////////////////////////////////////////////////////
+
+  //////////////////////
+  // MPI initialization
+  /////////////////////
+
+  int MPI_rank, MPI_size;
+  initialize_MPI(argc, argv, MPI_rank, MPI_size);
+
+  /////////////////////
+
+  //////////////////////////////////
+  // Parse the command line options
+  /////////////////////////////////
+
+  int num_threads_request;
+  std::string paramfile_name;
+  parse_command_line(argc, argv, num_threads_request, paramfile_name);
+
+  /////////////////////////////////
+
+  ///////////////////////////////////////
+  // Set up the number of threads to use
+  //////////////////////////////////////
+
+  int num_threads;
+  set_number_of_threads(num_threads_request, num_threads);
+
+  //////////////////////////////////////
+
+  ///////////////////////////
+  // Read the parameter file
+  //////////////////////////
+
+  double box[6], reemission_probability;
+  int ncell[3], num_subgrid[3];
+  unsigned int num_photon, number_of_iterations;
+
+  unsigned int queue_size_per_thread, memoryspace_size, number_of_tasks,
+      MPI_buffer_size;
+  double copy_factor;
+
+  read_parameters(paramfile_name, box, reemission_probability, ncell,
+                  num_subgrid, num_photon, number_of_iterations,
+                  queue_size_per_thread, memoryspace_size, number_of_tasks,
+                  MPI_buffer_size, copy_factor);
+
+  //////////////////////////
+
+  ////////////////////////////////
+  // Set up task based structures
+  ///////////////////////////////
+
+  // set up the queues used to queue tasks
+  std::vector< NewQueue * > new_queues(num_threads, nullptr);
+  for (int i = 0; i < num_threads; ++i) {
+    new_queues[i] = new NewQueue(queue_size_per_thread);
+  }
+
+  // set up the task space used to store tasks
+  ThreadSafeVector< Task > tasks(number_of_tasks);
+
+  // set up the memory space used to store photon packet buffers
+  MemorySpace new_buffers(memoryspace_size);
+
+  // set up the cost vector used to load balance
+  const unsigned int tot_num_subgrid =
+      num_subgrid[0] * num_subgrid[1] * num_subgrid[2];
+  CostVector costs(tot_num_subgrid, num_threads, MPI_size);
+
+  ///////////////////////////////
+
+  ///////////////////////////////////
+  // Set up MPI communication buffer
+  //////////////////////////////////
+
+  char *MPI_buffer = new char[MPI_buffer_size];
+
+  //////////////////////////////////
+
+  ///////////////////////////////////////
+  // Set up the random number generators
+  //////////////////////////////////////
+
+  std::vector< RandomGenerator > random_generator(num_threads);
+  for (int i = 0; i < num_threads; ++i) {
+    // make sure every thread on every process has a different seed
+    random_generator[i].set_seed(42 + MPI_rank * num_threads + i);
+  }
+
+  //////////////////////////////////////
+
+  ///////////////////
+  // Set up the grid
+  //////////////////
 
   // set up the grid of smaller grids used for the algorithm
   // each smaller grid stores a fraction of the total grid and has information
   // about the neighbouring subgrids
-  std::vector< SubGrid * > gridvec(
-      num_subgrid[0] * num_subgrid[1] * num_subgrid[2], nullptr);
-  const double subbox_side[3] = {box[3] / num_subgrid[0],
-                                 box[4] / num_subgrid[1],
-                                 box[5] / num_subgrid[2]};
-  const int subbox_ncell[3] = {ncell[0] / num_subgrid[0],
-                               ncell[1] / num_subgrid[1],
-                               ncell[2] / num_subgrid[2]};
-  const unsigned int tot_num_subgrid =
-      num_subgrid[0] * num_subgrid[1] * num_subgrid[2];
+  std::vector< SubGrid * > gridvec(tot_num_subgrid, nullptr);
 
-  CostVector costs(tot_num_subgrid, num_threads, MPI_size);
+  // the actual grid is only constructed on rank 0
+  if (MPI_rank == 0) {
+
+    const double subbox_side[3] = {box[3] / num_subgrid[0],
+                                   box[4] / num_subgrid[1],
+                                   box[5] / num_subgrid[2]};
+    const int subbox_ncell[3] = {ncell[0] / num_subgrid[0],
+                                 ncell[1] / num_subgrid[1],
+                                 ncell[2] / num_subgrid[2]};
 
 // set up the subgrids (in parallel)
 #pragma omp parallel default(shared)
-  {
-    // id of this specific thread
-    const int thread_id = omp_get_thread_num();
-    for (int ix = 0; ix < num_subgrid[0]; ++ix) {
-      for (int iy = 0; iy < num_subgrid[1]; ++iy) {
-        for (int iz = 0; iz < num_subgrid[2]; ++iz) {
-          const unsigned int index =
-              ix * num_subgrid[1] * num_subgrid[2] + iy * num_subgrid[2] + iz;
-          if (costs.get_thread(index) == thread_id) {
-            const double subbox[6] = {box[0] + ix * subbox_side[0],
-                                      box[1] + iy * subbox_side[1],
-                                      box[2] + iz * subbox_side[2],
-                                      subbox_side[0],
-                                      subbox_side[1],
-                                      subbox_side[2]};
-            gridvec[index] = new DensitySubGrid(subbox, subbox_ncell);
-            DensitySubGrid &this_grid =
-                *static_cast< DensitySubGrid * >(gridvec[index]);
-            // set up neighbouring information. We first make sure all
-            // neighbours are initialized to NEIGHBOUR_OUTSIDE, indicating no
-            // neighbour
-            for (int i = 0; i < 27; ++i) {
-              this_grid.set_neighbour(i, NEIGHBOUR_OUTSIDE);
-              this_grid.set_active_buffer(i, NEIGHBOUR_OUTSIDE);
-            }
-            // now set up the correct neighbour relations for the neighbours
-            // that exist
-            for (int nix = -1; nix < 2; ++nix) {
-              for (int niy = -1; niy < 2; ++niy) {
-                for (int niz = -1; niz < 2; ++niz) {
-                  // get neighbour corrected indices
-                  const int cix = ix + nix;
-                  const int ciy = iy + niy;
-                  const int ciz = iz + niz;
-                  // if the indices above point to a real subgrid: set up the
-                  // neighbour relations
-                  if (cix >= 0 && cix < num_subgrid[0] && ciy >= 0 &&
-                      ciy < num_subgrid[1] && ciz >= 0 &&
-                      ciz < num_subgrid[2]) {
-                    // we use get_output_direction() to get the correct index
-                    // for the neighbour
-                    // the three_index components will either be
-                    //  - -ncell --> negative --> lower limit
-                    //  - 0 --> in range --> inside
-                    //  - ncell --> upper limit
-                    const int three_index[3] = {nix * subbox_ncell[0],
-                                                niy * subbox_ncell[1],
-                                                niz * subbox_ncell[2]};
-                    const int ngbi =
-                        this_grid.get_output_direction(three_index);
-                    // now get the actual ngb index
-                    const unsigned int ngb_index =
-                        cix * num_subgrid[1] * num_subgrid[2] +
-                        ciy * num_subgrid[2] + ciz;
-                    this_grid.set_neighbour(ngbi, ngb_index);
-                    const unsigned int active_buffer =
-                        new_buffers.get_free_buffer();
-                    PhotonBuffer &buffer = new_buffers[active_buffer];
-                    buffer._sub_grid_index = ngb_index;
-                    buffer._direction = output_to_input_direction(ngbi);
-                    this_grid.set_active_buffer(ngbi, active_buffer);
-                  } // if ci
-                }   // for niz
-              }     // for niy
-            }       // for nix
-          }         // if local index
-        }           // for iz
-      }             // for iy
-    }               // for ix
-  }                 // end parallel region
+    {
+      // id of this specific thread
+      const int thread_id = omp_get_thread_num();
+      for (int ix = 0; ix < num_subgrid[0]; ++ix) {
+        for (int iy = 0; iy < num_subgrid[1]; ++iy) {
+          for (int iz = 0; iz < num_subgrid[2]; ++iz) {
+            const unsigned int index =
+                ix * num_subgrid[1] * num_subgrid[2] + iy * num_subgrid[2] + iz;
+            if (costs.get_thread(index) == thread_id) {
+              const double subbox[6] = {box[0] + ix * subbox_side[0],
+                                        box[1] + iy * subbox_side[1],
+                                        box[2] + iz * subbox_side[2],
+                                        subbox_side[0],
+                                        subbox_side[1],
+                                        subbox_side[2]};
+              gridvec[index] = new DensitySubGrid(subbox, subbox_ncell);
+              DensitySubGrid &this_grid =
+                  *static_cast< DensitySubGrid * >(gridvec[index]);
+              // set up neighbouring information. We first make sure all
+              // neighbours are initialized to NEIGHBOUR_OUTSIDE, indicating no
+              // neighbour
+              for (int i = 0; i < 27; ++i) {
+                this_grid.set_neighbour(i, NEIGHBOUR_OUTSIDE);
+                this_grid.set_active_buffer(i, NEIGHBOUR_OUTSIDE);
+              }
+              // now set up the correct neighbour relations for the neighbours
+              // that exist
+              for (int nix = -1; nix < 2; ++nix) {
+                for (int niy = -1; niy < 2; ++niy) {
+                  for (int niz = -1; niz < 2; ++niz) {
+                    // get neighbour corrected indices
+                    const int cix = ix + nix;
+                    const int ciy = iy + niy;
+                    const int ciz = iz + niz;
+                    // if the indices above point to a real subgrid: set up the
+                    // neighbour relations
+                    if (cix >= 0 && cix < num_subgrid[0] && ciy >= 0 &&
+                        ciy < num_subgrid[1] && ciz >= 0 &&
+                        ciz < num_subgrid[2]) {
+                      // we use get_output_direction() to get the correct index
+                      // for the neighbour
+                      // the three_index components will either be
+                      //  - -ncell --> negative --> lower limit
+                      //  - 0 --> in range --> inside
+                      //  - ncell --> upper limit
+                      const int three_index[3] = {nix * subbox_ncell[0],
+                                                  niy * subbox_ncell[1],
+                                                  niz * subbox_ncell[2]};
+                      const int ngbi =
+                          this_grid.get_output_direction(three_index);
+                      // now get the actual ngb index
+                      const unsigned int ngb_index =
+                          cix * num_subgrid[1] * num_subgrid[2] +
+                          ciy * num_subgrid[2] + ciz;
+                      this_grid.set_neighbour(ngbi, ngb_index);
+                      const unsigned int active_buffer =
+                          new_buffers.get_free_buffer();
+                      PhotonBuffer &buffer = new_buffers[active_buffer];
+                      buffer._sub_grid_index = ngb_index;
+                      buffer._direction = output_to_input_direction(ngbi);
+                      this_grid.set_active_buffer(ngbi, active_buffer);
+                    } // if ci
+                  }   // for niz
+                }     // for niy
+              }       // for nix
+            }         // if local index
+          }           // for iz
+        }             // for iy
+      }               // for ix
+    }                 // end parallel region
+
+  } // end MPI_rank == 0
+
+  //////////////////
+
+  ////////////////////////////////////////////
+  // Initialize the photon source information
+  ///////////////////////////////////////////
+
+  // Get the index of the (one) subgrid that contains the source position
+  const unsigned int source_indices[3] = {
+      (unsigned int)((-box[0] / box[3]) * num_subgrid[0]),
+      (unsigned int)((-box[1] / box[4]) * num_subgrid[1]),
+      (unsigned int)((-box[2] / box[5]) * num_subgrid[2])};
+
+  ///////////////////////////////////////////
+
+  //////////////////////////////
+  // Initialize the cost vector
+  /////////////////////////////
 
   std::vector< unsigned long > initial_cost_vector(tot_num_subgrid, 0);
   std::ifstream initial_costs("costs_00.txt");
@@ -658,50 +878,73 @@ int main(int argc, char **argv) {
     }
   }
 
+  /////////////////////////////
+
+  //////////////////////////////////////////////////////////////////////////////
+
+  //////////////////////////////////////////////////////////////////////////////
+  /// Main loop
+  //////////////////////////////////////////////////////////////////////////////
+
+  /////////////////////////////////////////////////
+  // Make copies and do the initial load balancing
+  ////////////////////////////////////////////////
+
   // make copies of the most expensive subgrids, so that multiple threads can
   // work on them simultaneously
+  // this is only done by rank 0
+  // note that we will need to communicate the originals vector somehow
   std::vector< unsigned int > originals;
   std::vector< unsigned int > copies(tot_num_subgrid, 0xffffffff);
   std::vector< unsigned char > levels(tot_num_subgrid, 0);
+  if (MPI_rank == 0) {
 
-  // get the average cost per thread
-  unsigned long avg_cost_per_thread = 0;
-  for (unsigned int i = 0; i < tot_num_subgrid; ++i) {
-    avg_cost_per_thread += initial_cost_vector[i];
-  }
-  avg_cost_per_thread /= num_threads;
-  // now set the levels accordingly
-  for (unsigned int i = 0; i < tot_num_subgrid; ++i) {
-    if (param_copy_factor * initial_cost_vector[i] > avg_cost_per_thread) {
-      // note that this in principle should be 1 higher. However, we do not
-      // count the original.
-      unsigned int number_of_copies =
-          param_copy_factor * initial_cost_vector[i] / avg_cost_per_thread;
-      // get the highest bit
-      unsigned int level = 0;
-      while (number_of_copies > 0) {
-        number_of_copies >>= 1;
-        ++level;
-      }
-      levels[i] = level;
+    // get the average cost per thread
+    unsigned long avg_cost_per_thread = 0;
+    for (unsigned int i = 0; i < tot_num_subgrid; ++i) {
+      avg_cost_per_thread += initial_cost_vector[i];
     }
+    avg_cost_per_thread /= num_threads;
+    // now set the levels accordingly
+    for (unsigned int i = 0; i < tot_num_subgrid; ++i) {
+      if (copy_factor * initial_cost_vector[i] > avg_cost_per_thread) {
+        // note that this in principle should be 1 higher. However, we do not
+        // count the original.
+        unsigned int number_of_copies =
+            copy_factor * initial_cost_vector[i] / avg_cost_per_thread;
+        // get the highest bit
+        unsigned int level = 0;
+        while (number_of_copies > 0) {
+          number_of_copies >>= 1;
+          ++level;
+        }
+        levels[i] = level;
+      }
+    }
+
+    create_copies(gridvec, levels, new_buffers, originals, copies);
+
+    // we keep this code for later debugging when we have more complex copy
+    // hiearchies
+    //  std::ofstream ngbfile("initial_ngbs.txt");
+    //  for(unsigned int i = 0; i < gridvec.size(); ++i){
+    //    ngbfile << i << "\n";
+    //    for(int j = 0; j < 27; ++j){
+    //      ngbfile << gridvec[i]->get_neighbour(j) << "\n";
+    //    }
+    //    ngbfile << "\n";
+    //  }
+    //  ngbfile.close();
   }
 
-  create_copies(gridvec, levels, new_buffers, originals, copies);
+  // communicate the new size of the grid to all processes and make sure the
+  // local gridvec is up to date (all processes other than rank 0 still have a
+  // completely empty gridvec)
+  unsigned int new_size = gridvec.size();
+  MPI_Bcast(&new_size, 1, MPI_UNSIGNED, 0, MPI_COMM_WORLD);
+  gridvec.resize(new_size, nullptr);
 
-  // we keep this code for later debugging when we have more complex copy
-  // hiearchies
-  //  std::ofstream ngbfile("initial_ngbs.txt");
-  //  for(unsigned int i = 0; i < gridvec.size(); ++i){
-  //    ngbfile << i << "\n";
-  //    for(int j = 0; j < 27; ++j){
-  //      ngbfile << gridvec[i]->get_neighbour(j) << "\n";
-  //    }
-  //    ngbfile << "\n";
-  //  }
-  //  ngbfile.close();
-
-  // initialize cost vector
+  // initialize the actual cost vector
   costs.reset(gridvec.size());
 
   // no initial cost information: assume a uniform cost
@@ -732,26 +975,45 @@ int main(int argc, char **argv) {
 
   costs.redistribute();
 
-  // get the central subgrid indices
-  const unsigned int source_indices[3] = {
-      (unsigned int)((-box[0] / box[3]) * num_subgrid[0]),
-      (unsigned int)((-box[1] / box[4]) * num_subgrid[1]),
-      (unsigned int)((-box[2] / box[5]) * num_subgrid[2])};
-  std::vector< unsigned int > central_index;
+  // now it is time to move the subgrids to the process where they belong
 
-  // set up the random number generators
-  std::vector< RandomGenerator > random_generator(num_threads);
-  for (int i = 0; i < num_threads; ++i) {
-    // make sure every thread on every process has a different seed
-    random_generator[i].set_seed(42 + MPI_rank * num_threads + i);
+  if (MPI_rank == 0) {
+    unsigned int buffer_position = 0;
+    for (int irank = 1; irank < MPI_size; ++irank) {
+      unsigned int rank_size = 0;
+      for (unsigned int igrid = 0; igrid < gridvec.size(); ++igrid) {
+        if (costs.get_process(igrid) == irank) {
+          gridvec[igrid]->pack(&MPI_buffer[buffer_position + rank_size],
+                               MPI_buffer_size);
+          rank_size += gridvec[igrid]->get_MPI_size();
+        }
+      }
+      MPI_Send(&rank_size, 1, MPI_UNSIGNED, irank, 0, MPI_COMM_WORLD);
+      MPI_Send(&MPI_buffer[buffer_position], rank_size, MPI_PACKED, irank, 1,
+               MPI_COMM_WORLD);
+      buffer_position += rank_size;
+    }
+  } else {
+    unsigned int rank_size;
+    MPI_Recv(&rank_size, 1, MPI_UNSIGNED, 0, 0, MPI_COMM_WORLD,
+             MPI_STATUS_IGNORE);
+    MPI_Recv(MPI_buffer, rank_size, MPI_PACKED, 0, 1, MPI_COMM_WORLD,
+             MPI_STATUS_IGNORE);
+    // we need to somehow figure out which subgrid belongs to which index...
   }
+
+  ////////////////////////////////////////////////
+
+  ////////////////////
+  // Actual main loop
+  ///////////////////
 
   // now for the main loop. This loop
   //  - shoots num_photon photons through the grid to get intensity estimates
   //  - computes the ionization equilibrium
   for (unsigned int iloop = 0; iloop < number_of_iterations; ++iloop) {
 
-    central_index.clear();
+    std::vector< unsigned int > central_index;
     central_index.push_back(
         source_indices[0] * num_subgrid[1] * num_subgrid[2] +
         source_indices[1] * num_subgrid[2] + source_indices[2]);
@@ -1081,11 +1343,11 @@ int main(int argc, char **argv) {
 
     // get new levels
     for (unsigned int i = 0; i < tot_num_subgrid; ++i) {
-      if (param_copy_factor * initial_cost_vector[i] > avg_cost_per_thread) {
+      if (copy_factor * initial_cost_vector[i] > avg_cost_per_thread) {
         // note that this in principle should be 1 higher. However, we do not
         // count the original.
         unsigned int number_of_copies =
-            param_copy_factor * initial_cost_vector[i] / avg_cost_per_thread;
+            copy_factor * initial_cost_vector[i] / avg_cost_per_thread;
         // get the highest bit
         unsigned int level = 0;
         while (number_of_copies > 0) {
@@ -1156,24 +1418,25 @@ int main(int argc, char **argv) {
     costs.redistribute();
   } // main loop
 
-  program_timer.stop();
-  logmessage("Total program time: " << program_timer.value() << " s.", 0);
+  ///////////////////
 
-  struct rusage resource_usage;
-  getrusage(RUSAGE_SELF, &resource_usage);
-  size_t max_memory = static_cast< size_t >(resource_usage.ru_maxrss) *
-                      static_cast< size_t >(1024);
-  logmessage(
-      "Maximum memory usage: " << Utilities::human_readable_bytes(max_memory),
-      0);
+  //////////////////////////////////////////////////////////////////////////////
 
-  // OUTPUT:
+  //////////////////////////////////////////////////////////////////////////////
+  /// Clean up
+  //////////////////////////////////////////////////////////////////////////////
+
+  ///////////////////////
+  // Output final result
+  //////////////////////
+
   //  - ASCII output (for the VisIt plot script)
   std::ofstream ofile("intensities.txt");
   for (unsigned int igrid = 0; igrid < tot_num_subgrid; ++igrid) {
     static_cast< DensitySubGrid * >(gridvec[igrid])->print_intensities(ofile);
   }
   ofile.close();
+
   //  - binary output (for the Python plot script)
   std::ofstream bfile("intensities.dat");
   for (unsigned int igrid = 0; igrid < tot_num_subgrid; ++igrid) {
@@ -1181,10 +1444,54 @@ int main(int argc, char **argv) {
   }
   bfile.close();
 
-  // garbage collection
+  //////////////////////
+
+  ///////////////////////////////////
+  // Output memory usage information
+  //////////////////////////////////
+
+  struct rusage resource_usage;
+  getrusage(RUSAGE_SELF, &resource_usage);
+  const size_t max_memory = static_cast< size_t >(resource_usage.ru_maxrss) *
+                            static_cast< size_t >(1024);
+  logmessage(
+      "Maximum memory usage: " << Utilities::human_readable_bytes(max_memory),
+      0);
+
+  //////////////////////////////////
+
+  //////////////////////
+  // Garbage collection
+  /////////////////////
+
+  // grid
   for (unsigned int igrid = 0; igrid < gridvec.size(); ++igrid) {
     delete gridvec[igrid];
   }
 
-  return MPI_Finalize();
+  // queues
+  for (int i = 0; i < num_threads; ++i) {
+    delete new_queues[i];
+  }
+
+  // MPI buffer
+  delete[] MPI_buffer;
+
+  /////////////////////
+
+  ////////////////
+  // Clean up MPI
+  ///////////////
+
+  const int MPI_exit_code = MPI_Finalize();
+
+  ///////////////
+
+  //////////////////////////////////////////////////////////////////////////////
+
+  // finally: stop timing and output the result
+  program_timer.stop();
+  logmessage("Total program time: " << program_timer.value() << " s.", 0);
+
+  return MPI_exit_code;
 }

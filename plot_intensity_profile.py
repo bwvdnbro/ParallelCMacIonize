@@ -31,11 +31,13 @@ matplotlib.use("Agg")
 import pylab as pl
 import scipy.stats as stats
 import sys
+import os
 
 ## run parameters
 # number of cells in one coordinate dimension
 # should be synced with the values used in the unit test
-ncell = 128
+# we guess based on the file size
+ncell = int(np.cbrt(os.path.getsize("intensities.dat")>>5))
 # number of bins to use to bin the results
 nbin = 100
 

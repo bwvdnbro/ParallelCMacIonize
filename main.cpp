@@ -83,7 +83,7 @@
  */
 
 /*! @brief Threshold probability \f$p\f$ of a cell to affect one of its
- *  during an interaction neighbours. */
+ *  neighbours during an interaction. */
 #define GLOBAL_PROBABILITY 0.4
 
 /*! @brief Total number of cells. */
@@ -220,7 +220,7 @@ int main(int argc, char **argv) {
   // we initialise all cells on all processes, to make sure the random
   // sequences are the same irrespective of the number of processes used
   srand(42);
-  std::vector<Cell> cells;
+  std::vector< Cell > cells;
   cells.reserve(GLOBAL_NUMBER_OF_CELLS);
   for (unsigned int i = 0; i < GLOBAL_NUMBER_OF_CELLS; ++i) {
     int left_neighbour = GLOBAL_NUMBER_OF_CELLS - 1;
@@ -251,7 +251,7 @@ int main(int argc, char **argv) {
   unsigned int completed_since_last = completed;
   unsigned int creacombuf[2] = {created_since_last, completed_since_last};
   // this is the total number of interactions created and completed across all
-  // processes (WHY DO WE NEED THIS?)
+  // processes, needed to check possible finishes on the master rank
   unsigned int total_created = 0;
   unsigned int total_completed = 0;
   // this is the exit flag for our loop

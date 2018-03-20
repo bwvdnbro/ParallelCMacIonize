@@ -4,12 +4,12 @@ box:
   anchor: [-5. pc, -5. pc, -5. pc]
   sides: [10. pc, 10. pc, 10. pc]
 # grid resolution
-ncell: [128, 128, 128]
+ncell: [64, 64, 64]
 # number of photon packets
-num_photon: 1e7
+num_photon: 1e6
 # number of iterations
 number_of_iterations: 10
-# reemission probability
+# reemission probability (realistic value: 0.364)
 reemission_probability: 0.
 
 ## Algorithm parameters
@@ -33,6 +33,10 @@ memoryspace_size: 40000
 # a single iteration of the algorithm
 # the code will crash if the total number of tasks exceeds this number
 number_of_tasks: 400000
+# size of the MPI communication buffer (in bytes)
+# the code will crash if a larger buffer is needed at any given point during the
+# simulation
+MPI_buffer_size: 1000000000
 # inverse fraction of the work load per thread that can be taken by a single
 # subgrid. If the work load for a subgrid exceeds this limit, the subgrid will
 # be split across multiple copies that can be processed independently
