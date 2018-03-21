@@ -76,6 +76,7 @@ int main(int argc, char **argv) {
     test_grid._ngbs[i] = random_generator.get_random_integer();
     test_grid._active_buffers[i] = random_generator.get_random_integer();
   }
+  test_grid._subgrid_index = random_generator.get_random_integer();
   const int tot_ncell = ncell[0] * ncell[1] * ncell[2];
   for (int i = 0; i < tot_ncell; ++i) {
     test_grid._number_density[i] = random_generator.get_uniform_random_double();
@@ -109,6 +110,8 @@ int main(int argc, char **argv) {
     // check if the result is what it should be
     densitysubgrid_check_equal(test_grid, recv_grid);
   } // other ranks do nothing
+
+  MPI_Barrier(MPI_COMM_WORLD);
 
   if (MPI_rank == 0) {
     logmessage("Test successful.", 0);

@@ -983,6 +983,11 @@ int main(int argc, char **argv) {
       unsigned int rank_size = 0;
       for (unsigned int igrid = 0; igrid < gridvec.size(); ++igrid) {
         if (costs.get_process(igrid) == irank) {
+          int position = 0;
+          MPI_Pack(&igrid, 1, MPI_UNSIGNED,
+                   &MPI_buffer[buffer_position + rank_size], 1, &position,
+                   MPI_COMM_WORLD);
+          ++rank_size;
           gridvec[igrid]->pack(&MPI_buffer[buffer_position + rank_size],
                                MPI_buffer_size);
           rank_size += gridvec[igrid]->get_MPI_size();
@@ -999,7 +1004,16 @@ int main(int argc, char **argv) {
              MPI_STATUS_IGNORE);
     MPI_Recv(MPI_buffer, rank_size, MPI_PACKED, 0, 1, MPI_COMM_WORLD,
              MPI_STATUS_IGNORE);
-    // we need to somehow figure out which subgrid belongs to which index...
+    unsigned int buffer_position = 0;
+    while (rank_size > 0) {
+      unsigned int igrid;
+      int position = 0;
+      MPI_Unpack(&MPI_buffer[buffer_position], 1, &position, &igrid, 1,
+                 MPI_UNSIGNED, MPI_COMM_WORLD);
+      ++buffer_position;
+      gridvec[igrid]->unpack(&MPI_buffer[buffer_position], MPI_buffer_size);
+      buffer_position += gridvec[igrid]->get_MPI_size();
+    }
   }
 
   ////////////////////////////////////////////////

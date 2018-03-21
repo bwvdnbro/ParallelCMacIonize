@@ -339,7 +339,7 @@ inline bool is_compatible_input_direction(const double *direction,
  *  time. */
 #define DENSITYSUBGRID_FIXED_MPI_SIZE                                          \
   (sizeof(unsigned long) + 9 * sizeof(double) + 4 * sizeof(int) +              \
-   54 * sizeof(unsigned int))
+   55 * sizeof(unsigned int))
 
 /*! @brief Number of variables stored in each cell of the DensitySubGrid
  *  (excluding potential lock variables). */
@@ -379,6 +379,8 @@ inline bool is_compatible_input_direction(const double *direction,
     myassert(a._active_buffers[i] == b._active_buffers[i],                     \
              "Active buffers not the same!");                                  \
   }                                                                            \
+  myassert(a._subgrid_index == b._subgrid_index,                               \
+           "Subgrid indices not the same!");                                   \
   const int tot_num_cells = a._number_of_cells[0] * a._number_of_cells[3];     \
   for (int i = 0; i < tot_num_cells; ++i) {                                    \
     myassert(a._number_density[i] == b._number_density[i],                     \
@@ -399,6 +401,9 @@ public:
 
   /*! @brief Indices of the active buffers. */
   unsigned int _active_buffers[27];
+
+  /*! @brief Index of the SubGrid in the subgrid list. */
+  unsigned int _subgrid_index;
 
   virtual ~SubGrid() {}
 
@@ -449,10 +454,6 @@ public:
   /*! @brief Rank that holds the actual DensitySubGrid. */
   int _rank;
 
-  /*! @brief Index of the actual DensitySubGrid on its home rank. */
-  unsigned int _actual_index;
-
-public:
   virtual ~DummySubGrid() {}
 
   virtual int get_MPI_size() const { return 0; }
@@ -988,6 +989,8 @@ public:
              MPI_COMM_WORLD);
     MPI_Pack(_active_buffers, 27, MPI_UNSIGNED, buffer, buffer_size,
              &buffer_position, MPI_COMM_WORLD);
+    MPI_Pack(&_subgrid_index, 1, MPI_UNSIGNED, buffer, buffer_size,
+             &buffer_position, MPI_COMM_WORLD);
 
     const int tot_num_cells = _number_of_cells[0] * _number_of_cells[3];
     MPI_Pack(_number_density, tot_num_cells, MPI_DOUBLE, buffer, buffer_size,
@@ -1023,6 +1026,8 @@ public:
     MPI_Unpack(buffer, buffer_size, &buffer_position, _ngbs, 27, MPI_UNSIGNED,
                MPI_COMM_WORLD);
     MPI_Unpack(buffer, buffer_size, &buffer_position, _active_buffers, 27,
+               MPI_UNSIGNED, MPI_COMM_WORLD);
+    MPI_Unpack(buffer, buffer_size, &buffer_position, &_subgrid_index, 1,
                MPI_UNSIGNED, MPI_COMM_WORLD);
 
     const int tot_num_cells = new_number_of_cells[0] * new_number_of_cells[3];
