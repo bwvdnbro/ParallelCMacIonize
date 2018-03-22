@@ -50,7 +50,9 @@ enum TaskType {
   /*! @brief Propagate photons through a subgrid. */
   TASKTYPE_PHOTON_TRAVERSAL,
   /*! @brief Reemit photons. */
-  TASKTYPE_PHOTON_REEMIT
+  TASKTYPE_PHOTON_REEMIT,
+  /*! @brief Send a buffer to another process. */
+  TASKTYPE_SEND
 };
 
 /**

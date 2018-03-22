@@ -353,7 +353,7 @@ inline static void do_reemission(PhotonBuffer &buffer,
  * @param originals List of originals for the newly created copies.
  * @param copies Index of the first copy of each subgrid.
  */
-inline void create_copies(std::vector< SubGrid * > &gridvec,
+inline void create_copies(std::vector< DensitySubGrid * > &gridvec,
                           std::vector< unsigned char > &levels,
                           MemorySpace &new_buffers,
                           std::vector< unsigned int > &originals,
@@ -378,8 +378,7 @@ inline void create_copies(std::vector< SubGrid * > &gridvec,
       copies[i] = gridvec.size();
     }
     for (unsigned int j = 1; j < number_of_copies; ++j) {
-      gridvec.push_back(
-          new DensitySubGrid(*static_cast< DensitySubGrid * >(gridvec[i])));
+      gridvec.push_back(new DensitySubGrid(*gridvec[i]));
       originals.push_back(i);
     }
   }
@@ -587,8 +586,9 @@ inline void read_parameters(
   copy_factor = parameters.get_value< double >("copy_factor");
 
   logmessage("\n##\n# Parameters:\n##", 0);
-  parameters.print_contents(std::cout, true);
-  std::cout.flush();
+  if (MPI_rank == 0) {
+    parameters.print_contents(std::cerr, true);
+  }
   logmessage("##\n", 0);
 }
 
@@ -735,11 +735,14 @@ int main(int argc, char **argv) {
   // Set up MPI communication buffer
   //////////////////////////////////
 
-  char *MPI_buffer = new char[MPI_buffer_size];
+  char *MPI_buffer = nullptr;
+  if (MPI_size > 1) {
+    MPI_buffer = new char[MPI_buffer_size];
 
-  logmessage(
-      "MPI_buffer_size: " << Utilities::human_readable_bytes(MPI_buffer_size),
-      0);
+    logmessage(
+        "MPI_buffer_size: " << Utilities::human_readable_bytes(MPI_buffer_size),
+        0);
+  }
 
   //////////////////////////////////
 
@@ -762,7 +765,7 @@ int main(int argc, char **argv) {
   // set up the grid of smaller grids used for the algorithm
   // each smaller grid stores a fraction of the total grid and has information
   // about the neighbouring subgrids
-  std::vector< SubGrid * > gridvec(tot_num_subgrid, nullptr);
+  std::vector< DensitySubGrid * > gridvec(tot_num_subgrid, nullptr);
 
   // the actual grid is only constructed on rank 0
   if (MPI_rank == 0) {
@@ -792,8 +795,7 @@ int main(int argc, char **argv) {
                                         subbox_side[1],
                                         subbox_side[2]};
               gridvec[index] = new DensitySubGrid(subbox, subbox_ncell);
-              DensitySubGrid &this_grid =
-                  *static_cast< DensitySubGrid * >(gridvec[index]);
+              DensitySubGrid &this_grid = *gridvec[index];
               // set up neighbouring information. We first make sure all
               // neighbours are initialized to NEIGHBOUR_OUTSIDE, indicating no
               // neighbour
@@ -957,10 +959,20 @@ int main(int argc, char **argv) {
   MPI_Bcast(&new_size, 1, MPI_UNSIGNED, 0, MPI_COMM_WORLD);
   gridvec.resize(new_size, nullptr);
 
+  // communicate the originals and copies to all processes
+  unsigned int originals_size = originals.size();
+  MPI_Bcast(&originals_size, 1, MPI_UNSIGNED, 0, MPI_COMM_WORLD);
+  originals.resize(originals_size, 0);
+  MPI_Bcast(&originals[0], originals_size, MPI_UNSIGNED, 0, MPI_COMM_WORLD);
+  MPI_Bcast(&copies[0], tot_num_subgrid, MPI_UNSIGNED, 0, MPI_COMM_WORLD);
+
+  // NOTE that the code below should have the same inputs (and hence outputs) on
+  // all processes
+
   // initialize the actual cost vector
   costs.reset(gridvec.size());
 
-  // no initial cost information: assume a uniform cost
+  // set the initial cost data (either from a file or from a guess)
   for (unsigned int i = 0; i < tot_num_subgrid; ++i) {
     costs.add_cost(i, initial_cost_vector[i]);
   }
@@ -989,7 +1001,6 @@ int main(int argc, char **argv) {
   costs.redistribute();
 
   // now it is time to move the subgrids to the process where they belong
-
   if (MPI_rank == 0) {
     unsigned int buffer_position = 0;
     for (int irank = 1; irank < MPI_size; ++irank) {
@@ -1010,6 +1021,10 @@ int main(int argc, char **argv) {
           gridvec[igrid]->pack(&MPI_buffer[buffer_position + rank_size],
                                MPI_buffer_size - buffer_position - rank_size);
           rank_size += gridvec[igrid]->get_MPI_size();
+
+          // delete the original subgrid
+          delete gridvec[igrid];
+          gridvec[igrid] = nullptr;
         }
       }
       MPI_Send(&rank_size, 1, MPI_UNSIGNED, irank, 0, MPI_COMM_WORLD);
@@ -1056,9 +1071,9 @@ int main(int argc, char **argv) {
   //  - computes the ionization equilibrium
   for (unsigned int iloop = 0; iloop < number_of_iterations; ++iloop) {
 
-    // make a global list of all subgrids that contain the (single) photon
-    // source position, we will distribute the initial propagation tasks
-    // evenly across these subgrids
+    // make a global list of all subgrids (on this process) that contain the
+    // (single) photon source position, we will distribute the initial
+    // propagation tasks evenly across these subgrids
     std::vector< unsigned int > central_index;
     central_index.push_back(
         source_indices[0] * num_subgrid[1] * num_subgrid[2] +
@@ -1072,6 +1087,26 @@ int main(int argc, char **argv) {
       }
     }
     logmessage("Number of central subgrid copies: " << central_index.size(), 0);
+    const unsigned int tot_num_copies = central_index.size();
+
+    // remove all central indices that are not on this process
+    std::remove_if(central_index.begin(), central_index.end(),
+                   [&costs](unsigned int index) {
+                     return (costs.get_process(index) != MPI_rank);
+                   });
+
+    // make sure all processes have source photons (we do not enforce this
+    // anywhere, so this assertion might very well fail)
+    myassert(central_index.size() > 0, "Rank without source photons!");
+
+    // divide the total number of photons over the processes, weighted with
+    // the number of copies each process holds
+    const unsigned int num_photon_per_copy = num_photon / tot_num_copies;
+    // for now just assume the total number of copies is a divisor of the total
+    // number of photons, and crash if it isn't
+    myassert(num_photon_per_copy * tot_num_copies == num_photon,
+             "Photon number not conserved!");
+    unsigned int num_photon_local = num_photon_per_copy * central_index.size();
 
     // get the corresponding thread ranks
     std::vector< int > central_queue(central_index.size());
@@ -1081,19 +1116,6 @@ int main(int argc, char **argv) {
 
     // STEP 0: log output
     logmessage("Loop " << iloop + 1, 0);
-
-    // make sure all copies have the same neutral fraction as their original
-    // subgrid
-    for (unsigned int i = 0; i < originals.size(); ++i) {
-      const unsigned int original = originals[i];
-      const unsigned int copy = tot_num_subgrid + i;
-      logmessage("Updating neutral fractions for " << copy << ", copy of "
-                                                   << original,
-                 1);
-      static_cast< DensitySubGrid * >(gridvec[copy])
-          ->update_neutral_fractions(
-              *static_cast< DensitySubGrid * >(gridvec[original]));
-    }
 
     // STEP 1: photon shooting
     logmessage("Starting photon shoot loop", 0);
@@ -1119,6 +1141,8 @@ int main(int argc, char **argv) {
       //   num_photon_sourced < num_photon
       // (this automatically means that threads with less propagation tasks will
       //  handle more source tasks)
+      // at the moment, we make sure each process holds at least 1 copy of the
+      // source subgrid, so each process should have this task
       {
         const size_t task_index = tasks.get_free_element_safe();
         myassert(task_index < tasks.max_size(), "Task buffer overflow!");
@@ -1126,11 +1150,12 @@ int main(int argc, char **argv) {
         // buffer is ready to be processed: add to the queue
         new_queues[thread_id]->add_task(task_index);
       }
-      // this loop is repeated until all photons have been propagated
+      // this loop is repeated until all local photons have been propagated
       // note that this condition automatically covers the condition
-      //  num_photon_sourced < num_photon
+      //  num_photon_sourced < num_photon_local
       // as unsourced photons cannot contribute to num_photon_done
-      while (num_photon_done < num_photon) {
+      // this condition definitely needs to change for MPI...
+      while (num_photon_done < num_photon_local) {
 
         // get a first task
         // upon first entry of the while loop, this will be the photon source
@@ -1149,8 +1174,9 @@ int main(int argc, char **argv) {
             // we only activate subgrids that belong to this thread to make
             // sure we don't create conflicts
             // Note that this could mean we prematurely activate tasks for
-            // another thread.
-            if (costs.get_thread(i) == thread_id) {
+            // another thread (and even another process).
+            if (costs.get_process(i) == MPI_rank &&
+                costs.get_thread(i) == thread_id) {
               int j = 0;
               // loop over all buffers of this subgrid
               while (j < 27 && current_index == NO_TASK) {
@@ -1182,20 +1208,32 @@ int main(int argc, char **argv) {
                   // feed hungry threads with food from this thread, as we do
                   // not allow threads to feed themselves with food that does
                   // not belong to them.
+                  unsigned int queue_index;
                   const size_t task_index = tasks.get_free_element();
                   if (j > 0) {
-                    tasks[task_index]._type = TASKTYPE_PHOTON_TRAVERSAL;
+                    if (costs.get_process(
+                            new_buffers[non_full_index]._sub_grid_index) !=
+                        MPI_rank) {
+                      tasks[task_index]._type = TASKTYPE_SEND;
+                      // send tasks are handled by the thread itself
+                      queue_index = thread_id;
+                    } else {
+                      tasks[task_index]._type = TASKTYPE_PHOTON_TRAVERSAL;
+                      queue_index = costs.get_thread(
+                          new_buffers[non_full_index]._sub_grid_index);
+                    }
                   } else {
                     tasks[task_index]._type = TASKTYPE_PHOTON_REEMIT;
+                    // internal buffers belong to the same subgrid and are
+                    // trivially processed by the thread itself
+                    queue_index = thread_id;
                   }
                   tasks[task_index]._cell =
                       new_buffers[non_full_index]._sub_grid_index;
                   tasks[task_index]._buffer = non_full_index;
                   // note that this statement should be last, as the task might
                   // be executed as soon as this statement is executed
-                  new_queues[costs.get_thread(
-                                 new_buffers[non_full_index]._sub_grid_index)]
-                      ->add_task(task_index);
+                  new_queues[queue_index]->add_task(task_index);
 
                   // Try again to get a task. This could be the task we just
                   // created, a task that was added by another thread while we
@@ -1319,8 +1357,7 @@ int main(int argc, char **argv) {
             const unsigned int current_buffer_index = task._buffer;
             PhotonBuffer &buffer = new_buffers[current_buffer_index];
             const unsigned int igrid = buffer._sub_grid_index;
-            DensitySubGrid &this_grid = *static_cast< DensitySubGrid * >(
-                gridvec[buffer._sub_grid_index]);
+            DensitySubGrid &this_grid = *gridvec[buffer._sub_grid_index];
 
             // prepare output buffers: make sure they are empty and that buffers
             // corresponding to directions outside the simulation box are
@@ -1379,16 +1416,24 @@ int main(int argc, char **argv) {
                   // internal buffer were absorbed and could be reemitted,
                   // photon packets in the other buffers left the subgrid and
                   // need to be traversed in the neighbouring subgrid
+                  unsigned int queue_index;
                   if (i > 0) {
-                    tasks[task_index]._type = TASKTYPE_PHOTON_TRAVERSAL;
+                    if (costs.get_process(ngb) != MPI_rank) {
+                      tasks[task_index]._type = TASKTYPE_SEND;
+                      queue_index = thread_id;
+                    } else {
+                      tasks[task_index]._type = TASKTYPE_PHOTON_TRAVERSAL;
+                      queue_index = costs.get_thread(ngb);
+                    }
                   } else {
                     tasks[task_index]._type = TASKTYPE_PHOTON_REEMIT;
+                    queue_index = thread_id;
                   }
                   tasks[task_index]._cell =
                       new_buffers[new_index]._sub_grid_index;
                   tasks[task_index]._buffer = new_index;
                   // add the task to the queue of the corresponding thread
-                  new_queues[costs.get_thread(ngb)]->add_task(task_index);
+                  new_queues[queue_index]->add_task(task_index);
                   myassert(new_buffers[add_index]._sub_grid_index == ngb,
                            "Wrong subgrid");
                   myassert(new_buffers[add_index]._direction ==
@@ -1465,6 +1510,11 @@ int main(int argc, char **argv) {
             task_tick(task_end);
             costs.add_cost(task._cell, task_end - task_start);
 
+          } else if (task._type == TASKTYPE_SEND) {
+
+            /// send a buffer to another process
+            cmac_error("Communication task not implemented yet!");
+
           } else {
 
             // should never happen
@@ -1479,7 +1529,14 @@ int main(int argc, char **argv) {
 
         } // while (current_index != NO_TASK)
 
+        // check for incoming communications
+        // ...
+
       } // while (num_photon_done < num_photon)
+
+      // final part of communication ring (still need to decide where to do
+      // this: here or outside the parallel region)
+      // ...
 
     } // parallel region
 
@@ -1488,14 +1545,54 @@ int main(int argc, char **argv) {
     logmessage("Total number of tasks: " << tasks.size(), 0);
 
     // combine the counter values for subgrids with copies
+    // if the original is on the local process, this is easy. If it is not, we
+    // need to communicate.
+    // Let's for simplicity just set up a single non-blocking communication for
+    // each copy.
+    std::vector< MPI_Request > requests(originals.size(), MPI_REQUEST_NULL);
+    // we just assume this is big enough (for now)
+    const size_t buffer_part_size = MPI_buffer_size / originals.size();
     for (unsigned int i = 0; i < originals.size(); ++i) {
       const unsigned int original = originals[i];
       const unsigned int copy = tot_num_subgrid + i;
       logmessage("Updating ionization integrals for " << original
                                                       << " using copy " << copy,
                  1);
-      static_cast< DensitySubGrid * >(gridvec[original])
-          ->update_intensities(*static_cast< DensitySubGrid * >(gridvec[copy]));
+      if (costs.get_process(original) == MPI_rank) {
+        if (costs.get_process(copy) == MPI_rank) {
+          // no communication required
+          gridvec[original]->update_intensities(*gridvec[copy]);
+        } else {
+          // we need to set up a recv
+          MPI_Irecv(&MPI_buffer[i * buffer_part_size], buffer_part_size,
+                    MPI_PACKED, costs.get_process(copy), i, MPI_COMM_WORLD,
+                    &requests[i]);
+        }
+      } else {
+        if (costs.get_process(copy) == MPI_rank) {
+          // we need to send
+          gridvec[copy]->pack(&MPI_buffer[i * buffer_part_size],
+                              buffer_part_size);
+          MPI_Isend(&MPI_buffer[i * buffer_part_size], buffer_part_size,
+                    MPI_PACKED, costs.get_process(original), i, MPI_COMM_WORLD,
+                    &requests[i]);
+        } // else: no action required
+      }
+    }
+
+    MPI_Waitall(originals.size(), &requests[0], MPI_STATUSES_IGNORE);
+
+    // data have arrived: unpack
+    for (unsigned int i = 0; i < originals.size(); ++i) {
+      const unsigned int original = originals[i];
+      const unsigned int copy = tot_num_subgrid + i;
+      if (costs.get_process(original) == MPI_rank &&
+          costs.get_process(copy) != MPI_rank) {
+        const int ncell_dummy[3] = {1, 1, 1};
+        DensitySubGrid dummy(box, ncell_dummy);
+        dummy.unpack(&MPI_buffer[i * buffer_part_size], buffer_part_size);
+        gridvec[original]->update_intensities(dummy);
+      }
     }
 
     // STEP 2: update the ionization structure for each subgrid
@@ -1506,13 +1603,16 @@ int main(int argc, char **argv) {
       while (igrid < tot_num_subgrid) {
         const unsigned int current_igrid = atomic_post_increment(igrid);
         if (current_igrid < tot_num_subgrid) {
-          static_cast< DensitySubGrid * >(gridvec[current_igrid])
-              ->compute_neutral_fraction(num_photon);
+          // only subgrids on this process are done
+          if (costs.get_process(current_igrid) == MPI_rank) {
+            gridvec[current_igrid]->compute_neutral_fraction(num_photon);
+          }
         }
       }
     }
 
     // output useful information about this iteration (if enabled)
+    // we need to find an elegant way to do this in MPI
     logmessage("Writing task and cost information", 0);
     output_tasks(iloop, tasks);
     output_costs(iloop, tot_num_subgrid, num_threads, costs, copies, originals);
@@ -1522,6 +1622,7 @@ int main(int argc, char **argv) {
 
     // rebalance the work based on the cost information during the last
     // iteration
+    // we first need to communicate cost information
     logmessage("Rebalancing", 0);
     // fill initial_cost_vector with costs
     unsigned long avg_cost_per_thread = 0;
@@ -1610,6 +1711,10 @@ int main(int argc, char **argv) {
     // redistribute the subgrids among the threads to balance the computational
     // costs (based on this iteration)
     costs.redistribute();
+
+    // now do the communication: some subgrids might move between processes
+    // ...
+
   } // main loop
 
   ///////////////////
@@ -1624,17 +1729,20 @@ int main(int argc, char **argv) {
   // Output final result
   //////////////////////
 
+  // this will be a collective operation. Either we first send all data to
+  // process 0, or we let all processes write in turn.
+
   //  - ASCII output (for the VisIt plot script)
   std::ofstream ofile("intensities.txt");
   for (unsigned int igrid = 0; igrid < tot_num_subgrid; ++igrid) {
-    static_cast< DensitySubGrid * >(gridvec[igrid])->print_intensities(ofile);
+    gridvec[igrid]->print_intensities(ofile);
   }
   ofile.close();
 
   //  - binary output (for the Python plot script)
   std::ofstream bfile("intensities.dat");
   for (unsigned int igrid = 0; igrid < tot_num_subgrid; ++igrid) {
-    static_cast< DensitySubGrid * >(gridvec[igrid])->output_intensities(bfile);
+    gridvec[igrid]->output_intensities(bfile);
   }
   bfile.close();
 

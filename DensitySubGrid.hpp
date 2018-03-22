@@ -392,9 +392,10 @@ inline bool is_compatible_input_direction(const double *direction,
   }
 
 /**
- * @brief Common interface for actual subgrids and dummy subgrids.
+ * @brief Small fraction of a density grid that acts as an individual density
+ * grid.
  */
-class SubGrid {
+class DensitySubGrid {
 public:
   /*! @brief Indices of the neighbouring subgrids. */
   unsigned int _ngbs[27];
@@ -405,68 +406,6 @@ public:
   /*! @brief Index of the SubGrid in the subgrid list. */
   unsigned int _subgrid_index;
 
-  virtual ~SubGrid() {}
-
-  /**
-   * @brief Get the neighbour for the given direction.
-   *
-   * @param output_direction TravelDirection.
-   * @return Index of the neighbouring subgrid for that direction.
-   */
-  inline unsigned int get_neighbour(const int output_direction) const {
-    myassert(output_direction >= 0 && output_direction < 27,
-             "output_direction: " << output_direction);
-    return _ngbs[output_direction];
-  }
-
-  /**
-   * @brief Set the neighbour for the given direction.
-   *
-   * @param output_direction TravelDirection.
-   * @param ngb Neighbour index.
-   */
-  inline void set_neighbour(const int output_direction,
-                            const unsigned int ngb) {
-    myassert(output_direction >= 0 && output_direction < 27,
-             "output_direction: " << output_direction);
-    _ngbs[output_direction] = ngb;
-  }
-
-  inline unsigned int get_active_buffer(const int direction) const {
-    return _active_buffers[direction];
-  }
-
-  inline void set_active_buffer(const int direction, const unsigned int index) {
-    _active_buffers[direction] = index;
-  }
-
-  virtual int get_MPI_size() const = 0;
-
-  virtual void pack(char *buffer, const int buffer_size) = 0;
-  virtual void unpack(char *buffer, const int buffer_size) = 0;
-};
-
-/**
- * @brief DensitySubGrid that is not present on the current MPI rank.
- */
-class DummySubGrid : public SubGrid {
-public:
-  /*! @brief Rank that holds the actual DensitySubGrid. */
-  int _rank;
-
-  virtual ~DummySubGrid() {}
-
-  virtual int get_MPI_size() const { return 0; }
-  virtual void pack(char *buffer, const int buffer_size) {}
-  virtual void unpack(char *buffer, const int buffer_size) {}
-};
-
-/**
- * @brief Small fraction of a density grid that acts as an individual density
- * grid.
- */
-class DensitySubGrid : public SubGrid {
-public:
   /*! @brief Computational cost of this subgrid. */
   unsigned long _computational_cost;
 
@@ -946,7 +885,7 @@ public:
   /**
    * @brief Destructor.
    */
-  virtual ~DensitySubGrid() {
+  inline ~DensitySubGrid() {
     // deallocate data arrays
     delete[] _number_density;
     delete[] _neutral_fraction;
@@ -955,11 +894,44 @@ public:
   }
 
   /**
+   * @brief Get the neighbour for the given direction.
+   *
+   * @param output_direction TravelDirection.
+   * @return Index of the neighbouring subgrid for that direction.
+   */
+  inline unsigned int get_neighbour(const int output_direction) const {
+    myassert(output_direction >= 0 && output_direction < 27,
+             "output_direction: " << output_direction);
+    return _ngbs[output_direction];
+  }
+
+  /**
+   * @brief Set the neighbour for the given direction.
+   *
+   * @param output_direction TravelDirection.
+   * @param ngb Neighbour index.
+   */
+  inline void set_neighbour(const int output_direction,
+                            const unsigned int ngb) {
+    myassert(output_direction >= 0 && output_direction < 27,
+             "output_direction: " << output_direction);
+    _ngbs[output_direction] = ngb;
+  }
+
+  inline unsigned int get_active_buffer(const int direction) const {
+    return _active_buffers[direction];
+  }
+
+  inline void set_active_buffer(const int direction, const unsigned int index) {
+    _active_buffers[direction] = index;
+  }
+
+  /**
    * @brief Get the size of a DensitySubGrid when it is communicated over MPI.
    *
    * @return Size of a DensitySubGrid that is communicated over MPI.
    */
-  virtual int get_MPI_size() const {
+  inline int get_MPI_size() const {
     return DENSITYSUBGRID_FIXED_MPI_SIZE +
            DENSITYSUBGRID_NUMBER_OF_CELL_VARIABLES * _number_of_cells[0] *
                _number_of_cells[3] * sizeof(double);
@@ -971,7 +943,7 @@ public:
    * @param buffer MPI buffer (should at least have size get_MPI_size()).
    * @param buffer_size Actual size of the buffer.
    */
-  virtual void pack(char *buffer, const int buffer_size) {
+  inline void pack(char *buffer, const int buffer_size) {
     myassert(buffer_size >= get_MPI_size(), "Buffer too small!");
 
     int buffer_position = 0;
@@ -1010,7 +982,7 @@ public:
    * @param buffer MPI buffer.
    * @param buffer_size Actual size of the buffer.
    */
-  virtual void unpack(char *buffer, const int buffer_size) {
+  inline void unpack(char *buffer, const int buffer_size) {
     int buffer_position = 0;
     MPI_Unpack(buffer, buffer_size, &buffer_position, &_computational_cost, 1,
                MPI_UNSIGNED_LONG, MPI_COMM_WORLD);
