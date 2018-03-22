@@ -736,8 +736,18 @@ int main(int argc, char **argv) {
   //////////////////////////////////
 
   char *MPI_buffer = nullptr;
+  // we use a single, locked request buffer to handle memory management for
+  // non-blocking communication.
+  // We do this because any communication requires locking anyway, and because
+  // it gives us a more elegant way to regularly check for finished sends.
+  std::vector< MPI_Request > MPI_buffer_requests;
+  Lock MPI_lock;
+  unsigned int MPI_last_request = 0;
   if (MPI_size > 1) {
     MPI_buffer = new char[MPI_buffer_size];
+    const unsigned int num_photonbuffers =
+        MPI_buffer_size / PHOTONBUFFER_MPI_SIZE;
+    MPI_buffer_requests.resize(num_photonbuffers, MPI_REQUEST_NULL);
 
     logmessage(
         "MPI_buffer_size: " << Utilities::human_readable_bytes(MPI_buffer_size),
@@ -1251,6 +1261,70 @@ int main(int argc, char **argv) {
         // Keep processing tasks until the queue is empty.
         while (current_index != NO_TASK) {
 
+          // first do MPI related stuff
+          // we only allow one thread at a time to use the MPI library
+          if (MPI_size > 1 && MPI_lock.try_lock()) {
+
+            // check if any of the non-blocking sends finished
+            int index, flag;
+            MPI_Testany(MPI_buffer_requests.size(), &MPI_buffer_requests[0],
+                        &index, &flag, MPI_STATUS_IGNORE);
+            if (flag) {
+              // release the request, this will automatically release the
+              // corresponding space in the buffer
+              MPI_buffer_requests[index] = MPI_REQUEST_NULL;
+            }
+
+            // check for incoming communications
+            MPI_Status status;
+            MPI_Iprobe(MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &flag,
+                       &status);
+            if (flag) {
+              const int source = status.MPI_SOURCE;
+              const int tag = status.MPI_TAG;
+
+              // We can receive a message! How we receive it depends on the tag.
+              if (tag == 0) {
+
+                // incoming photon buffer
+                // we need to receive it and schedule a new propagation task
+
+                // receive the message
+                char buffer[PHOTONBUFFER_MPI_SIZE];
+                MPI_Recv(buffer, PHOTONBUFFER_MPI_SIZE, MPI_PACKED, source, tag,
+                         MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+
+                // get a new free buffer
+                unsigned int buffer_index = new_buffers.get_free_buffer();
+                PhotonBuffer &input_buffer = new_buffers[buffer_index];
+
+                // fill the buffer
+                input_buffer.unpack(buffer);
+
+                unsigned int subgrid_index = input_buffer._sub_grid_index;
+                myassert(costs.get_process(subgrid_index) == MPI_rank,
+                         "Message arrived on wrong process!");
+                unsigned int thread_index = costs.get_thread(subgrid_index);
+
+                // add to the queue of the corresponding thread
+                const size_t task_index = tasks.get_free_element_safe();
+                myassert(task_index < tasks.max_size(),
+                         "Task buffer overflow!");
+                tasks[task_index]._type = TASKTYPE_PHOTON_TRAVERSAL;
+                tasks[task_index]._cell = subgrid_index;
+                tasks[task_index]._buffer = buffer_index;
+                // note that this statement should be last, as the buffer might
+                // be processed as soon as this statement is executed
+                new_queues[thread_index]->add_task(task_index);
+
+              } else {
+                cmac_error("Unknown tag: %i!", tag);
+              }
+            }
+
+            MPI_lock.unlock();
+          }
+
           Task &task = tasks[current_index];
 
           // Different tasks are processed in different ways.
@@ -1513,7 +1587,42 @@ int main(int argc, char **argv) {
           } else if (task._type == TASKTYPE_SEND) {
 
             /// send a buffer to another process
-            cmac_error("Communication task not implemented yet!");
+
+            // log the start of the task
+            task.start(thread_id);
+
+            // get the buffer
+            const unsigned int current_buffer_index = task._buffer;
+            PhotonBuffer &buffer = new_buffers[current_buffer_index];
+
+            // pack it
+            // first: get a free MPI_Request
+            MPI_lock.lock();
+            unsigned int request_index = MPI_last_request;
+            while (MPI_buffer_requests[request_index] != MPI_REQUEST_NULL) {
+              request_index = (request_index + 1) % MPI_buffer_requests.size();
+              myassert(request_index != MPI_last_request,
+                       "Unable to obtain a free MPI request!");
+            }
+            MPI_last_request = request_index;
+            MPI_Request &request = MPI_buffer_requests[request_index];
+            // now use the request index to find the right spot in the buffer
+            buffer.pack(&MPI_buffer[request_index * PHOTONBUFFER_MPI_SIZE]);
+
+            // send the message (non-blocking)
+            const int sendto = costs.get_process(buffer._sub_grid_index);
+            MPI_Isend(&MPI_buffer[request_index * PHOTONBUFFER_MPI_SIZE],
+                      PHOTONBUFFER_MPI_SIZE, MPI_PACKED, sendto, 0,
+                      MPI_COMM_WORLD, &request);
+
+            MPI_lock.unlock();
+
+            // we can (and should) test if the message was sent using
+            // MPI_Testany, so that we can free and reuse the request index and
+            // buffer space
+
+            // log the end time of the task
+            task.stop();
 
           } else {
 
@@ -1521,7 +1630,7 @@ int main(int argc, char **argv) {
             logmessage("Unknown task!", 0);
           }
 
-          // We finished as task: try to get a new task from the local queue
+          // We finished a task: try to get a new task from the local queue
           current_index = new_queues[thread_id]->get_task();
 
           // this would be the right place to delete the task (if we don't want
