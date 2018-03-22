@@ -30,6 +30,8 @@
 #include <cstdio>
 #include <cstdlib>
 
+extern int MPI_rank;
+
 /**
  * @brief Macro that prints the given formatted string (with arguments) to the
  * given stream as a 5 space indented block of 65 characters with proper limits.
@@ -98,7 +100,8 @@
  */
 #define cmac_error(s, ...)                                                     \
   {                                                                            \
-    fprintf(stderr, "%s:%s():%i: Error:\n", __FILE__, __FUNCTION__, __LINE__); \
+    fprintf(stderr, "[rank %i]:%s:%s():%i: Error:\n", MPI_rank, __FILE__,      \
+            __FUNCTION__, __LINE__);                                           \
     print_indent(stderr, s, ##__VA_ARGS__);                                    \
     abort();                                                                   \
   }
@@ -109,8 +112,8 @@
  */
 #define cmac_warning(s, ...)                                                   \
   {                                                                            \
-    fprintf(stderr, "%s:%s():%i: Warning:\n", __FILE__, __FUNCTION__,          \
-            __LINE__);                                                         \
+    fprintf(stderr, "[rank %i];%s:%s():%i: Warning:\n", MPI_rank, __FILE__,    \
+            __FUNCTION__, __LINE__);                                           \
     print_indent(stderr, s, ##__VA_ARGS__);                                    \
   }
 
@@ -119,7 +122,7 @@
  * the stdout.
  */
 #define cmac_status(s, ...)                                                    \
-  {                                                                            \
+  if (MPI_rank == 0) {                                                         \
     fprintf(stdout, "%s:%s():%i:\n", __FILE__, __FUNCTION__, __LINE__);        \
     print_indent(stdout, s, ##__VA_ARGS__);                                    \
   }

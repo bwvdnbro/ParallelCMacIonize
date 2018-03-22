@@ -35,7 +35,7 @@
  */
 #ifdef LOG_OUTPUT
 #define logmessage(message, loglevel)                                          \
-  if (loglevel < LOG_OUTPUT) {                                                 \
+  if (MPI_rank == 0 && loglevel < LOG_OUTPUT) {                                \
     _Pragma("omp single") { std::cerr << message << std::endl; }               \
   }
 #else

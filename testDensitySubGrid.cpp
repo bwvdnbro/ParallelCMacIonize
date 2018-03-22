@@ -44,6 +44,9 @@
 #define TASK_PLOT
 #endif
 
+// global variables, as we need them in the log macro
+int MPI_rank, MPI_size;
+
 // Project includes
 #include "CommandLineParser.hpp"
 #include "CostVector.hpp"
@@ -585,6 +588,7 @@ inline void read_parameters(
 
   logmessage("\n##\n# Parameters:\n##", 0);
   parameters.print_contents(std::cout, true);
+  std::cout.flush();
   logmessage("##\n", 0);
 }
 
@@ -656,8 +660,13 @@ int main(int argc, char **argv) {
   // MPI initialization
   /////////////////////
 
-  int MPI_rank, MPI_size;
   initialize_MPI(argc, argv, MPI_rank, MPI_size);
+
+  // disable std::cout output for all processes other than rank 0 (log messages
+  // by default are only written by rank 0)
+  if (MPI_rank > 0) {
+    std::cout.rdbuf(nullptr);
+  }
 
   /////////////////////
 
@@ -727,6 +736,10 @@ int main(int argc, char **argv) {
   //////////////////////////////////
 
   char *MPI_buffer = new char[MPI_buffer_size];
+
+  logmessage(
+      "MPI_buffer_size: " << Utilities::human_readable_bytes(MPI_buffer_size),
+      0);
 
   //////////////////////////////////
 
@@ -834,7 +847,7 @@ int main(int argc, char **argv) {
       }               // for ix
     }                 // end parallel region
 
-  } // end MPI_rank == 0
+  } // if(MPI_rank == 0)
 
   //////////////////
 
@@ -984,12 +997,18 @@ int main(int argc, char **argv) {
       for (unsigned int igrid = 0; igrid < gridvec.size(); ++igrid) {
         if (costs.get_process(igrid) == irank) {
           int position = 0;
+          myassert(buffer_position + rank_size <= MPI_buffer_size,
+                   "MPI buffer overflow!");
+          // length 4 since buffer contains 8-bit chars and we are adding a
+          // 32-bit integer
           MPI_Pack(&igrid, 1, MPI_UNSIGNED,
-                   &MPI_buffer[buffer_position + rank_size], 1, &position,
+                   &MPI_buffer[buffer_position + rank_size], 4, &position,
                    MPI_COMM_WORLD);
-          ++rank_size;
+          rank_size += 4;
+          myassert(buffer_position + rank_size <= MPI_buffer_size,
+                   "MPI buffer overflow!");
           gridvec[igrid]->pack(&MPI_buffer[buffer_position + rank_size],
-                               MPI_buffer_size);
+                               MPI_buffer_size - buffer_position - rank_size);
           rank_size += gridvec[igrid]->get_MPI_size();
         }
       }
@@ -999,6 +1018,7 @@ int main(int argc, char **argv) {
       buffer_position += rank_size;
     }
   } else {
+    const int ncell_dummy[3] = {1, 1, 1};
     unsigned int rank_size;
     MPI_Recv(&rank_size, 1, MPI_UNSIGNED, 0, 0, MPI_COMM_WORLD,
              MPI_STATUS_IGNORE);
@@ -1008,13 +1028,22 @@ int main(int argc, char **argv) {
     while (rank_size > 0) {
       unsigned int igrid;
       int position = 0;
-      MPI_Unpack(&MPI_buffer[buffer_position], 1, &position, &igrid, 1,
+      myassert(buffer_position <= MPI_buffer_size, "MPI buffer overflow!");
+      MPI_Unpack(&MPI_buffer[buffer_position], 4, &position, &igrid, 1,
                  MPI_UNSIGNED, MPI_COMM_WORLD);
-      ++buffer_position;
-      gridvec[igrid]->unpack(&MPI_buffer[buffer_position], MPI_buffer_size);
+      buffer_position += 4;
+      rank_size -= 4;
+      gridvec[igrid] = new DensitySubGrid(box, ncell_dummy);
+      myassert(buffer_position <= MPI_buffer_size, "MPI buffer overflow!");
+      gridvec[igrid]->unpack(&MPI_buffer[buffer_position],
+                             MPI_buffer_size - buffer_position);
       buffer_position += gridvec[igrid]->get_MPI_size();
+      rank_size -= gridvec[igrid]->get_MPI_size();
     }
   }
+
+  // Just for now: wait until the communication is finished before proceeding.
+  MPI_Barrier(MPI_COMM_WORLD);
 
   ////////////////////////////////////////////////
 
