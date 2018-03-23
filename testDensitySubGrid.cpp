@@ -40,6 +40,15 @@
 //   on scaling)
 // - Find a way to make sure each process only generates a fraction of the
 //   source photons.
+//
+// How do we check the end of the traversal step:
+//  globally: if the total number of photons that finished (i.e. left the box or
+//  was absorbed) equals the total number of photons
+//  locally: if (a) all local photon packets were generated, (b) all local
+//  photon buffers were processed, (c) the number of local empty photon buffers
+//  equals the expected number
+// Question: how do we make sure each process only sends one message to master
+// when it locally finishes?
 
 // Defines: we do these first, as some includes depend on them
 
@@ -721,8 +730,8 @@ inline void set_number_of_threads(int num_threads_request, int &num_threads) {
  * @param thread_id Thread that will execute the task.
  * @param num_photon_sourced Number of photon packets that has already been
  * generated at the source.
- * @param num_photon Total number of photon packets that needs to be generated
- * at the source.
+ * @param num_photon_local Total number of photon packets that needs to be
+ * generated at the source on this process.
  * @param tasks Task space to create new tasks in.
  * @param new_queues Task queues for individual threads.
  * @param new_buffers PhotonBuffer memory space.
@@ -731,22 +740,23 @@ inline void set_number_of_threads(int num_threads_request, int &num_threads) {
  * @param gridvec List of all subgrids.
  * @param central_queue List with the corresponding thread number for each entry
  * in central_index.
+ * @param num_active_buffers Number of active photon buffers on this process.
  */
 inline void execute_source_photon_task(
     Task &task, const int thread_id, unsigned int &num_photon_sourced,
-    const unsigned int num_photon, ThreadSafeVector< Task > &tasks,
+    const unsigned int num_photon_local, ThreadSafeVector< Task > &tasks,
     std::vector< NewQueue * > &new_queues, MemorySpace &new_buffers,
     RandomGenerator &random_generator,
     const std::vector< unsigned int > &central_index,
     std::vector< DensitySubGrid * > &gridvec,
-    const std::vector< int > &central_queue) {
+    const std::vector< int > &central_queue, unsigned int &num_active_buffers) {
 
   // log the start time of the task (if task output is enabled)
   task.start(thread_id);
 
   // check if we should still execute this task (as another thread
   // could have depleted the photon source by now)
-  if (num_photon_sourced < num_photon) {
+  if (num_photon_sourced < num_photon_local) {
 
     // atomically increment the number of photons that was sourced
     // if this works, then this thread gets the unique right and
@@ -757,7 +767,7 @@ inline void execute_source_photon_task(
     // the statement above could have been executed by multiple
     // threads simultaneously, so we need to check that it worked for
     // this particular thread before we actually continue.
-    if (num_photon_sourced_now < num_photon) {
+    if (num_photon_sourced_now < num_photon_local) {
 
       // OK, we can (/have to) generate some photons!
 
@@ -776,6 +786,9 @@ inline void execute_source_photon_task(
         new_queues[thread_id]->add_task(task_index);
       }
 
+      // we will create a new buffer
+      atomic_pre_increment(num_active_buffers);
+
       // if this is the last buffer: cap the total number of photons
       // to the requested value
       // (note that num_photon_done_now is the number of photons that
@@ -783,8 +796,8 @@ inline void execute_source_photon_task(
       //  num_photon_done_now + PHOTONBUFFER_SIZE photons will have
       //  been generated, unless this number is capped)
       unsigned int num_photon_this_loop = PHOTONBUFFER_SIZE;
-      if (num_photon_sourced_now + PHOTONBUFFER_SIZE > num_photon) {
-        num_photon_this_loop += (num_photon - num_photon_sourced_now);
+      if (num_photon_sourced_now + PHOTONBUFFER_SIZE > num_photon_local) {
+        num_photon_this_loop += (num_photon_local - num_photon_sourced_now);
       }
 
       // get a free photon buffer in the central queue
@@ -840,13 +853,16 @@ inline void execute_source_photon_task(
  * and domain decomposition.
  * @param num_photon_done Number of photon packets that has been completely
  * finished.
+ * @param num_empty Number of empty buffers on this process.
+ * @param num_active_buffers Number of active photon buffers on this process.
  */
 inline void execute_photon_traversal_task(
     Task &task, const int thread_id, ThreadSafeVector< Task > &tasks,
     std::vector< NewQueue * > &new_queues, MemorySpace &new_buffers,
     std::vector< DensitySubGrid * > &gridvec, PhotonBuffer *local_buffers,
     bool *local_buffer_flags, const double reemission_probability,
-    CostVector &costs, unsigned int &num_photon_done) {
+    CostVector &costs, unsigned int &num_photon_done, unsigned int &num_empty,
+    unsigned int &num_active_buffers) {
 
   // variables used to determine the cost of photon traversal tasks
   unsigned long task_start, task_end;
@@ -902,11 +918,18 @@ inline void execute_photon_traversal_task(
       // for that direction (which might cause on overflow)
       const unsigned int ngb = this_grid.get_neighbour(i);
       unsigned int new_index = this_grid.get_active_buffer(i);
+      if (new_buffers[new_index]._actual_size == 0) {
+        // we are adding photons to an empty buffer
+        atomic_pre_decrement(num_empty);
+      }
       unsigned int add_index =
           new_buffers.add_photons(new_index, local_buffers[i]);
 
       // check if the original buffer is full
       if (add_index != new_index) {
+
+        // a new active buffer was created
+        atomic_pre_increment(num_active_buffers);
 
         // YES: create a task for the buffer and add it to the queue
         const size_t task_index = tasks.get_free_element_safe();
@@ -941,6 +964,10 @@ inline void execute_photon_traversal_task(
         // buffer, set it as the active buffer for this output
         // direction
         this_grid.set_active_buffer(i, add_index);
+        if (new_buffers[add_index]._actual_size == 0) {
+          // we have created a new empty buffer
+          atomic_pre_increment(num_empty);
+        }
 
       } // if (add_index != new_index)
 
@@ -955,6 +982,8 @@ inline void execute_photon_traversal_task(
 
   // delete the original buffer, as we are done with it
   new_buffers.free_buffer(current_buffer_index);
+
+  atomic_pre_subtract(num_active_buffers);
 
   // log the end time of the task
   task.stop();
@@ -1100,8 +1129,8 @@ inline void execute_send_task(Task &task, const int thread_id,
  * @param thread_id Thread that will execute the task.
  * @param num_photon_sourced Number of photon packets that has already been
  * generated at the source.
- * @param num_photon Total number of photon packets that needs to be generated
- * at the source.
+ * @param num_photon_local Total number of photon packets that needs to be
+ * generated at the source on this process.
  * @param tasks Task space to create new tasks in.
  * @param new_queues Task queues for individual threads.
  * @param new_buffers PhotonBuffer memory space.
@@ -1125,21 +1154,23 @@ inline void execute_send_task(Task &task, const int thread_id,
  * @param MPI_buffer MPI communication buffer.
  * @param message_log MPI message log.
  * @param message_log_size Size of the MPI message log.
+ * @param num_empty Number of empty buffers on this process.
+ * @param num_active_buffers Number of active photon buffers on this process.
  */
-inline void
-execute_task(Task &task, const int thread_id, unsigned int &num_photon_sourced,
-             const unsigned int num_photon, ThreadSafeVector< Task > &tasks,
-             std::vector< NewQueue * > &new_queues, MemorySpace &new_buffers,
-             RandomGenerator &random_generator,
-             const std::vector< unsigned int > &central_index,
-             std::vector< DensitySubGrid * > &gridvec,
-             const std::vector< int > &central_queue,
-             PhotonBuffer *local_buffers, bool *local_buffer_flags,
-             const double reemission_probability, CostVector &costs,
-             unsigned int &num_photon_done, Lock &MPI_lock,
-             unsigned int &MPI_last_request,
-             std::vector< MPI_Request > &MPI_buffer_requests, char *MPI_buffer,
-             std::vector< MPIMessage > &message_log, size_t &message_log_size) {
+inline void execute_task(
+    Task &task, const int thread_id, unsigned int &num_photon_sourced,
+    const unsigned int num_photon_local, ThreadSafeVector< Task > &tasks,
+    std::vector< NewQueue * > &new_queues, MemorySpace &new_buffers,
+    RandomGenerator &random_generator,
+    const std::vector< unsigned int > &central_index,
+    std::vector< DensitySubGrid * > &gridvec,
+    const std::vector< int > &central_queue, PhotonBuffer *local_buffers,
+    bool *local_buffer_flags, const double reemission_probability,
+    CostVector &costs, unsigned int &num_photon_done, Lock &MPI_lock,
+    unsigned int &MPI_last_request,
+    std::vector< MPI_Request > &MPI_buffer_requests, char *MPI_buffer,
+    std::vector< MPIMessage > &message_log, size_t &message_log_size,
+    unsigned int &num_empty, unsigned int &num_active_buffers) {
 
   // Different tasks are processed in different ways.
   switch (task._type) {
@@ -1147,9 +1178,10 @@ execute_task(Task &task, const int thread_id, unsigned int &num_photon_sourced,
 
     /// generate random photon packets from the source
 
-    execute_source_photon_task(task, thread_id, num_photon_sourced, num_photon,
-                               tasks, new_queues, new_buffers, random_generator,
-                               central_index, gridvec, central_queue);
+    execute_source_photon_task(task, thread_id, num_photon_sourced,
+                               num_photon_local, tasks, new_queues, new_buffers,
+                               random_generator, central_index, gridvec,
+                               central_queue, num_active_buffers);
     break;
 
   case TASKTYPE_PHOTON_TRAVERSAL:
@@ -1158,7 +1190,8 @@ execute_task(Task &task, const int thread_id, unsigned int &num_photon_sourced,
 
     execute_photon_traversal_task(
         task, thread_id, tasks, new_queues, new_buffers, gridvec, local_buffers,
-        local_buffer_flags, reemission_probability, costs, num_photon_done);
+        local_buffer_flags, reemission_probability, costs, num_photon_done,
+        num_empty, num_active_buffers);
     break;
 
   case TASKTYPE_PHOTON_REEMIT:
@@ -1199,13 +1232,16 @@ execute_task(Task &task, const int thread_id, unsigned int &num_photon_sourced,
  * @param new_buffers PhotonBuffer memory space.
  * @param gridvec List of subgrids.
  * @param costs CostVector used for load balancing and domain decomposition.
+ * @param num_empty Number of empty buffers on this process.
+ * @param num_active_buffers Number of active photon buffers on this process.
  */
 inline void activate_buffer(unsigned int &current_index, const int thread_id,
                             ThreadSafeVector< Task > &tasks,
                             std::vector< NewQueue * > &new_queues,
                             MemorySpace &new_buffers,
                             std::vector< DensitySubGrid * > &gridvec,
-                            CostVector &costs) {
+                            CostVector &costs, unsigned int &num_empty,
+                            unsigned int &num_active_buffers) {
   // try to activate a non-full buffer
   // note that we only try to access thread-local information, so as
   // long as we don't allow task stealing, this will be thread-safe
@@ -1238,6 +1274,8 @@ inline void activate_buffer(unsigned int &current_index, const int thread_id,
           new_buffers[new_index]._direction =
               new_buffers[non_full_index]._direction;
           gridvec[i]->set_active_buffer(j, new_index);
+          // we are creating a new active photon buffer
+          atomic_pre_increment(num_active_buffers);
           // Add the buffer to the queue of the corresponding thread.
           // Note that this could be another thread than this thread, in
           // which case this thread will still be hungry (and we might
@@ -1267,6 +1305,8 @@ inline void activate_buffer(unsigned int &current_index, const int thread_id,
           }
           tasks[task_index]._cell = new_buffers[non_full_index]._sub_grid_index;
           tasks[task_index]._buffer = non_full_index;
+          // we created a new empty buffer
+          atomic_pre_increment(num_empty);
           // note that this statement should be last, as the task might
           // be executed as soon as this statement is executed
           new_queues[queue_index]->add_task(task_index);
@@ -1364,6 +1404,27 @@ inline void check_for_incoming_communications(
       // note that this statement should be last, as the buffer might
       // be processed as soon as this statement is executed
       new_queues[thread_index]->add_task(task_index);
+
+    } else if (tag == MPIMESSAGETAG_LOCAL_PROCESS_FINISHED) {
+
+      // a process finished its local work and sends its tallies to the master
+      // process to check if the traversal step finished
+      myassert(MPI_rank == 0,
+               "Only the master rank should receive this type of message!");
+
+    } else if (tag == MPIMESSAGETAG_REDUCE_REQUEST) {
+
+      // the master rank detected a possible finish and wants to do a global
+      // reduction to check if the traversal step really finished
+      myassert(MPI_rank != 0,
+               "The master rank should not receive this type of message!");
+
+    } else if (tag == MPIMESSAGETAG_STOP) {
+
+      // the master rank detected a real finish: finish the photon traversal
+      // step
+      myassert(MPI_rank != 0,
+               "The master rank should not receive this type of message!");
 
     } else {
       cmac_error("Unknown tag: %i!", tag);
@@ -1842,6 +1903,7 @@ int main(int argc, char **argv) {
       }
     }
     logmessage("Number of central subgrid copies: " << central_index.size(), 0);
+    const unsigned int tot_num_copies = central_index.size();
 
     // remove all central indices that are not on this process
     std::remove_if(central_index.begin(), central_index.end(),
@@ -1852,6 +1914,16 @@ int main(int argc, char **argv) {
     // make sure all processes have source photons (we do not enforce this
     // anywhere, so this assertion might very well fail)
     myassert(central_index.size() > 0, "Rank without source photons!");
+
+    // divide the total number of photons over the processes, weighted with
+    // the number of copies each process holds
+    const unsigned int num_photon_per_copy = num_photon / tot_num_copies;
+    // for now just assume the total number of copies is a divisor of the total
+    // number of photons, and crash if it isn't
+    myassert(num_photon_per_copy * tot_num_copies == num_photon,
+             "Photon number not conserved!");
+    const unsigned int num_photon_local =
+        num_photon_per_copy * central_index.size();
 
     // get the corresponding thread ranks
     std::vector< int > central_queue(central_index.size());
@@ -1871,6 +1943,10 @@ int main(int argc, char **argv) {
     //    absorption or by crossing a simulation box wall
     unsigned int num_photon_done = 0;
     bool global_run_flag = true;
+    // local control variables
+    const unsigned int num_empty_target = 27 * gridvec.size();
+    unsigned int num_empty = 27 * gridvec.size();
+    unsigned int num_active_buffers = 0;
 #pragma omp parallel default(shared)
     {
       // id of this specific thread
@@ -1925,20 +2001,22 @@ int main(int argc, char **argv) {
         // that is not yet full and prematurely schedule it
         if (current_index == NO_TASK) {
           activate_buffer(current_index, thread_id, tasks, new_queues,
-                          new_buffers, gridvec, costs);
+                          new_buffers, gridvec, costs, num_empty,
+                          num_active_buffers);
         }
 
         // Keep processing tasks until the queue is empty.
         while (current_index != NO_TASK) {
 
           Task &task = tasks[current_index];
-          execute_task(task, thread_id, num_photon_sourced, num_photon, tasks,
-                       new_queues, new_buffers, random_generator[thread_id],
-                       central_index, gridvec, central_queue, local_buffers,
-                       local_buffer_flags, reemission_probability, costs,
-                       num_photon_done, MPI_lock, MPI_last_request,
-                       MPI_buffer_requests, MPI_buffer, message_log,
-                       message_log_size);
+          execute_task(task, thread_id, num_photon_sourced, num_photon_local,
+                       tasks, new_queues, new_buffers,
+                       random_generator[thread_id], central_index, gridvec,
+                       central_queue, local_buffers, local_buffer_flags,
+                       reemission_probability, costs, num_photon_done, MPI_lock,
+                       MPI_last_request, MPI_buffer_requests, MPI_buffer,
+                       message_log, message_log_size, num_empty,
+                       num_active_buffers);
 
           // this would be the right place to delete the task (if we don't want
           // to output it)
@@ -1961,7 +2039,31 @@ int main(int argc, char **argv) {
 
         } // while (current_index != NO_TASK)
 
-        global_run_flag = (num_photon_done < num_photon);
+        // check for a local finish:
+        // if(process_finished()){
+        //   if(lock){ -> try to lock something (MPI_lock? specific lock?)
+        //     if(process_finished()){ -> we need to check again
+        //       -> check if the local tallies are 0 (in which case another
+        //          thread already sent them off). If not:
+        //         -> get local tallies
+        //         -> send local tallies to rank 0
+        //     }
+        //   }
+        // }
+        // a few key points:
+        //   - we need to protect the tallies with a lock
+        //   - we need to check the finish condition again inside the lock
+        //     because all threads will try to access this block
+        //     simultaneously, but only for the first one we can guarantee that
+        //     the finish condition was really met
+        if (num_photon_sourced == num_photon_local &&
+            num_empty == num_empty_target && num_active_buffers == 0) {
+          global_run_flag = false;
+        }
+
+        // this needs to change: global_run_flag can only be set to false by
+        // process rank 0 through a collective communication
+        //        global_run_flag = (num_photon_done < num_photon);
 
       } // while (global_run_flag)
 
