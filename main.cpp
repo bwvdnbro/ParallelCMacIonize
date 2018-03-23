@@ -92,6 +92,9 @@
 /*! @brief Starting value \f$N\f$ for the cells. */
 #define GLOBAL_STARTING_VALUE 1000u
 
+/*! @brief Enable this to write a detailed message log. */
+#define LOG_MESSAGES
+
 /**
  * @brief Generate a uniform random double using the default C++ random
  * generator.
@@ -99,6 +102,143 @@
  * @return Uniform random double in the range [0, 1[.
  */
 double random_double() { return ((double)rand()) / ((double)RAND_MAX); }
+
+/**
+ * @brief Get the CPU cycle time stamp.
+ *
+ * @param time_variable Variable to store the result in.
+ */
+#define get_CPU_cycle(time_variable)                                           \
+  {                                                                            \
+    unsigned int lo, hi;                                                       \
+    __asm__ __volatile__("rdtsc" : "=a"(lo), "=d"(hi));                        \
+    time_variable = ((unsigned long)hi << 32) | lo;                            \
+  }
+
+/**
+ * @brief Types of messages that are logged.
+ */
+enum MessageType {
+  /*! @brief Send. */
+  MESSAGETYPE_SEND = 0,
+  /*! @brief Receive. */
+  MESSAGETYPE_RECV
+};
+
+/**
+ * @brief Log information about a message.
+ */
+class Message {
+public:
+  /*! @brief Type of message. */
+  MessageType _type;
+
+  /*! @brief Source/destination rank. */
+  int _rank;
+
+  /*! @brief Message tag. */
+  int _tag;
+
+  /*! @brief Message time stamp. */
+  unsigned long _timestamp;
+};
+
+/**
+ * @brief Write communication logs to a file.
+ *
+ * @param messages Local message logs.
+ * @param message_size Number of messages in the log.
+ * @param rank Local MPI rank.
+ * @param size Total MPI size.
+ */
+inline void write_message_log(const Message *messages,
+                              const size_t message_size, const int rank,
+                              const int size) {
+#ifdef LOG_MESSAGES
+  // each process writes in turn; rank 0 creates/overwrites the file, the other
+  // ranks append to it
+  for (int irank = 0; irank < size; ++irank) {
+    if (irank == rank) {
+      std::ios_base::openmode mode;
+      if (rank == 0) {
+        mode = std::ofstream::trunc;
+      } else {
+        mode = std::ofstream::app;
+      }
+      std::ofstream ofile("messages.txt", mode);
+      if (rank == 0) {
+        ofile << "# origin\ttype\trank\ttag\ttime\n";
+      }
+      for (size_t i = 0; i < message_size; ++i) {
+        const Message &message = messages[i];
+        ofile << rank << "\t" << message._type << "\t" << message._rank << "\t"
+              << message._tag << "\t" << message._timestamp << "\n";
+      }
+    }
+    // non-active processes wait until the file is released by the current
+    // process
+    MPI_Barrier(MPI_COMM_WORLD);
+  }
+#endif // LOG_MESSAGES
+}
+
+/**
+ * @brief Create a buffer to log messages.
+ *
+ * @param size Size of the buffer.
+ */
+#ifdef LOG_MESSAGES
+#define create_message_log(size)                                               \
+  Message *messages = new Message[size];                                       \
+  size_t message_size = 0;                                                     \
+  size_t message_max_size = size;
+#else
+#define create_message_log(size) (void)
+#endif
+
+/**
+ * @brief Free the message buffer.
+ */
+#ifdef LOG_MESSAGES
+#define free_message_log() delete[] messages;
+#else
+#define free_message_log() (void)
+#endif
+
+/**
+ * @brief Write the message log file.
+ */
+#ifdef LOG_MESSAGES
+#define write_messages() write_message_log(messages, message_size, rank, size)
+#else
+#define write_messages() (void)
+#endif
+
+/**
+ * @brief Log a message.
+ *
+ * @param type Message type.
+ * @param rank Source/destination rank.
+ * @param tag Message tag.
+ */
+#ifdef LOG_MESSAGES
+#define log_message(type, rank, tag)                                           \
+  {                                                                            \
+    if (message_size == message_max_size) {                                    \
+      std::cerr << "Message buffer full!" << std::endl;                        \
+      return 1;                                                                \
+    }                                                                          \
+    unsigned long timestamp;                                                   \
+    get_CPU_cycle(timestamp);                                                  \
+    messages[message_size]._type = type;                                       \
+    messages[message_size]._rank = rank;                                       \
+    messages[message_size]._tag = tag;                                         \
+    messages[message_size]._timestamp = timestamp;                             \
+    ++message_size;                                                            \
+  }
+#else
+#define log_message(type, rank, tag) (void)
+#endif
 
 /**
  * @brief Single cell of the 1D grid.
@@ -200,6 +340,8 @@ int main(int argc, char **argv) {
   MPI_Comm_rank(MPI_COMM_WORLD, &rank);
   MPI_Comm_size(MPI_COMM_WORLD, &size);
 
+  create_message_log(10000);
+
   std::stringstream rankstream;
   rankstream << rank << "/" << size << ": ";
   std::string rankstr = rankstream.str();
@@ -285,6 +427,7 @@ int main(int argc, char **argv) {
               }
               MPI_Isend(NULL, 0, MPI_INT, destination, tag, MPI_COMM_WORLD,
                         &request);
+              log_message(MESSAGETYPE_SEND, destination, tag);
               ++num_send;
               // we do not care about storing request information in this case,
               // as the communication tag itself contains all the data we want
@@ -305,6 +448,7 @@ int main(int argc, char **argv) {
           if (tag == 0) {
             // receive the (empty) message
             MPI_Recv(NULL, 0, MPI_INT, source, tag, MPI_COMM_WORLD, &status);
+            log_message(MESSAGETYPE_RECV, source, tag);
             ++num_recv;
             // increase the relevant neighbour: the rightmost one
             ++cells[imax - 1]._integer_variable;
@@ -313,6 +457,7 @@ int main(int argc, char **argv) {
           if (tag == 1) {
             // receive the (empty) message
             MPI_Recv(NULL, 0, MPI_INT, source, tag, MPI_COMM_WORLD, &status);
+            log_message(MESSAGETYPE_RECV, source, tag);
             ++num_recv;
             // increase the relevant neighbour: the leftmost one
             ++cells[imin]._integer_variable;
@@ -328,6 +473,7 @@ int main(int argc, char **argv) {
             unsigned int buffer[2];
             MPI_Recv(buffer, 2, MPI_UNSIGNED, source, tag, MPI_COMM_WORLD,
                      &status);
+            log_message(MESSAGETYPE_RECV, source, tag);
             ++num_recv;
             total_created += buffer[0];
             total_completed += buffer[1];
@@ -336,6 +482,7 @@ int main(int argc, char **argv) {
           if (tag == 3) {
             // receive the (empty) message
             MPI_Recv(NULL, 0, MPI_INT, source, tag, MPI_COMM_WORLD, &status);
+            log_message(MESSAGETYPE_RECV, source, tag);
             ++num_recv;
             unsigned int global_buffer[2];
             do_reduction(created, completed, global_buffer);
@@ -344,6 +491,7 @@ int main(int argc, char **argv) {
           if (tag == 4) {
             // receive the (empty) message
             MPI_Recv(NULL, 0, MPI_INT, source, tag, MPI_COMM_WORLD, &status);
+            log_message(MESSAGETYPE_RECV, source, tag);
             ++num_recv;
             // set the global finished flag and break from the probe loop
             global_finished = true;
@@ -376,6 +524,7 @@ int main(int argc, char **argv) {
           MPI_Request request;
           MPI_Isend(creacombuf, 2, MPI_UNSIGNED, 0, 2, MPI_COMM_WORLD,
                     &request);
+          log_message(MESSAGETYPE_SEND, 0, 2);
           ++num_send;
           MPI_Request_free(&request);
         }
@@ -395,6 +544,7 @@ int main(int argc, char **argv) {
           for (int irank = 1; irank < size; ++irank) {
             MPI_Request request;
             MPI_Isend(NULL, 0, MPI_INT, irank, 3, MPI_COMM_WORLD, &request);
+            log_message(MESSAGETYPE_SEND, irank, 3);
             ++num_send;
             MPI_Request_free(&request);
           }
@@ -407,6 +557,7 @@ int main(int argc, char **argv) {
             for (int irank = 1; irank < size; ++irank) {
               MPI_Request request;
               MPI_Isend(NULL, 0, MPI_INT, irank, 4, MPI_COMM_WORLD, &request);
+              log_message(MESSAGETYPE_SEND, irank, 4);
               ++num_send;
               MPI_Request_free(&request);
             }
@@ -429,6 +580,7 @@ int main(int argc, char **argv) {
         if (tag == 0) {
           // receive the (empty) message
           MPI_Recv(NULL, 0, MPI_INT, source, tag, MPI_COMM_WORLD, &status);
+          log_message(MESSAGETYPE_RECV, source, tag);
           ++num_recv;
           // increase nummertjes for the rightmost kotje
           ++cells[imax - 1]._integer_variable;
@@ -438,6 +590,7 @@ int main(int argc, char **argv) {
         if (tag == 1) {
           // receive the (empty) message
           MPI_Recv(NULL, 0, MPI_INT, source, tag, MPI_COMM_WORLD, &status);
+          log_message(MESSAGETYPE_RECV, source, tag);
           ++num_recv;
           // increase nummertjes for the leftmost kotje
           ++cells[imin]._integer_variable;
@@ -454,6 +607,7 @@ int main(int argc, char **argv) {
           unsigned int buffer[2];
           MPI_Recv(buffer, 2, MPI_UNSIGNED, source, tag, MPI_COMM_WORLD,
                    &status);
+          log_message(MESSAGETYPE_RECV, source, tag);
           ++num_recv;
           total_created += buffer[0];
           total_completed += buffer[1];
@@ -462,6 +616,7 @@ int main(int argc, char **argv) {
         if (tag == 3) {
           // receive the (empty) message
           MPI_Recv(NULL, 0, MPI_INT, source, tag, MPI_COMM_WORLD, &status);
+          log_message(MESSAGETYPE_RECV, source, tag);
           ++num_recv;
           unsigned int globbuffer[2];
           do_reduction(created, completed, globbuffer);
@@ -470,6 +625,7 @@ int main(int argc, char **argv) {
         if (tag == 4) {
           // receive the (empty) message
           MPI_Recv(NULL, 0, MPI_INT, source, tag, MPI_COMM_WORLD, &status);
+          log_message(MESSAGETYPE_RECV, source, tag);
           ++num_recv;
           // set the global finished flag and break from the probe loop
           global_finished = true;
@@ -539,6 +695,9 @@ int main(int argc, char **argv) {
     }
     MPI_Barrier(MPI_COMM_WORLD);
   }
+
+  write_messages();
+  free_message_log();
 
   return MPI_Finalize();
 }

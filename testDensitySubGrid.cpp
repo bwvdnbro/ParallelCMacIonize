@@ -1,6 +1,6 @@
 /*******************************************************************************
  * This file is part of CMacIonize
- * Copyright (C) 2017 Bert Vandenbroucke (bert.vandenbroucke@gmail.com)
+ * Copyright (C) 2017, 2018 Bert Vandenbroucke (bert.vandenbroucke@gmail.com)
  *
  * CMacIonize is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as published by
@@ -23,6 +23,18 @@
  *
  * @author Bert Vandenbroucke (bv7@st-andrews.ac.uk)
  */
+
+// Space for ideas, TODOs...
+//
+// - MPI communication logging: create ThreadSafeVector with a new data type
+//   that can store: communication type (send/recv), source/destination rank,
+//   tag and time. Analysis script can make link, as communication between 2
+//   ranks always happens chronologically (so no need to assign unique ID to
+//   each communication and add it to the message)
+// - check if MPI_Testany is actually faster than an own implementation, and if
+//   it favours specific entries in the list (since we always only remove 1
+//   element and if this is always the first, this might have negative impact
+//   on scaling)
 
 // Defines: we do these first, as some includes depend on them
 
@@ -52,6 +64,7 @@ int MPI_rank, MPI_size;
 #include "CostVector.hpp"
 #include "DensitySubGrid.hpp"
 #include "Log.hpp"
+#include "MPIMessage.hpp"
 #include "MemorySpace.hpp"
 #include "NewQueue.hpp"
 #include "PhotonBuffer.hpp"
@@ -80,6 +93,7 @@ int MPI_rank, MPI_size;
 inline void output_tasks(const unsigned int iloop,
                          const ThreadSafeVector< Task > &tasks) {
 #ifdef TASK_OUTPUT
+  // compose the file name
   std::stringstream filename;
   filename << "tasks_";
   filename.fill('0');
@@ -87,14 +101,39 @@ inline void output_tasks(const unsigned int iloop,
   filename << iloop;
   filename << ".txt";
 
-  std::ofstream ofile(filename.str());
-  ofile << "# thread\tstart\tstop\ttype\n";
+  // now output
+  // each process outputs its own tasks in turn, process 0 is responsible for
+  // creating the file and the other processes append to it
+  for (int irank = 0; irank < MPI_size; ++irank) {
+    // only the active process writes
+    if (irank == MPI_rank) {
+      // the file mode depends on the rank
+      std::ios_base::openmode mode;
+      if (irank == 0) {
+        // rank 0 creates (or overwrites) the file
+        mode = std::ofstream::trunc;
+      } else {
+        // all other ranks append to it
+        mode = std::ofstream::app;
+      }
+      // now open the file
+      std::ofstream ofile(filename.str(), mode);
 
-  const size_t tsize = tasks.size();
-  for (size_t i = 0; i < tsize; ++i) {
-    const Task &task = tasks[i];
-    ofile << task._thread_id << "\t" << task._start_time << "\t"
-          << task._end_time << "\t" << task._type << "\n";
+      // rank 0 writes the header
+      if (irank == 0) {
+        ofile << "# rank\tthread\tstart\tstop\ttype\n";
+      }
+
+      // write the task info
+      const size_t tsize = tasks.size();
+      for (size_t i = 0; i < tsize; ++i) {
+        const Task &task = tasks[i];
+        ofile << MPI_rank << "\t" << task._thread_id << "\t" << task._start_time
+              << "\t" << task._end_time << "\t" << task._type << "\n";
+      }
+    }
+    // only one process at a time is allowed to write
+    MPI_Barrier(MPI_COMM_WORLD);
   }
 #endif
 }
@@ -114,6 +153,7 @@ inline void output_costs(const unsigned int iloop, const unsigned int ngrid,
                          const std::vector< unsigned int > &copies,
                          const std::vector< unsigned int > &originals) {
 #ifdef COST_OUTPUT
+  // first compose the file name
   std::stringstream filename;
   filename << "costs_";
   filename.fill('0');
@@ -121,20 +161,54 @@ inline void output_costs(const unsigned int iloop, const unsigned int ngrid,
   filename << iloop;
   filename << ".txt";
 
-  std::ofstream ofile(filename.str());
-  ofile << "# subgrid\tcost\trank\tthread\n";
-  for (unsigned int i = 0; i < ngrid; ++i) {
-    ofile << i << "\t" << costs.get_cost(i) << "\t" << costs.get_process(i)
-          << "\t" << costs.get_thread(i) << "\n";
-    if (copies[i] < 0xffffffff) {
-      unsigned int copy = copies[i];
-      while (copy - ngrid < originals.size() && originals[copy - ngrid] == i) {
-        ofile << i << "\t" << costs.get_cost(copy) << "\t"
-              << costs.get_process(copy) << "\t" << costs.get_thread(copy)
-              << "\n";
-        ++copy;
+  // now output
+  // each process outputs its own costs in turn, process 0 is responsible for
+  // creating the file and the other processes append to it
+  // note that in principle each process holds all cost information. However,
+  // the actual costs will only be up to date on the local process that holds
+  // the subgrid.
+  for (int irank = 0; irank < MPI_size; ++irank) {
+    if (irank == MPI_rank) {
+      // the file mode depends on the rank
+      std::ios_base::openmode mode;
+      if (irank == 0) {
+        // rank 0 creates (or overwrites) the file
+        mode = std::ofstream::trunc;
+      } else {
+        // all other ranks append to it
+        mode = std::ofstream::app;
+      }
+      // now open the file
+      std::ofstream ofile(filename.str(), mode);
+
+      // rank 0 writes the file header
+      if (irank == 0) {
+        ofile << "# subgrid\tcost\trank\tthread\n";
+      }
+
+      // output the cost information
+      for (unsigned int i = 0; i < ngrid; ++i) {
+        // only output local information
+        if (costs.get_process(i) == MPI_rank) {
+          ofile << i << "\t" << costs.get_cost(i) << "\t"
+                << costs.get_process(i) << "\t" << costs.get_thread(i) << "\n";
+        }
+        if (copies[i] < 0xffffffff) {
+          unsigned int copy = copies[i];
+          while (copy - ngrid < originals.size() &&
+                 originals[copy - ngrid] == i) {
+            // only output local information
+            if (costs.get_process(copy) == MPI_rank) {
+              ofile << i << "\t" << costs.get_cost(copy) << "\t"
+                    << costs.get_process(copy) << "\t" << costs.get_thread(copy)
+                    << "\n";
+            }
+            ++copy;
+          }
+        }
       }
     }
+    MPI_Barrier(MPI_COMM_WORLD);
   }
 #endif
 }
@@ -754,6 +828,15 @@ int main(int argc, char **argv) {
         0);
   }
 
+  // set up the message log buffer
+  // we don't need to use a thread safe vector, as only one thread is allowed
+  // access to MPI at the same time
+  std::vector< MPIMessage > message_log;
+  if (MPI_size > 1) {
+    message_log.resize(number_of_tasks);
+  }
+  size_t message_log_size = 0;
+
   //////////////////////////////////
 
   ///////////////////////////////////////
@@ -1135,6 +1218,7 @@ int main(int argc, char **argv) {
     //  - number of photon packets that has left the system, either through
     //    absorption or by crossing a simulation box wall
     unsigned int num_photon_done = 0;
+    bool global_run_flag = true;
 #pragma omp parallel default(shared)
     {
       // id of this specific thread
@@ -1165,7 +1249,7 @@ int main(int argc, char **argv) {
       //  num_photon_sourced < num_photon_local
       // as unsourced photons cannot contribute to num_photon_done
       // this condition definitely needs to change for MPI...
-      while (num_photon_done < num_photon_local) {
+      while (global_run_flag) {
 
         // get a first task
         // upon first entry of the while loop, this will be the photon source
@@ -1284,7 +1368,7 @@ int main(int argc, char **argv) {
               const int tag = status.MPI_TAG;
 
               // We can receive a message! How we receive it depends on the tag.
-              if (tag == 0) {
+              if (tag == MPIMESSAGETAG_PHOTONBUFFER) {
 
                 // incoming photon buffer
                 // we need to receive it and schedule a new propagation task
@@ -1293,6 +1377,11 @@ int main(int argc, char **argv) {
                 char buffer[PHOTONBUFFER_MPI_SIZE];
                 MPI_Recv(buffer, PHOTONBUFFER_MPI_SIZE, MPI_PACKED, source, tag,
                          MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+
+                log_recv(message_log[message_log_size], source, tag);
+                ++message_log_size;
+                myassert(message_log_size < message_log.size(),
+                         "Too many messages for message log!");
 
                 // get a new free buffer
                 unsigned int buffer_index = new_buffers.get_free_buffer();
@@ -1612,8 +1701,14 @@ int main(int argc, char **argv) {
             // send the message (non-blocking)
             const int sendto = costs.get_process(buffer._sub_grid_index);
             MPI_Isend(&MPI_buffer[request_index * PHOTONBUFFER_MPI_SIZE],
-                      PHOTONBUFFER_MPI_SIZE, MPI_PACKED, sendto, 0,
-                      MPI_COMM_WORLD, &request);
+                      PHOTONBUFFER_MPI_SIZE, MPI_PACKED, sendto,
+                      MPIMESSAGETAG_PHOTONBUFFER, MPI_COMM_WORLD, &request);
+
+            log_send(message_log[message_log_size], sendto,
+                     MPIMESSAGETAG_PHOTONBUFFER);
+            ++message_log_size;
+            myassert(message_log_size < message_log.size(),
+                     "Too many messages for message log!");
 
             MPI_lock.unlock();
 
@@ -1638,10 +1733,9 @@ int main(int argc, char **argv) {
 
         } // while (current_index != NO_TASK)
 
-        // check for incoming communications
-        // ...
+        global_run_flag = (num_photon_done < num_photon_local);
 
-      } // while (num_photon_done < num_photon)
+      } // while (global_run_flag)
 
       // final part of communication ring (still need to decide where to do
       // this: here or outside the parallel region)

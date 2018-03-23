@@ -17,13 +17,13 @@ print "Plotting tasks for", name, "..."
 
 data = np.loadtxt(name)
 
-tmin = data[:,1].min()
-tmax = data[:,2].max()
+tmin = data[:,2].min()
+tmax = data[:,3].max()
 tconv = 1. / (tmax - tmin)
-nthread = int(data[:,0].max()) + 1
+nthread = int(data[:,1].max()) + 1
 alltime = 0
 for i in range(nthread):
-  thread = data[data[:,0] == i]
+  thread = data[data[:,1] == i][:,1:]
   bar = [((task[1] - tmin) * tconv, (task[2] - task[1]) * tconv) \
            for task in thread]
   tottime = np.array([line[1] for line in bar]).sum()

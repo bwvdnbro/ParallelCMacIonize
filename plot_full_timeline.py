@@ -16,9 +16,9 @@ def plot_file(name):
 
   data = np.loadtxt(name)
 
-  nthread = int(data[:,0].max()) + 1
+  nthread = int(data[:,1].max()) + 1
   for i in range(nthread):
-    thread = data[data[:,0] == i]
+    thread = data[data[:,1] == i][:,1:]
     bar = [(task[1], task[2] - task[1]) for task in thread]
     colors = [task_colors[int(task[3])] for task in thread]
     pl.broken_barh(bar, (i-0.4, 0.8), facecolors = colors, edgecolor = "none")
