@@ -38,17 +38,12 @@
 //   it favours specific entries in the list (since we always only remove 1
 //   element and if this is always the first, this might have negative impact
 //   on scaling)
-// - Find a way to make sure each process only generates a fraction of the
-//   source photons.
 //
-// How do we check the end of the traversal step:
-//  globally: if the total number of photons that finished (i.e. left the box or
-//  was absorbed) equals the total number of photons
-//  locally: if (a) all local photon packets were generated, (b) all local
-//  photon buffers were processed, (c) the number of local empty photon buffers
-//  equals the expected number
-// Question: how do we make sure each process only sends one message to master
-// when it locally finishes?
+// Important knowledge: if you compile with debug symbols, the following
+// command can link addresses in error output to file positions:
+//  addr2line 0x40fafc -e testDensitySubGrid
+//
+// TODO: set up photon buffers for incoming subgrids before the main loop starts
 
 // Defines: we do these first, as some includes depend on them
 
@@ -876,6 +871,9 @@ inline void execute_photon_traversal_task(
   const unsigned int igrid = buffer._sub_grid_index;
   DensitySubGrid &this_grid = *gridvec[buffer._sub_grid_index];
 
+  myassert(costs.get_process(igrid) == MPI_rank,
+           "This process should not be working on this subgrid!");
+
   // prepare output buffers: make sure they are empty and that buffers
   // corresponding to directions outside the simulation box are
   // disabled
@@ -1336,7 +1334,9 @@ check_for_finished_sends(std::vector< MPI_Request > &MPI_buffer_requests) {
   int index, flag;
   MPI_Testany(MPI_buffer_requests.size(), &MPI_buffer_requests[0], &index,
               &flag, MPI_STATUS_IGNORE);
-  if (flag) {
+  // we cannot test flag, since flag will also be true if the array only
+  // contains MPI_REQUEST_NULL values
+  if (index != MPI_UNDEFINED) {
     // release the request, this will automatically release the
     // corresponding space in the buffer
     MPI_buffer_requests[index] = MPI_REQUEST_NULL;
@@ -1353,11 +1353,15 @@ check_for_finished_sends(std::vector< MPI_Request > &MPI_buffer_requests) {
  * decomposition.
  * @param tasks Task space.
  * @param new_queues Per thread queues.
+ * @param num_photon_done_since_last Number of photon packets that finished
+ * completely since the last time the process thought it was done.
+ * @param global_run_flag Global flag that controls when we should finish.
  */
 inline void check_for_incoming_communications(
     std::vector< MPIMessage > &message_log, size_t &message_log_size,
     MemorySpace &new_buffers, CostVector &costs,
-    ThreadSafeVector< Task > &tasks, std::vector< NewQueue * > &new_queues) {
+    ThreadSafeVector< Task > &tasks, std::vector< NewQueue * > &new_queues,
+    unsigned int &num_photon_done_since_last, bool &global_run_flag) {
 
   // check for incoming communications
   MPI_Status status;
@@ -1412,12 +1416,16 @@ inline void check_for_incoming_communications(
       myassert(MPI_rank == 0,
                "Only the master rank should receive this type of message!");
 
-    } else if (tag == MPIMESSAGETAG_REDUCE_REQUEST) {
+      unsigned int tally;
+      MPI_Recv(&tally, 1, MPI_UNSIGNED, source, tag, MPI_COMM_WORLD,
+               MPI_STATUS_IGNORE);
 
-      // the master rank detected a possible finish and wants to do a global
-      // reduction to check if the traversal step really finished
-      myassert(MPI_rank != 0,
-               "The master rank should not receive this type of message!");
+      log_recv(message_log[message_log_size], source, tag);
+      ++message_log_size;
+      myassert(message_log_size < message_log.size(),
+               "Too many messages for message log!");
+
+      atomic_pre_add(num_photon_done_since_last, tally);
 
     } else if (tag == MPIMESSAGETAG_STOP) {
 
@@ -1425,6 +1433,18 @@ inline void check_for_incoming_communications(
       // step
       myassert(MPI_rank != 0,
                "The master rank should not receive this type of message!");
+
+      // we do not really need to receive this message, as the tag contains all
+      // the information we need
+      MPI_Recv(nullptr, 0, MPI_INT, source, tag, MPI_COMM_WORLD,
+               MPI_STATUS_IGNORE);
+
+      log_recv(message_log[message_log_size], source, tag);
+      ++message_log_size;
+      myassert(message_log_size < message_log.size(),
+               "Too many messages for message log!");
+
+      global_run_flag = false;
 
     } else {
       cmac_error("Unknown tag: %i!", tag);
@@ -1947,6 +1967,8 @@ int main(int argc, char **argv) {
     const unsigned int num_empty_target = 27 * gridvec.size();
     unsigned int num_empty = 27 * gridvec.size();
     unsigned int num_active_buffers = 0;
+    // global control variable
+    unsigned int num_photon_done_since_last = 0;
 #pragma omp parallel default(shared)
     {
       // id of this specific thread
@@ -1985,9 +2007,9 @@ int main(int argc, char **argv) {
 
           check_for_finished_sends(MPI_buffer_requests);
 
-          check_for_incoming_communications(message_log, message_log_size,
-                                            new_buffers, costs, tasks,
-                                            new_queues);
+          check_for_incoming_communications(
+              message_log, message_log_size, new_buffers, costs, tasks,
+              new_queues, num_photon_done_since_last, global_run_flag);
 
           MPI_lock.unlock();
         }
@@ -2013,10 +2035,10 @@ int main(int argc, char **argv) {
                        tasks, new_queues, new_buffers,
                        random_generator[thread_id], central_index, gridvec,
                        central_queue, local_buffers, local_buffer_flags,
-                       reemission_probability, costs, num_photon_done, MPI_lock,
-                       MPI_last_request, MPI_buffer_requests, MPI_buffer,
-                       message_log, message_log_size, num_empty,
-                       num_active_buffers);
+                       reemission_probability, costs,
+                       num_photon_done_since_last, MPI_lock, MPI_last_request,
+                       MPI_buffer_requests, MPI_buffer, message_log,
+                       message_log_size, num_empty, num_active_buffers);
 
           // this would be the right place to delete the task (if we don't want
           // to output it)
@@ -2027,9 +2049,9 @@ int main(int argc, char **argv) {
 
             check_for_finished_sends(MPI_buffer_requests);
 
-            check_for_incoming_communications(message_log, message_log_size,
-                                              new_buffers, costs, tasks,
-                                              new_queues);
+            check_for_incoming_communications(
+                message_log, message_log_size, new_buffers, costs, tasks,
+                new_queues, num_photon_done_since_last, global_run_flag);
 
             MPI_lock.unlock();
           }
@@ -2039,26 +2061,68 @@ int main(int argc, char **argv) {
 
         } // while (current_index != NO_TASK)
 
-        // check for a local finish:
-        // if(process_finished()){
-        //   if(lock){ -> try to lock something (MPI_lock? specific lock?)
-        //     if(process_finished()){ -> we need to check again
-        //       -> check if the local tallies are 0 (in which case another
-        //          thread already sent them off). If not:
-        //         -> get local tallies
-        //         -> send local tallies to rank 0
-        //     }
-        //   }
-        // }
-        // a few key points:
-        //   - we need to protect the tallies with a lock
-        //   - we need to check the finish condition again inside the lock
-        //     because all threads will try to access this block
-        //     simultaneously, but only for the first one we can guarantee that
-        //     the finish condition was really met
+        // check if the local process finished
         if (num_photon_sourced == num_photon_local &&
             num_empty == num_empty_target && num_active_buffers == 0) {
-          global_run_flag = false;
+          // we use the MPI lock so that we know for sure we are the only
+          // thread that has access to num_photon_done_since_last:
+          // other threads cannot do anything as long as there is no incoming
+          // communication, and an incoming communication can only be received
+          // by a thread that holds the MPI lock
+          if (MPI_lock.try_lock()) {
+            if (num_photon_sourced == num_photon_local &&
+                num_empty == num_empty_target && num_active_buffers == 0 &&
+                num_photon_done_since_last > 0) {
+              if (MPI_rank == 0) {
+                num_photon_done += num_photon_done_since_last;
+                num_photon_done_since_last = 0;
+                if (num_photon_done == num_photon) {
+                  // send stop signal to all other processes
+                  for (int irank = 1; irank < MPI_size; ++irank) {
+                    MPI_Request request;
+                    // we don't need to actually send anything, just sending
+                    // the tag is enough
+                    MPI_Isend(nullptr, 0, MPI_INT, irank, MPIMESSAGETAG_STOP,
+                              MPI_COMM_WORLD, &request);
+
+                    log_send(message_log[message_log_size], irank,
+                             MPIMESSAGETAG_STOP);
+                    ++message_log_size;
+                    myassert(message_log_size < message_log.size(),
+                             "Too many messages for message log!");
+
+                    MPI_Request_free(&request);
+                  }
+                  // make sure the master process also stops
+                  global_run_flag = false;
+                }
+              } else {
+                // send tally to master rank
+                MPI_Request request;
+                MPI_Isend(&num_photon_done_since_last, 1, MPI_UNSIGNED, 0,
+                          MPIMESSAGETAG_LOCAL_PROCESS_FINISHED, MPI_COMM_WORLD,
+                          &request);
+
+                log_send(message_log[message_log_size], 0,
+                         MPIMESSAGETAG_LOCAL_PROCESS_FINISHED);
+                ++message_log_size;
+                myassert(message_log_size < message_log.size(),
+                         "Too many messages for message log!");
+
+                // https://www.open-mpi.org/doc/v2.0/man3/MPI_Request_free.3.php
+                //  MPI_Request_free marks the request object for deallocation
+                //  and sets request to MPI_REQUEST_NULL. Any ongoing
+                //  communication that is associated with the request will be
+                //  allowed to complete. The request will be deallocated only
+                //  after its completion.
+                // in other words: we can safely throw away the request
+                MPI_Request_free(&request);
+
+                num_photon_done_since_last = 0;
+              }
+            }
+            MPI_lock.unlock();
+          }
         }
 
         // this needs to change: global_run_flag can only be set to false by
@@ -2145,6 +2209,9 @@ int main(int argc, char **argv) {
     logmessage("Writing task and cost information", 0);
     output_tasks(iloop, tasks);
     output_costs(iloop, tot_num_subgrid, num_threads, costs, copies, originals);
+
+    // stop here to see how MPI did for 1 iteration
+    return 0;
 
     // clear task buffer
     tasks.clear();

@@ -36,8 +36,6 @@ enum MPIMessageTag {
   MPIMESSAGETAG_PHOTONBUFFER = 0,
   /*! @brief End of local process message. */
   MPIMESSAGETAG_LOCAL_PROCESS_FINISHED,
-  /*! @brief Request for global communication. */
-  MPIMESSAGETAG_REDUCE_REQUEST,
   /*! @brief Global stop message. */
   MPIMESSAGETAG_STOP
 };
