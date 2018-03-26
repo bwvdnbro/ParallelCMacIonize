@@ -45,12 +45,14 @@ enum MPIMessageTag {
  *
  * @param message Message field to write the log to.
  * @param destination Destination rank of the send.
+ * @param thread Thread that does the communication.
  * @param tag Associated tag.
  */
-#define log_send(message, destination, tag)                                    \
+#define log_send(message, destination, thread, tag)                            \
   {                                                                            \
     message._type = MPIMESSAGETYPE_SEND;                                       \
     message._rank = destination;                                               \
+    message._thread = thread;                                                  \
     message._tag = tag;                                                        \
     task_tick(message._timestamp);                                             \
   }
@@ -60,12 +62,14 @@ enum MPIMessageTag {
  *
  * @param message Message field to write the log to.
  * @param source Source rank of the communication.
+ * @param thread Thread that does the communication.
  * @param tag Associated tag.
  */
-#define log_recv(message, source, tag)                                         \
+#define log_recv(message, source, thread, tag)                                 \
   {                                                                            \
     message._type = MPIMESSAGETYPE_RECV;                                       \
     message._rank = source;                                                    \
+    message._thread = thread;                                                  \
     message._tag = tag;                                                        \
     task_tick(message._timestamp);                                             \
   }
@@ -90,6 +94,9 @@ public:
 
   /*! @brief Origin/destination rank of the message. */
   int _rank;
+
+  /*! @brief Thread that did the communication. */
+  int _thread;
 
   /*! @brief Message tag. */
   int _tag;

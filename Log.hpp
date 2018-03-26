@@ -39,7 +39,51 @@
     _Pragma("omp single") { std::cerr << message << std::endl; }               \
   }
 #else
-#define logmessage(s, loglevel)
+#define logmessage(message, loglevel)
+#endif
+
+/**
+ * @brief Write a message to the log with the given log level, irrespective of
+ * the rank of the process.
+ *
+ * @param message Message to write.
+ * @param loglevel Log level. The message is only written if the LOG_OUTPUT
+ * defined is higher than this value.
+ */
+#ifdef LOG_OUTPUT
+#define logmessage_always(message, loglevel)                                   \
+  if (loglevel < LOG_OUTPUT) {                                                 \
+    _Pragma("omp single") {                                                    \
+      std::cerr << "[rank " << MPI_rank << "]: " << message << std::endl;      \
+    }                                                                          \
+  }
+#else
+#define logmessage_always(message, loglevel)
+#endif
+
+/**
+ * @brief Write a message to the log with the given log level from every
+ * process.
+ *
+ * Note that this macro should only be used in parts of the code that are
+ * executed simultaneously by all processes by a single thread.
+ *
+ * @param message Message to write.
+ * @param loglevel Log level. The message is only written if the LOG_OUTPUT
+ * defined is higher than this value.
+ */
+#ifdef LOG_OUTPUT
+#define logmessage_all(message, loglevel)                                      \
+  if (loglevel < LOG_OUTPUT) {                                                 \
+    for (int irank = 0; irank < MPI_size; ++irank) {                           \
+      if (irank == MPI_rank) {                                                 \
+        std::cerr << "[rank " << irank << "]: " << message << std::endl;       \
+      }                                                                        \
+      MPI_Barrier(MPI_COMM_WORLD);                                             \
+    }                                                                          \
+  }
+#else
+#define logmessage_all(message, loglevel) (void)
 #endif
 
 #endif // LOG_HPP

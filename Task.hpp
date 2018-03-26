@@ -100,6 +100,13 @@ public:
     task_tick(_end_time);
 #endif
   }
+
+  /**
+   * @brief Empty constructor.
+   *
+   * Used to flag unexecuted tasks.
+   */
+  Task() : _end_time(0) {}
 };
 
 #endif // TASK_HPP
