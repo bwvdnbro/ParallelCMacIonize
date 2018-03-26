@@ -1991,23 +1991,17 @@ int main(int argc, char **argv) {
   MPI_Barrier(MPI_COMM_WORLD);
 
   // set up the initial photon buffers for each subgrid
-  for (int ix = 0; ix < num_subgrid[0]; ++ix) {
-    for (int iy = 0; iy < num_subgrid[1]; ++iy) {
-      for (int iz = 0; iz < num_subgrid[2]; ++iz) {
-        const unsigned int index =
-            ix * num_subgrid[1] * num_subgrid[2] + iy * num_subgrid[2] + iz;
-        if (costs.get_process(index) == MPI_rank) {
-          DensitySubGrid &this_grid = *gridvec[index];
-          for (int i = 0; i < 27; ++i) {
-            const unsigned int ngb_index = this_grid.get_neighbour(i);
-            if (ngb_index != NEIGHBOUR_OUTSIDE) {
-              const unsigned int active_buffer = new_buffers.get_free_buffer();
-              PhotonBuffer &buffer = new_buffers[active_buffer];
-              buffer._sub_grid_index = ngb_index;
-              buffer._direction = output_to_input_direction(i);
-              this_grid.set_active_buffer(i, active_buffer);
-            }
-          }
+  for (unsigned int igrid = 0; igrid < gridvec.size(); ++igrid) {
+    if (costs.get_process(igrid) == MPI_rank) {
+      DensitySubGrid &this_grid = *gridvec[igrid];
+      for (int i = 0; i < 27; ++i) {
+        const unsigned int ngb_index = this_grid.get_neighbour(i);
+        if (ngb_index != NEIGHBOUR_OUTSIDE) {
+          const unsigned int active_buffer = new_buffers.get_free_buffer();
+          PhotonBuffer &buffer = new_buffers[active_buffer];
+          buffer._sub_grid_index = ngb_index;
+          buffer._direction = output_to_input_direction(i);
+          this_grid.set_active_buffer(i, active_buffer);
         }
       }
     }
