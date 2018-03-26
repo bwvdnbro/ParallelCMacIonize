@@ -89,7 +89,7 @@ for iproc in range(nproc):
       label += "rank {0} - ".format(iproc)
     if nthread > 1:
       label += "thread {0} -".format(i)
-    label += "{0:.2f} \% empty".format(tottime * 100.)
+    label += "{0:.2f} \% load".format(tottime * 100.)
     ax.text(0.5, iproc * nthread + i, label, ha = "center",
             bbox = dict(facecolor='white', alpha=0.9))
 
@@ -100,6 +100,7 @@ for i in range(len(task_colors)):
 ax.legend(loc = "upper center", ncol = len(task_colors))
 ax.set_ylim(-1., nproc * nthread * 1.1)
 ax.set_yticks([])
+ax.set_xlim(-0.05, 1.05)
 alltime /= (nthread * nproc)
 ax.set_title("Total empty fraction: {0:.2f} \%".format((1. - alltime) * 100.))
 ax.set_xlabel("fraction of iteration time")
