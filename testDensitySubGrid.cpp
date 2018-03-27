@@ -42,6 +42,13 @@
 // Important knowledge: if you compile with debug symbols, the following
 // command can link addresses in error output to file positions:
 //  addr2line 0x40fafc -e testDensitySubGrid
+//
+// Don't use logmessage inside locked regions!! It contains an omp single
+// statement that automatically locks, and the locks interfere with region
+// locks.
+// Also: avoid using logmessage anywhere near the end of a parallel block, as
+// it will deadlock if one of the threads already left the parallel region (or
+// cause extremely weird behaviour)
 
 // Defines: we do these first, as some includes depend on them
 
@@ -1042,7 +1049,7 @@ inline void execute_photon_traversal_task(
   new_buffers.free_buffer(current_buffer_index);
 
   myassert(num_active_buffers > 0, "Number of active buffers < 0!");
-  atomic_pre_subtract(num_active_buffers);
+  atomic_pre_decrement(num_active_buffers);
 
   // log the end time of the task
   task.stop();
@@ -1180,7 +1187,7 @@ inline void execute_send_task(Task &task, const int thread_id,
   new_buffers.free_buffer(current_buffer_index);
 
   myassert(num_active_buffers > 0, "Number of active buffers < 0!");
-  atomic_pre_subtract(num_active_buffers);
+  atomic_pre_decrement(num_active_buffers);
 
   // we can (and should) test if the message was sent using
   // MPI_Testany, so that we can free and reuse the request index and
@@ -1285,8 +1292,7 @@ inline void execute_task(
   default:
 
     // should never happen
-    logmessage("Unknown task!", 0);
-    abort();
+    cmac_error("Unknown task: %i!", task._type);
   }
 }
 
@@ -1449,6 +1455,14 @@ inline void check_for_incoming_communications(
     // We can receive a message! How we receive it depends on the tag.
     if (tag == MPIMESSAGETAG_PHOTONBUFFER) {
 
+      // set up a dummy task to show receives in task plots
+      size_t task_index = tasks.get_free_element_safe();
+      myassert(task_index < tasks.max_size(), "Task buffer overflow!");
+      Task &receive_task = tasks[task_index];
+      receive_task._type = TASKTYPE_RECV;
+
+      receive_task.start(thread_id);
+
       // incoming photon buffer
       // we need to receive it and schedule a new propagation task
 
@@ -1478,7 +1492,7 @@ inline void check_for_incoming_communications(
       unsigned int thread_index = costs.get_thread(subgrid_index);
 
       // add to the queue of the corresponding thread
-      const size_t task_index = tasks.get_free_element_safe();
+      task_index = tasks.get_free_element_safe();
       myassert(task_index < tasks.max_size(), "Task buffer overflow!");
       tasks[task_index]._type = TASKTYPE_PHOTON_TRAVERSAL;
       tasks[task_index]._cell = subgrid_index;
@@ -1486,6 +1500,8 @@ inline void check_for_incoming_communications(
       // note that this statement should be last, as the buffer might
       // be processed as soon as this statement is executed
       new_queues[thread_index]->add_task(task_index);
+
+      receive_task.stop();
 
     } else if (tag == MPIMESSAGETAG_LOCAL_PROCESS_FINISHED) {
 
@@ -1504,8 +1520,6 @@ inline void check_for_incoming_communications(
                "Too many messages for message log!");
 
       atomic_pre_add(num_photon_done_since_last, tally);
-
-      logmessage("Rank 1 sent a tally!", 0);
 
     } else if (tag == MPIMESSAGETAG_STOP) {
 
@@ -2196,9 +2210,10 @@ int main(int argc, char **argv) {
               if (MPI_rank == 0) {
                 num_photon_done += num_photon_done_since_last;
                 num_photon_done_since_last = 0;
-                logmessage("num_photon_done = " << num_photon_done << " ("
-                                                << num_photon << ")",
-                           0);
+                logmessage_lockfree("num_photon_done = " << num_photon_done
+                                                         << " (" << num_photon
+                                                         << ")",
+                                    1);
                 if (num_photon_done == num_photon) {
                   // send stop signal to all other processes
                   for (int irank = 1; irank < MPI_size; ++irank) {
@@ -2248,11 +2263,12 @@ int main(int argc, char **argv) {
           }
         }
 
-        // this needs to change: global_run_flag can only be set to false by
-        // process rank 0 through a collective communication
-        //        global_run_flag = (num_photon_done < num_photon);
-
       } // while (global_run_flag)
+
+      logmessage("Thread " << thread_id << " exited loop!", 0);
+
+// make sure all threads finished before continuing
+#pragma omp barrier
 
     } // parallel region
 
@@ -2274,8 +2290,6 @@ int main(int argc, char **argv) {
 
     logmessage("Updating copies...", 0);
 
-    logmessage_all("originals.size() = " << originals.size(), 0);
-
     // combine the counter values for subgrids with copies
     // if the original is on the local process, this is easy. If it is not, we
     // need to communicate.
@@ -2288,9 +2302,6 @@ int main(int argc, char **argv) {
     for (unsigned int i = 0; i < originals.size(); ++i) {
       const unsigned int original = originals[i];
       const unsigned int copy = tot_num_subgrid + i;
-      logmessage("Updating ionization integrals for " << original
-                                                      << " using copy " << copy,
-                 1);
       if (costs.get_process(original) == MPI_rank) {
         if (costs.get_process(copy) == MPI_rank) {
           // no communication required
@@ -2298,10 +2309,6 @@ int main(int argc, char **argv) {
         } else {
           // we need to set up a recv
           ++num_to_receive;
-          logmessage_always("receiving message with tag "
-                                << copy << " from process "
-                                << costs.get_process(copy) << "...",
-                            0);
         }
       } else {
         if (costs.get_process(copy) == MPI_rank) {
@@ -2312,14 +2319,9 @@ int main(int argc, char **argv) {
           MPI_Isend(&MPI_buffer[i * buffer_part_size], sendsize, MPI_PACKED,
                     costs.get_process(original), original, MPI_COMM_WORLD,
                     &requests[i]);
-          logmessage_always("sending message with tag "
-                                << copy << " to process "
-                                << costs.get_process(original) << "...",
-                            0);
         } // else: no action required
       }
     }
-    logmessage("Sent. Waiting for communications to finish...", 0);
 
     unsigned int num_received = 0;
     while (num_received < num_to_receive) {
@@ -2344,6 +2346,8 @@ int main(int argc, char **argv) {
 
     MPI_Waitall(requests.size(), &requests[0], MPI_STATUSES_IGNORE);
 
+    MPI_Barrier(MPI_COMM_WORLD);
+
     logmessage("Done.", 0);
 
     // STEP 2: update the ionization structure for each subgrid
@@ -2351,11 +2355,13 @@ int main(int argc, char **argv) {
     unsigned int igrid = 0;
 #pragma omp parallel default(shared)
     {
+      const int thread_id = omp_get_thread_num();
       while (igrid < tot_num_subgrid) {
         const unsigned int current_igrid = atomic_post_increment(igrid);
         if (current_igrid < tot_num_subgrid) {
           // only subgrids on this process are done
-          if (costs.get_process(current_igrid) == MPI_rank) {
+          if (costs.get_process(current_igrid) == MPI_rank &&
+              costs.get_thread(current_igrid) == thread_id) {
             gridvec[current_igrid]->compute_neutral_fraction(num_photon);
           }
         }

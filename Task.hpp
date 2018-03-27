@@ -52,7 +52,9 @@ enum TaskType {
   /*! @brief Reemit photons. */
   TASKTYPE_PHOTON_REEMIT,
   /*! @brief Send a buffer to another process. */
-  TASKTYPE_SEND
+  TASKTYPE_SEND,
+  /*! @brief Receive a buffer from another process. */
+  TASKTYPE_RECV
 };
 
 /**

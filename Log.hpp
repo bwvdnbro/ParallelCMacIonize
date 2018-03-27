@@ -39,7 +39,7 @@
     _Pragma("omp single") { std::cerr << message << std::endl; }               \
   }
 #else
-#define logmessage(message, loglevel)
+#define logmessage(message, loglevel) (void)
 #endif
 
 /**
@@ -58,7 +58,26 @@
     }                                                                          \
   }
 #else
-#define logmessage_always(message, loglevel)
+#define logmessage_always(message, loglevel) (void)
+#endif
+
+/**
+ * @brief Write a message to the log with the given log level without using any
+ * shared memory locking mechanism to ensure a single message (this is the only
+ * macro that should be used inside regions that already use a custom locking
+ * mechanism).
+ *
+ * @param message Message to write.
+ * @param loglevel Log level. The message is only written if the LOG_OUTPUT
+ * defined is higher than this value.
+ */
+#ifdef LOG_OUTPUT
+#define logmessage_lockfree(message, loglevel)                                 \
+  if (loglevel < LOG_OUTPUT) {                                                 \
+    std::cerr << message << std::endl;                                         \
+  }
+#else
+#define logmessage_lockfree(message, loglevel) (void)
 #endif
 
 /**

@@ -10,8 +10,9 @@ pl.rcParams["font.size"] = 14
 
 name = sys.argv[1]
 
-task_colors = ["b", "r", "g", "y"]
-task_names = ["source photon", "photon traversal", "reemission", "send"]
+task_colors = ["b", "r", "c", "y", "g"]
+task_names = ["source photon", "photon traversal", "reemission", "send",
+              "receive"]
 
 print "Plotting tasks for", name, "..."
 
@@ -70,7 +71,7 @@ if len(sys.argv) > 2:
         v = (recvs[:, 0] - sends[:, 0]) * nthread + recvs[:, 1] - sends[:, 1]
 
         q = ax.quiver(x, y, u, v, angles = "xy", scale_units = "xy",
-                      scale = 1., width = 0.0001, alpha = 0.2)
+                      scale = 1., width = 0.0001)
 
 alltime = 0
 for iproc in range(nproc):
@@ -88,7 +89,7 @@ for iproc in range(nproc):
     if nproc > 1:
       label += "rank {0} - ".format(iproc)
     if nthread > 1:
-      label += "thread {0} -".format(i)
+      label += "thread {0} - ".format(i)
     label += "{0:.2f} \% load".format(tottime * 100.)
     ax.text(0.5, iproc * nthread + i, label, ha = "center",
             bbox = dict(facecolor='white', alpha=0.9))

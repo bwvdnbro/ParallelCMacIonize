@@ -102,12 +102,4 @@
 #define atomic_pre_add(variable, increment)                                    \
   __sync_add_and_fetch(&variable, increment)
 
-/**
- * @brief Atomically decrease the given variable by 1 and return the new value.
- *
- * @param variable Variable to decrease.
- * @return New value of the variable.
- */
-#define atomic_pre_subtract(variable) __sync_sub_and_fetch(&variable, 1)
-
 #endif // ATOMIC_HPP
