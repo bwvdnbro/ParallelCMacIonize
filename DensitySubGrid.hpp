@@ -894,6 +894,18 @@ public:
   }
 
   /**
+   * @brief Get the midpoint of the subgrid box for domain decomposition
+   * plotting.
+   *
+   * @param midpoint Variable to set.
+   */
+  inline void get_midpoint(double midpoint[3]) const {
+    midpoint[0] = _anchor[0] + 0.5 * _number_of_cells[0] * _cell_size[0];
+    midpoint[1] = _anchor[1] + 0.5 * _number_of_cells[1] * _cell_size[1];
+    midpoint[2] = _anchor[2] + 0.5 * _number_of_cells[2] * _cell_size[2];
+  }
+
+  /**
    * @brief Get the neighbour for the given direction.
    *
    * @param output_direction TravelDirection.
