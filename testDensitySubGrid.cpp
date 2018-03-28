@@ -71,6 +71,10 @@
 /*! @brief Enable this to activate message output. */
 #define MESSAGE_OUTPUT
 
+/*! @brief Enable this to only execute a single iteration (until cost and task
+ *  output is written). */
+//#define SINGLE_ITERATION
+
 #ifdef TASK_OUTPUT
 // activate task output in Task.hpp
 #define TASK_PLOT
@@ -1948,11 +1952,22 @@ int main(int argc, char **argv) {
     }
   }
 
+  std::vector< std::vector< unsigned int > > ngbs(gridvec.size());
+  std::vector< unsigned int > source_cost(gridvec.size(), 0);
   if (MPI_rank == 0) {
-    // output the graph of the grid with copies
-    idx_t nvert = gridvec.size();
-    std::vector< std::vector< unsigned int > > ngbs(nvert);
+
+    // find the graph of the subgrids (with copies) and set the source costs
+
+    const unsigned int central_index =
+        source_indices[0] * num_subgrid[1] * num_subgrid[2] +
+        source_indices[1] * num_subgrid[2] + source_indices[2];
+
     for (size_t igrid = 0; igrid < gridvec.size(); ++igrid) {
+      source_cost[igrid] =
+          (igrid == central_index) ||
+          (igrid > tot_num_subgrid &&
+           originals[igrid - tot_num_subgrid] == central_index);
+
       DensitySubGrid &subgrid = *gridvec[igrid];
       // don't include the 0 ngb, as that is a self-reference
       for (int ingb = 1; ingb < 27; ++ingb) {
@@ -1980,106 +1995,92 @@ int main(int argc, char **argv) {
         }
       }
     }
-    idx_t nedge = 0;
-    for (unsigned int i = 0; i < ngbs.size(); ++i) {
-      nedge += ngbs[i].size();
-    }
-    // we counted each edge twice, divide by 2
-    nedge >>= 1;
 
-    const unsigned int central_index =
-        source_indices[0] * num_subgrid[1] * num_subgrid[2] +
-        source_indices[1] * num_subgrid[2] + source_indices[2];
+    // ParMETIS version
+    //    idx_t vtxdist[2] = {0, nvert};
+    //    idx_t ncon = 3;
+    //    idx_t *xadj = new idx_t[nvert + 1];
+    //    idx_t *adjncy = new idx_t[2 * nedge];
+    //    idx_t *vwgt = new idx_t[ncon * nvert];
+    //    idx_t *adjwgt = new idx_t[2 * nedge];
 
-    logmessage("Central index: " << central_index, 0);
+    //    xadj[0] = 0;
+    //    for (size_t igrid = 0; igrid < gridvec.size(); ++igrid) {
+    //      // figure out if this subgrid holds the source position
+    //      const int has_source =
+    //          (igrid == central_index) ||
+    //          (igrid > tot_num_subgrid &&
+    //           originals[igrid - tot_num_subgrid] == central_index);
 
-    std::ofstream sfile("subgrids.txt");
-    sfile << num_subgrid[0] << "\t" << num_subgrid[1] << "\t" << num_subgrid[2]
-          << "\n";
-    std::ofstream gfile("graph.txt");
-    gfile << nvert << " " << nedge << " 011 3\n";
+    //      // we have 3 weights that we want to equally distribute:
+    //      //  - the computational cost
+    //      vwgt[3 * igrid + 0] = costs.get_cost(igrid);
+    //      //  - the memory (each subgrid has the same memory requirements for
+    //      now)
+    //      vwgt[3 * igrid + 1] = 1;
+    //      //  - the number of sources per domain
+    //      vwgt[3 * igrid + 2] = has_source;
 
-    idx_t vtxdist[2] = {0, nvert};
-    idx_t ncon = 3;
-    idx_t *xadj = new idx_t[nvert + 1];
-    idx_t *adjncy = new idx_t[2 * nedge];
-    idx_t *vwgt = new idx_t[ncon * nvert];
-    idx_t *adjwgt = new idx_t[2 * nedge];
+    //      // xadj[igrid] points to the beginning of the edge list for this
+    //      vertex in
+    //      // adjncy
+    //      // xadj[igrid+1] points to the element beyond the edge list for this
+    //      // vertex (similar to iterator::end())
+    //      xadj[igrid + 1] = xadj[igrid] + ngbs[igrid].size();
 
-    xadj[0] = 0;
-    for (size_t igrid = 0; igrid < gridvec.size(); ++igrid) {
-      // figure out if this subgrid holds the source position
-      const int has_source =
-          (igrid == central_index) ||
-          (igrid > tot_num_subgrid &&
-           originals[igrid - tot_num_subgrid] == central_index);
+    //      double midpoint[3];
+    //      gridvec[igrid]->get_midpoint(midpoint);
+    //      sfile << midpoint[0] << "\t" << midpoint[1] << "\t" << midpoint[2]
+    //            << "\n";
+    //      gfile << costs.get_cost(igrid) << " 1 " << has_source;
+    //      for (unsigned int ingb = 0; ingb < ngbs[igrid].size(); ++ingb) {
+    //        // +1 because metis starts indexing from 1 instead of 0
+    //        gfile << " " << (ngbs[igrid][ingb] + 1) << " 1";
+    //        adjncy[xadj[igrid] + ingb] = ngbs[igrid][ingb];
+    //        // all edges have the same weight
+    //        adjwgt[xadj[igrid] + ingb] = 1;
+    //      }
+    //      gfile << "\n";
+    //    }
+    //    myassert(xadj[nvert] == 2 * nedge, "Wrong number of edges!");
 
-      // we have 3 weights that we want to equally distribute:
-      //  - the computational cost
-      vwgt[3 * igrid + 0] = costs.get_cost(igrid);
-      //  - the memory (each subgrid has the same memory requirements for now)
-      vwgt[3 * igrid + 1] = 1;
-      //  - the number of sources per domain
-      vwgt[3 * igrid + 2] = has_source;
+    //    idx_t *part = new idx_t[nvert];
+    //    idx_t nparts = 4;
+    //    idx_t wgtflag = 3;
+    //    idx_t numflag = 0;
+    //    real_t *tpwgts = new real_t[nparts * ncon];
+    //    for (idx_t i = 0; i < nparts * ncon; ++i) {
+    //      tpwgts[i] = 1. / nparts;
+    //    }
+    //    real_t ubvec[3] = {1.05, 1.05, 1.05};
+    //    idx_t options[1] = {0};
+    //    idx_t edgecut;
 
-      // xadj[igrid] points to the beginning of the edge list for this vertex in
-      // adjncy
-      // xadj[igrid+1] points to the element beyond the edge list for this
-      // vertex (similar to iterator::end())
-      xadj[igrid + 1] = xadj[igrid] + ngbs[igrid].size();
+    //    MPI_Comm comm = MPI_COMM_WORLD;
 
-      double midpoint[3];
-      gridvec[igrid]->get_midpoint(midpoint);
-      sfile << midpoint[0] << "\t" << midpoint[1] << "\t" << midpoint[2]
-            << "\n";
-      gfile << costs.get_cost(igrid) << " 1 " << has_source;
-      for (unsigned int ingb = 0; ingb < ngbs[igrid].size(); ++ingb) {
-        // +1 because metis starts indexing from 1 instead of 0
-        gfile << " " << (ngbs[igrid][ingb] + 1) << " 1";
-        adjncy[xadj[igrid] + ingb] = ngbs[igrid][ingb];
-        // all edges have the same weight
-        adjwgt[xadj[igrid] + ingb] = 1;
-      }
-      gfile << "\n";
-    }
-    myassert(xadj[nvert] == 2 * nedge, "Wrong number of edges!");
+    //    int metis_status = ParMETIS_V3_PartKway(
+    //        vtxdist, xadj, adjncy, vwgt, adjwgt, &wgtflag, &numflag, &ncon,
+    //        &nparts,
+    //        tpwgts, ubvec, options, &edgecut, part, &comm);
 
-    idx_t *part = new idx_t[nvert];
-    idx_t nparts = 4;
-    idx_t wgtflag = 3;
-    idx_t numflag = 0;
-    real_t *tpwgts = new real_t[nparts * ncon];
-    for (idx_t i = 0; i < nparts * ncon; ++i) {
-      tpwgts[i] = 1. / nparts;
-    }
-    real_t ubvec[3] = {1.05, 1.05, 1.05};
-    idx_t options[1] = {0};
-    idx_t edgecut;
+    //    if (metis_status != METIS_OK) {
+    //      cmac_error("Metis error!");
+    //    }
 
-    MPI_Comm comm = MPI_COMM_WORLD;
+    //    std::ofstream pfile("partition_metis.txt");
+    //    for (size_t igrid = 0; igrid < gridvec.size(); ++igrid) {
+    //      pfile << part[igrid] << "\n";
+    //    }
 
-    int metis_status = ParMETIS_V3_PartKway(
-        vtxdist, xadj, adjncy, vwgt, adjwgt, &wgtflag, &numflag, &ncon, &nparts,
-        tpwgts, ubvec, options, &edgecut, part, &comm);
-
-    if (metis_status != METIS_OK) {
-      cmac_error("Metis error!");
-    }
-
-    std::ofstream pfile("partition_metis.txt");
-    for (size_t igrid = 0; igrid < gridvec.size(); ++igrid) {
-      pfile << part[igrid] << "\n";
-    }
-
-    delete[] xadj;
-    delete[] adjncy;
-    delete[] vwgt;
-    delete[] adjwgt;
-    delete[] part;
-    delete[] tpwgts;
+    //    delete[] xadj;
+    //    delete[] adjncy;
+    //    delete[] vwgt;
+    //    delete[] adjwgt;
+    //    delete[] part;
+    //    delete[] tpwgts;
   }
 
-  costs.redistribute();
+  costs.redistribute(ngbs);
 
   // now it is time to move the subgrids to the process where they belong
   if (MPI_rank == 0) {
@@ -2511,9 +2512,11 @@ int main(int argc, char **argv) {
     output_messages(iloop, message_log, message_log_size);
     output_costs(iloop, tot_num_subgrid, costs, copies, originals);
 
+#ifdef SINGLE_ITERATION
     // stop here to see how MPI did for 1 iteration
     MPI_Barrier(MPI_COMM_WORLD);
     return MPI_Finalize();
+#endif
 
     // clear message log
     message_log_size = 0;
@@ -2611,7 +2614,7 @@ int main(int argc, char **argv) {
 
     // redistribute the subgrids among the threads to balance the computational
     // costs (based on this iteration)
-    costs.redistribute();
+    costs.redistribute(ngbs);
 
     // now do the communication: some subgrids might move between processes
     // ...

@@ -82,6 +82,10 @@ public:
     }
     _number_taken = 0;
     _current_index = 0;
+
+    // clear the elements
+    delete[] _vector;
+    _vector = new _datatype_[_size];
   }
 
   /**
