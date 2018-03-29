@@ -36,7 +36,7 @@ nthread = 0
 nproc = 0
 task_flags = np.zeros(len(task_colors), dtype = bool)
 for name in sorted(glob.glob("tasks_??.txt")):
-  nthread_this, nproc_this, this_task_flags = plot_file(name)
+  nproc_this, nthread_this, this_task_flags = plot_file(name)
   nthread = max(nthread, nthread_this)
   nproc = max(nproc, nproc_this)
   for i in range(len(task_flags)):
@@ -44,6 +44,18 @@ for name in sorted(glob.glob("tasks_??.txt")):
 for i in range(len(task_colors)):
   if task_flags[i]:
     pl.plot([], [], color = task_colors[i], label = task_names[i])
+if nproc > 1 or nthread > 1:
+  for iproc in range(nproc):
+    for ithread in range(nthread):
+      label = ""
+      if nproc > 1:
+        label += "rank {0} - ".format(iproc)
+      if nthread > 1:
+        label += "thread {0} - ".format(ithread)
+      xlim = pl.gca().get_xlim()
+      xpos = 0.5 * (xlim[0] + xlim[1])
+      pl.text(xpos, iproc * nthread + ithread, label[:-2], ha = "center",
+              bbox = dict(facecolor = "white", alpha = 0.9))
 pl.legend(loc = "upper center", ncol = len(task_colors))
 pl.ylim(-1., nproc * nthread * 1.1)
 pl.gca().set_yticks([])
