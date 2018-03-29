@@ -85,13 +85,23 @@ for iproc in range(nproc):
     colors = [task_colors[int(task[3])] for task in thread]
     ax.broken_barh(bar, (iproc * nthread + i - 0.4, 0.8), facecolors = colors,
                    edgecolor = "none")
+    # status text
     label = ""
     if nproc > 1:
       label += "rank {0} - ".format(iproc)
     if nthread > 1:
       label += "thread {0} - ".format(i)
     label += "{0:.2f} \% load".format(tottime * 100.)
-    ax.text(0.5, iproc * nthread + i, label, ha = "center",
+    ax.text(0.5, iproc * nthread + i + 0.2, label, ha = "center",
+            bbox = dict(facecolor='white', alpha=0.9))
+    # per task fraction text
+    label = ""
+    for itask in range(len(task_colors)):
+      if task_flags[itask]:
+        tottime = np.array([(task[2] - task[1]) * tconv
+                            for task in thread if task[3] == itask]).sum()
+        label += "{0}: {1:.2f} \% - ".format(task_names[itask], tottime * 100.)
+    ax.text(0.5, iproc * nthread + i - 0.2, label[:-2], ha = "center",
             bbox = dict(facecolor='white', alpha=0.9))
 
 for i in range(len(task_colors)):

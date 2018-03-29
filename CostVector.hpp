@@ -27,12 +27,25 @@
 #ifndef COSTVECTOR_HPP
 #define COSTVECTOR_HPP
 
+/*! @brief Activate this to show METIS output at runtime. */
+//#define SHOW_METIS_OUTPUT
+
+/*! @brief Activate this to output the partitioning to a file
+ *  "cost_stats.txt". */
+//#define OUTPUT_STATS
+
 #include "Assert.hpp"
 
 #include <metis.h>
 
 #include <algorithm>
 #include <vector>
+
+#ifdef OUTPUT_STATS
+#include <fstream>
+#include <mpi.h>
+#include <sstream>
+#endif
 
 /**
  * @brief Sort the given array with given size by argument.
@@ -140,6 +153,17 @@ public:
       // our initial decomposition
       _thread_list[i] = i % _number_of_threads;
       _process_list[i] = i % _number_of_processes;
+    }
+  }
+
+  /**
+   * @brief Reset the costs without rebalancing.
+   */
+  inline void clear_costs() {
+
+    for (size_t i = 0; i < _size; ++i) {
+      _costs[i] = 0;
+      _source_costs[i] = 0;
     }
   }
 
@@ -278,9 +302,9 @@ public:
         //  - the computational cost
         vwgt[3 * igrid + 0] = _costs[igrid];
         //  - the memory (each subgrid has the same memory requirements for now)
-        vwgt[3 * igrid + 1] = 1;
+        vwgt[3 * igrid + 1] = _source_costs[igrid];
         //  - the number of sources per domain
-        vwgt[3 * igrid + 2] = _source_costs[igrid];
+        vwgt[3 * igrid + 2] = 1;
 
         // xadj[igrid] points to the beginning of the edge list for this vertex
         // in adjncy
@@ -302,9 +326,19 @@ public:
       idx_t nparts = _number_of_processes;
       idx_t edgecut;
 
+      real_t ubvec[3] = {1.03, 1.001, 1.1};
+
+      idx_t options[METIS_NOPTIONS];
+      METIS_SetDefaultOptions(options);
+#ifdef SHOW_METIS_OUTPUT
+      if (MPI_rank == 0) {
+        options[METIS_OPTION_DBGLVL] = METIS_DBG_INFO;
+      }
+#endif
+
       int metis_status = METIS_PartGraphKway(&nvert, &ncon, xadj, adjncy, vwgt,
                                              nullptr, adjwgt, &nparts, nullptr,
-                                             nullptr, nullptr, &edgecut, part);
+                                             ubvec, options, &edgecut, part);
 
       if (metis_status != METIS_OK) {
         cmac_error("Metis error!");
@@ -335,24 +369,27 @@ public:
     // loop over the processes and load balance the threads on each process
     for (int irank = 0; irank < _number_of_processes; ++irank) {
       size_t index = 0;
-      while (index < _size && _process_list[index] != irank) {
+      size_t current_index = indices[max_index - index];
+      while (index < _size && _process_list[current_index] != irank) {
         ++index;
+        current_index = indices[max_index - index];
       }
       myassert(index < _size, "Not enough subgrids!");
       std::vector< unsigned long > threadcost(_number_of_threads, 0);
       for (int ithread = 0; ithread < _number_of_threads; ++ithread) {
-        const size_t current_index = indices[max_index - index];
         _thread_list[current_index] = ithread;
         threadcost[ithread] += _costs[current_index];
         ++index;
-        while (index < _size && _process_list[index] != irank) {
+        current_index = indices[max_index - index];
+        while (index < _size && _process_list[current_index] != irank) {
           ++index;
+          current_index = indices[max_index - index];
         }
         myassert(index < _size, "Not enough subgrids!");
       }
       for (; index < _size; ++index) {
-        if (_process_list[index] == irank) {
-          const size_t current_index = indices[max_index - index];
+        const size_t current_index = indices[max_index - index];
+        if (_process_list[current_index] == irank) {
           // find the thread where this cost has the lowest impact
           int cmatch_thread = -1;
           unsigned long cmatch = threadcost[0] + _costs[current_index];
@@ -371,9 +408,27 @@ public:
       }
     }
 
+#ifdef OUTPUT_STATS
+    // output statistics
+    for (int irank = 0; irank < MPI_size; ++irank) {
+      if (irank == MPI_rank) {
+        std::stringstream filename;
+        filename << "cost_stats." << irank << ".txt";
+        std::ofstream sfile(filename.str());
+        sfile << "# rank\tthread\tcomp cost\tsource cost\n";
+        for (size_t igrid = 0; igrid < _size; ++igrid) {
+          sfile << _process_list[igrid] << "\t" << _thread_list[igrid] << "\t"
+                << _costs[igrid] << "\t" << _source_costs[igrid] << "\n";
+        }
+      }
+      MPI_Barrier(MPI_COMM_WORLD);
+    }
+#endif
+
     // reset costs
     for (size_t i = 0; i < _size; ++i) {
       _costs[i] = 0;
+      _source_costs[i] = 0;
     }
   }
 };

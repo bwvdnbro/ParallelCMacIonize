@@ -28,10 +28,9 @@ print "avgcost:", avgcost
 
 colors = ["r", "b"]
 
-fig, ax = pl.subplots(nproc, 1, sharex = True)
+fig, ax = pl.subplots(1, 1, sharex = True)
 
-if nproc == 1:
-  ax = [ax]
+ax = [ax]
 maxtext = 0.1
 for iproc in range(nproc):
   process = data[data[:,2] == iproc]
@@ -40,25 +39,24 @@ for iproc in range(nproc):
     thread = sorted(thread, key = lambda line: line[1], reverse = True)
     bars = [(0, thread[0][1] * 1. / avgcost)]
     bar_colors = [colors[0]]
-    textpos = [0.05]
-    texts = ["{0} ({1:.2f})".format(thread[0][0], thread[0][1] * 1. / avgcost)]
     for i in range(1, len(thread)):
       bars.append((bars[-1][0] + bars[-1][1], thread[i][1] * 1. / avgcost))
       bar_colors.append(colors[i%2])
-      textpos.append(textpos[-1] + 0.1)
-      maxtext = max(maxtext, textpos[-1] + 0.05)
-      texts.append("{0} ({1:.2f})".format(
-        thread[i][0], thread[i][1] * 1. / avgcost))
-    ax[iproc].broken_barh(bars, (ithread - 0.5, 0.4), facecolors = bar_colors)
-#    for i in range(len(texts)):
-#      ax[iproc].text(textpos[i], ithread, texts[i],
-#                     horizontalalignment = "center",
-#                     bbox = dict(facecolor = bar_colors[i], edgecolor = "none"))
+    ax[0].broken_barh(bars, (iproc * nthread + ithread - 0.4, 0.8),
+                      facecolors = bar_colors)
+    totfraction = bars[-1][0] + bars[-1][1]
+    label = ""
+    if nproc > 1:
+      label += "rank {0} - ".format(iproc)
+    if nthread > 1:
+      label += "thread {0} - ".format(ithread)
+    label += "{0:.2f} \% load".format(totfraction * 100.)
+    ax[0].text(0.5, iproc * nthread + ithread, label, ha = "center",
+               bbox = dict(facecolor = "white", alpha = 0.9))
 
 for a in ax:
   a.axvline(x = 1.)
   a.set_yticks([])
 ax[-1].set_xlabel("Fractional cost")
-#ax[-1].set_xlim(0., max(ax[-1].get_xlim()[1], maxtext))
 pl.tight_layout()
 pl.savefig("{0}.png".format(name[:-4]))

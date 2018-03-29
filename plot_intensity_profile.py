@@ -37,7 +37,7 @@ import os
 # number of cells in one coordinate dimension
 # should be synced with the values used in the unit test
 # we guess based on the file size
-ncell = int(np.cbrt(os.path.getsize("intensities.dat")>>5))
+ncell = int(np.cbrt(os.path.getsize("intensities.dat") / (5 * 8)))
 # number of bins to use to bin the results
 nbin = 100
 
@@ -57,7 +57,7 @@ pc = 3.086e16 # m
 Rs /= pc
 
 # memory-map the binary output file to a numpy array
-data = np.memmap("intensities.dat", dtype = np.float64, shape = (ncell**3, 4),
+data = np.memmap("intensities.dat", dtype = np.float64, shape = (ncell**3, 5),
                  mode = 'r')
 # compute the radii
 pos = data[:, 0:3]

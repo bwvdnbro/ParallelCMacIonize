@@ -8,29 +8,44 @@ pl.rcParams["text.usetex"] = True
 pl.rcParams["figure.figsize"] = (12, 10)
 pl.rcParams["font.size"] = 14
 
-task_colors = ["b", "r", "g"]
-task_names = ["source photon", "photon traversal", "reemission"]
+task_colors = ["b", "r", "c", "y", "g"]
+task_names = ["source photon", "photon traversal", "reemission", "send",
+              "receive"]
 
 def plot_file(name):
   print "Plotting tasks for", name, "..."
 
   data = np.loadtxt(name)
 
+  task_flags = [len(data[data[:,4] == task]) > 0 \
+                for task in range(len(task_names))]
+
   nthread = int(data[:,1].max()) + 1
-  for i in range(nthread):
-    thread = data[data[:,1] == i][:,1:]
-    bar = [(task[1], task[2] - task[1]) for task in thread]
-    colors = [task_colors[int(task[3])] for task in thread]
-    pl.broken_barh(bar, (i-0.4, 0.8), facecolors = colors, edgecolor = "none")
-  return nthread
+  nproc = int(data[:,0].max()) + 1
+  for iproc in range(nproc):
+    process = data[data[:,0] == iproc]
+    for i in range(nthread):
+      thread = process[process[:,1] == i][:,1:]
+      bar = [(task[1], task[2] - task[1]) for task in thread]
+      colors = [task_colors[int(task[3])] for task in thread]
+      pl.broken_barh(bar, (iproc * nthread + i-0.4, 0.8), facecolors = colors,
+                     edgecolor = "none")
+  return nproc, nthread, task_flags
 
 nthread = 0
+nproc = 0
+task_flags = np.zeros(len(task_colors), dtype = bool)
 for name in sorted(glob.glob("tasks_??.txt")):
-  nthread = max(nthread, plot_file(name))
+  nthread_this, nproc_this, this_task_flags = plot_file(name)
+  nthread = max(nthread, nthread_this)
+  nproc = max(nproc, nproc_this)
+  for i in range(len(task_flags)):
+    task_flags[i] = task_flags[i] or this_task_flags[i]
 for i in range(len(task_colors)):
-  pl.plot([], [], color = task_colors[i], label = task_names[i])
+  if task_flags[i]:
+    pl.plot([], [], color = task_colors[i], label = task_names[i])
 pl.legend(loc = "upper center", ncol = len(task_colors))
-pl.ylim(-1., nthread * 1.1)
+pl.ylim(-1., nproc * nthread * 1.1)
 pl.gca().set_yticks([])
 pl.xlabel("CPU cycle")
 pl.tight_layout()

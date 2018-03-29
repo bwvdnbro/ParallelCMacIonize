@@ -75,6 +75,10 @@
  *  output is written). */
 //#define SINGLE_ITERATION
 
+/*! @brief Enable this to rebalance subgrids across threads and processes in
+ *  between iterations. */
+//#define DO_REBALANCING
+
 #ifdef TASK_OUTPUT
 // activate task output in Task.hpp
 #define TASK_PLOT
@@ -297,6 +301,73 @@ inline void output_messages(const unsigned int iloop,
     MPI_Barrier(MPI_COMM_WORLD);
   }
 #endif
+}
+
+/**
+ * @brief Output the neutral fractions for inspection of the physical result.
+ *
+ * @oaran costs CostVector.
+ * @param gridvec Subgrids.
+ * @param tot_num_subgrid Total number of original subgrids.
+ */
+inline void
+output_neutral_fractions(const CostVector &costs,
+                         const std::vector< DensitySubGrid * > &gridvec,
+                         const unsigned int tot_num_subgrid) {
+
+  //  - ASCII output (for the VisIt plot script)
+  for (int irank = 0; irank < MPI_size; ++irank) {
+    // only the active process writes
+    if (irank == MPI_rank) {
+      // the file mode depends on the rank
+      std::ios_base::openmode mode;
+      if (irank == 0) {
+        // rank 0 creates (or overwrites) the file
+        mode = std::ofstream::trunc;
+      } else {
+        // all other ranks append to it
+        mode = std::ofstream::app;
+      }
+      // now open the file
+      std::ofstream ofile("intensities.txt", mode);
+
+      // write the task info
+      for (unsigned int igrid = 0; igrid < tot_num_subgrid; ++igrid) {
+        if (costs.get_process(igrid) == MPI_rank) {
+          gridvec[igrid]->print_intensities(ofile);
+        }
+      }
+    }
+    // only one process at a time is allowed to write
+    MPI_Barrier(MPI_COMM_WORLD);
+  }
+
+  //  - binary output (for the Python plot script)
+  for (int irank = 0; irank < MPI_size; ++irank) {
+    // only the active process writes
+    if (irank == MPI_rank) {
+      // the file mode depends on the rank
+      std::ios_base::openmode mode;
+      if (irank == 0) {
+        // rank 0 creates (or overwrites) the file
+        mode = std::ofstream::trunc;
+      } else {
+        // all other ranks append to it
+        mode = std::ofstream::app;
+      }
+      // now open the file
+      std::ofstream ofile("intensities.dat", mode);
+
+      // write the task info
+      for (unsigned int igrid = 0; igrid < tot_num_subgrid; ++igrid) {
+        if (costs.get_process(igrid) == MPI_rank) {
+          gridvec[igrid]->output_intensities(ofile);
+        }
+      }
+    }
+    // only one process at a time is allowed to write
+    MPI_Barrier(MPI_COMM_WORLD);
+  }
 }
 
 /**
@@ -1848,7 +1919,6 @@ int main(int argc, char **argv) {
   // make copies of the most expensive subgrids, so that multiple threads can
   // work on them simultaneously
   // this is only done by rank 0
-  // note that we will need to communicate the originals vector somehow
   std::vector< unsigned int > originals;
   std::vector< unsigned int > copies(tot_num_subgrid, 0xffffffff);
   std::vector< unsigned char > levels(tot_num_subgrid, 0);
@@ -1859,7 +1929,7 @@ int main(int argc, char **argv) {
     for (unsigned int i = 0; i < tot_num_subgrid; ++i) {
       avg_cost_per_thread += initial_cost_vector[i];
     }
-    avg_cost_per_thread /= num_threads;
+    avg_cost_per_thread /= (num_threads * MPI_size);
     // now set the levels accordingly
     for (unsigned int i = 0; i < tot_num_subgrid; ++i) {
       if (copy_factor * initial_cost_vector[i] > avg_cost_per_thread) {
@@ -1938,20 +2008,6 @@ int main(int argc, char **argv) {
     }
   }
 
-  {
-    const unsigned int original_source_index =
-        source_indices[0] * num_subgrid[1] * num_subgrid[2] +
-        source_indices[1] * num_subgrid[2] + source_indices[2];
-    // make sure each process has at least 1 copy of the source
-    costs.add_cost(original_source_index, 1e10);
-    unsigned int copy = copies[original_source_index];
-    while (copy < gridvec.size() &&
-           originals[copy - tot_num_subgrid] == original_source_index) {
-      costs.add_cost(copy, 1e10);
-      ++copy;
-    }
-  }
-
   std::vector< std::vector< unsigned int > > ngbs(gridvec.size());
   std::vector< unsigned int > source_cost(gridvec.size(), 0);
   if (MPI_rank == 0) {
@@ -1965,7 +2021,7 @@ int main(int argc, char **argv) {
     for (size_t igrid = 0; igrid < gridvec.size(); ++igrid) {
       source_cost[igrid] =
           (igrid == central_index) ||
-          (igrid > tot_num_subgrid &&
+          (igrid >= tot_num_subgrid &&
            originals[igrid - tot_num_subgrid] == central_index);
 
       DensitySubGrid &subgrid = *gridvec[igrid];
@@ -2078,6 +2134,30 @@ int main(int argc, char **argv) {
     //    delete[] adjwgt;
     //    delete[] part;
     //    delete[] tpwgts;
+  }
+
+  // broadcast ngbs and source costs to all processes
+  unsigned int ngbsize = ngbs.size();
+  std::vector< unsigned int > ngbsizes(ngbsize, 0);
+  for (unsigned int i = 0; i < ngbsize; ++i) {
+    ngbsizes[i] = ngbs[i].size();
+  }
+  MPI_Bcast(&ngbsize, 1, MPI_UNSIGNED, 0, MPI_COMM_WORLD);
+  ngbsizes.resize(ngbsize, 0);
+  MPI_Bcast(&ngbsizes[0], ngbsize, MPI_UNSIGNED, 0, MPI_COMM_WORLD);
+  ngbs.resize(ngbsize);
+  for (unsigned int i = 0; i < ngbsize; ++i) {
+    ngbs[i].resize(ngbsizes[i], 0);
+    MPI_Bcast(&ngbs[i][0], ngbsizes[i], MPI_UNSIGNED, 0, MPI_COMM_WORLD);
+  }
+  unsigned int source_cost_size = source_cost.size();
+  MPI_Bcast(&source_cost_size, 1, MPI_UNSIGNED, 0, MPI_COMM_WORLD);
+  source_cost.resize(source_cost_size, 0);
+  MPI_Bcast(&source_cost[0], source_cost_size, MPI_UNSIGNED, 0, MPI_COMM_WORLD);
+
+  // set source costs
+  for (unsigned int igrid = 0; igrid < gridvec.size(); ++igrid) {
+    costs.set_source_cost(igrid, source_cost[igrid]);
   }
 
   costs.redistribute(ngbs);
@@ -2431,8 +2511,6 @@ int main(int argc, char **argv) {
     // combine the counter values for subgrids with copies
     // if the original is on the local process, this is easy. If it is not, we
     // need to communicate.
-    // Let's for simplicity just set up a single non-blocking communication for
-    // each copy.
     std::vector< MPI_Request > requests(originals.size(), MPI_REQUEST_NULL);
     unsigned int num_to_receive = 0;
     // we just assume this is big enough (for now)
@@ -2493,18 +2571,69 @@ int main(int argc, char **argv) {
     unsigned int igrid = 0;
 #pragma omp parallel default(shared)
     {
-      const int thread_id = omp_get_thread_num();
       while (igrid < tot_num_subgrid) {
         const unsigned int current_igrid = atomic_post_increment(igrid);
         if (current_igrid < tot_num_subgrid) {
           // only subgrids on this process are done
-          if (costs.get_process(current_igrid) == MPI_rank &&
-              costs.get_thread(current_igrid) == thread_id) {
+          if (costs.get_process(current_igrid) == MPI_rank) {
             gridvec[current_igrid]->compute_neutral_fraction(num_photon);
           }
         }
       }
     }
+
+    // update the neutral fractions for copies
+    // if the original is on the local process, this is easy. If it is not, we
+    // need to communicate.
+    num_to_receive = 0;
+    for (unsigned int i = 0; i < originals.size(); ++i) {
+      const unsigned int original = originals[i];
+      const unsigned int copy = tot_num_subgrid + i;
+      if (costs.get_process(copy) == MPI_rank) {
+        if (costs.get_process(original) == MPI_rank) {
+          // no communication required
+          gridvec[copy]->update_neutral_fractions(*gridvec[original]);
+        } else {
+          // we need to set up a recv
+          ++num_to_receive;
+        }
+      } else {
+        if (costs.get_process(original) == MPI_rank) {
+          // we need to send
+          gridvec[original]->pack(&MPI_buffer[i * buffer_part_size],
+                                  buffer_part_size);
+          unsigned int sendsize = gridvec[original]->get_MPI_size();
+          MPI_Isend(&MPI_buffer[i * buffer_part_size], sendsize, MPI_PACKED,
+                    costs.get_process(copy), copy, MPI_COMM_WORLD,
+                    &requests[i]);
+        } // else: no action required
+      }
+    }
+
+    num_received = 0;
+    while (num_received < num_to_receive) {
+      MPI_Status status;
+      MPI_Probe(MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &status);
+      const int source = status.MPI_SOURCE;
+      const int tag = status.MPI_TAG;
+      int size;
+      MPI_Get_count(&status, MPI_PACKED, &size);
+      MPI_Recv(&MPI_buffer[originals.size() * buffer_part_size], size,
+               MPI_PACKED, source, tag, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+
+      const int ncell_dummy[3] = {1, 1, 1};
+      DensitySubGrid dummy(box, ncell_dummy);
+      dummy.unpack(&MPI_buffer[originals.size() * buffer_part_size], size);
+
+      // the tag tells us which original to update
+      gridvec[tag]->update_neutral_fractions(dummy);
+
+      ++num_received;
+    }
+
+    MPI_Waitall(requests.size(), &requests[0], MPI_STATUSES_IGNORE);
+
+    MPI_Barrier(MPI_COMM_WORLD);
 
     // output useful information about this iteration (if enabled)
     logmessage("Writing task and cost information", 0);
@@ -2515,6 +2644,9 @@ int main(int argc, char **argv) {
 #ifdef SINGLE_ITERATION
     // stop here to see how MPI did for 1 iteration
     MPI_Barrier(MPI_COMM_WORLD);
+
+    output_neutral_fractions(costs, gridvec, tot_num_subgrid);
+
     return MPI_Finalize();
 #endif
 
@@ -2524,6 +2656,7 @@ int main(int argc, char **argv) {
     // clear task buffer
     tasks.clear();
 
+#ifdef DO_REBALANCING
     // rebalance the work based on the cost information during the last
     // iteration
     // we first need to communicate cost information
@@ -2616,8 +2749,11 @@ int main(int argc, char **argv) {
     // costs (based on this iteration)
     costs.redistribute(ngbs);
 
-    // now do the communication: some subgrids might move between processes
-    // ...
+// now do the communication: some subgrids might move between processes
+// ...
+#else // DO_REBALANCING
+    costs.clear_costs();
+#endif
 
   } // main loop
 
@@ -2633,22 +2769,7 @@ int main(int argc, char **argv) {
   // Output final result
   //////////////////////
 
-  // this will be a collective operation. Either we first send all data to
-  // process 0, or we let all processes write in turn.
-
-  //  - ASCII output (for the VisIt plot script)
-  std::ofstream ofile("intensities.txt");
-  for (unsigned int igrid = 0; igrid < tot_num_subgrid; ++igrid) {
-    gridvec[igrid]->print_intensities(ofile);
-  }
-  ofile.close();
-
-  //  - binary output (for the Python plot script)
-  std::ofstream bfile("intensities.dat");
-  for (unsigned int igrid = 0; igrid < tot_num_subgrid; ++igrid) {
-    gridvec[igrid]->output_intensities(bfile);
-  }
-  bfile.close();
+  output_neutral_fractions(costs, gridvec, tot_num_subgrid);
 
   //////////////////////
 
