@@ -102,9 +102,6 @@ int MPI_rank, MPI_size;
 #include "Utilities.hpp"
 #include "YAMLDictionary.hpp"
 
-// external libraries
-#include <parmetis.h>
-
 // standard library includes
 #include <cmath>
 #include <fstream>
@@ -336,8 +333,9 @@ output_neutral_fractions(const CostVector &costs,
       // now open the file
       std::ofstream ofile("intensities.txt", mode);
 
-      // write the task info
+      // write the neutral fractions
       for (unsigned int igrid = 0; igrid < tot_num_subgrid; ++igrid) {
+        // only the owning process writes
         if (costs.get_process(igrid) == MPI_rank) {
           gridvec[igrid]->print_intensities(ofile);
         }
@@ -363,8 +361,9 @@ output_neutral_fractions(const CostVector &costs,
       // now open the file
       std::ofstream ofile("intensities.dat", mode);
 
-      // write the task info
+      // write the neutral fractions
       for (unsigned int igrid = 0; igrid < tot_num_subgrid; ++igrid) {
+        // only the owning process writes
         if (costs.get_process(igrid) == MPI_rank) {
           gridvec[igrid]->output_intensities(ofile);
         }
@@ -1048,7 +1047,8 @@ inline void execute_photon_traversal_task(
   // keep track of the original number of photons
   unsigned int num_photon_done_now = buffer._actual_size;
 
-  // add to the photon cost of this subgrid
+  // add to the photon cost of this subgrid (we need to do this now, as we will
+  // be subtracting non-finished packets from num_photon_done_now below)
   costs.add_photon_cost(igrid, num_photon_done_now);
 
   // now do the actual photon traversal
@@ -1195,8 +1195,8 @@ inline void execute_photon_reemit_task(
   tasks[task_index]._type = TASKTYPE_PHOTON_TRAVERSAL;
   tasks[task_index]._cell = task._cell;
   tasks[task_index]._buffer = current_buffer_index;
-  // add it to the local queue
-  new_queues[thread_id]->add_task(task_index);
+  // add it to the queue of the corresponding thread
+  new_queues[costs.get_thread(buffer._sub_grid_index)]->add_task(task_index);
 
   // log the end time of the task
   task.stop();
@@ -1254,6 +1254,7 @@ inline void execute_send_task(Task &task, const int thread_id,
             PHOTONBUFFER_MPI_SIZE, MPI_PACKED, sendto,
             MPIMESSAGETAG_PHOTONBUFFER, MPI_COMM_WORLD, &request);
 
+  // log the send event
   log_send(message_log[message_log_size], sendto, thread_id,
            MPIMESSAGETAG_PHOTONBUFFER);
   ++message_log_size;
@@ -1262,15 +1263,11 @@ inline void execute_send_task(Task &task, const int thread_id,
 
   MPI_lock.unlock();
 
-  // remove the buffer from this process
+  // remove the buffer from this process (the data are stored in the MPI buffer)
   new_buffers.free_buffer(current_buffer_index);
 
   myassert(num_active_buffers > 0, "Number of active buffers < 0!");
   atomic_pre_decrement(num_active_buffers);
-
-  // we can (and should) test if the message was sent using
-  // MPI_Testany, so that we can free and reuse the request index and
-  // buffer space
 
   // log the end time of the task
   task.stop();
@@ -1524,9 +1521,13 @@ inline void check_for_incoming_communications(
     const int thread_id, unsigned int &num_active_buffers) {
 
   // check for incoming communications
+  // this is a non-blocking event: we just check if a message is ready to
+  // receive
   MPI_Status status;
   int flag;
   MPI_Iprobe(MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &flag, &status);
+  // flag will be 1 if there is a message ready to receive; status stores the
+  // source rank and tag of the message
   if (flag) {
     const int source = status.MPI_SOURCE;
     const int tag = status.MPI_TAG;
@@ -1550,6 +1551,7 @@ inline void check_for_incoming_communications(
       MPI_Recv(buffer, PHOTONBUFFER_MPI_SIZE, MPI_PACKED, source, tag,
                MPI_COMM_WORLD, MPI_STATUS_IGNORE);
 
+      // log the receive event
       log_recv(message_log[message_log_size], source, thread_id, tag);
       ++message_log_size;
       myassert(message_log_size < message_log.size(),
@@ -1589,15 +1591,18 @@ inline void check_for_incoming_communications(
       myassert(MPI_rank == 0,
                "Only the master rank should receive this type of message!");
 
+      // receive the tally
       unsigned int tally;
       MPI_Recv(&tally, 1, MPI_UNSIGNED, source, tag, MPI_COMM_WORLD,
                MPI_STATUS_IGNORE);
 
+      // log the receive event
       log_recv(message_log[message_log_size], source, thread_id, tag);
       ++message_log_size;
       myassert(message_log_size < message_log.size(),
                "Too many messages for message log!");
 
+      // add the tally to the current total
       atomic_pre_add(num_photon_done_since_last, tally);
 
     } else if (tag == MPIMESSAGETAG_STOP) {
@@ -1612,11 +1617,13 @@ inline void check_for_incoming_communications(
       MPI_Recv(nullptr, 0, MPI_INT, source, tag, MPI_COMM_WORLD,
                MPI_STATUS_IGNORE);
 
+      // log the receive event
       log_recv(message_log[message_log_size], source, thread_id, tag);
       ++message_log_size;
       myassert(message_log_size < message_log.size(),
                "Too many messages for message log!");
 
+      // set the stop condition, all threads will stop the propagation step
       global_run_flag = false;
 
     } else {
@@ -1872,13 +1879,21 @@ int main(int argc, char **argv) {
       (unsigned int)((-box[1] / box[4]) * num_subgrid[1]),
       (unsigned int)((-box[2] / box[5]) * num_subgrid[2])};
 
+  const unsigned int central_index =
+      source_indices[0] * num_subgrid[1] * num_subgrid[2] +
+      source_indices[1] * num_subgrid[2] + source_indices[2];
+
   ///////////////////////////////////////////
 
   //////////////////////////////
   // Initialize the cost vector
   /////////////////////////////
 
+  // we need 2 cost vectors:
+  //  - an actual computational cost vector used for shared memory balancing
   std::vector< unsigned long > initial_cost_vector(tot_num_subgrid, 0);
+  //  - a photon cost vector that is a more stable reference for the distributed
+  //    memory decomposition
   std::vector< unsigned int > initial_photon_cost(tot_num_subgrid, 0);
   std::ifstream initial_costs("costs_00.txt");
   if (initial_costs.good()) {
@@ -1940,6 +1955,12 @@ int main(int argc, char **argv) {
         // count the original.
         unsigned int number_of_copies =
             copy_factor * initial_cost_vector[i] / avg_cost_per_thread;
+        // make sure the number of copies of the source subgrid is at least
+        // equal to the number of processes
+        if (i == central_index &&
+            number_of_copies < static_cast< unsigned int >(MPI_size)) {
+          number_of_copies = MPI_size;
+        }
         // get the highest bit
         unsigned int level = 0;
         while (number_of_copies > 0) {
@@ -1950,19 +1971,8 @@ int main(int argc, char **argv) {
       }
     }
 
+    // now create the copies
     create_copies(gridvec, levels, new_buffers, originals, copies);
-
-    // we keep this code for later debugging when we have more complex copy
-    // hiearchies
-    //  std::ofstream ngbfile("initial_ngbs.txt");
-    //  for(unsigned int i = 0; i < gridvec.size(); ++i){
-    //    ngbfile << i << "\n";
-    //    for(int j = 0; j < 27; ++j){
-    //      ngbfile << gridvec[i]->get_neighbour(j) << "\n";
-    //    }
-    //    ngbfile << "\n";
-    //  }
-    //  ngbfile.close();
   }
 
   // communicate the new size of the grid to all processes and make sure the
@@ -1985,7 +1995,7 @@ int main(int argc, char **argv) {
   // initialize the actual cost vector
   costs.reset(gridvec.size());
 
-  // set the initial cost data (either from a file or from a guess)
+  // set the initial cost data (that were loaded before)
   for (unsigned int i = 0; i < tot_num_subgrid; ++i) {
     costs.add_computational_cost(i, initial_cost_vector[i]);
     costs.add_photon_cost(i, initial_photon_cost[i]);
@@ -2016,15 +2026,14 @@ int main(int argc, char **argv) {
     }
   }
 
+  // set up the graph for the distributed memory domain decomposition
+  // figure out the source costs
   std::vector< std::vector< unsigned int > > ngbs(gridvec.size());
   std::vector< unsigned int > source_cost(gridvec.size(), 0);
+  // only rank 0 does this for the moment
   if (MPI_rank == 0) {
 
     // find the graph of the subgrids (with copies) and set the source costs
-
-    const unsigned int central_index =
-        source_indices[0] * num_subgrid[1] * num_subgrid[2] +
-        source_indices[1] * num_subgrid[2] + source_indices[2];
 
     for (size_t igrid = 0; igrid < gridvec.size(); ++igrid) {
       source_cost[igrid] =
@@ -2086,9 +2095,11 @@ int main(int argc, char **argv) {
     costs.set_source_cost(igrid, source_cost[igrid]);
   }
 
+  // now do the actual domain decomposition
   costs.redistribute(ngbs);
 
   // now it is time to move the subgrids to the process where they belong
+  // rank 0 sends, all other ranks receive
   if (MPI_rank == 0) {
     unsigned int buffer_position = 0;
     for (int irank = 1; irank < MPI_size; ++irank) {
@@ -2115,6 +2126,8 @@ int main(int argc, char **argv) {
           gridvec[igrid] = nullptr;
         }
       }
+      // we could also just use MPI_Probe to figure out the size of the incoming
+      // message
       MPI_Send(&rank_size, 1, MPI_UNSIGNED, irank, 0, MPI_COMM_WORLD);
       MPI_Send(&MPI_buffer[buffer_position], rank_size, MPI_PACKED, irank, 1,
                MPI_COMM_WORLD);
@@ -2418,12 +2431,15 @@ int main(int argc, char **argv) {
 
     } // parallel region
 
+    // make sure all requests are freed
     MPI_Waitall(MPI_buffer_requests.size(), &MPI_buffer_requests[0],
                 MPI_STATUSES_IGNORE);
 
     // wait for all processes to exit the main loop
     MPI_Barrier(MPI_COMM_WORLD);
 
+    // check that all requests finished (should be guaranteed by the MPI_Waitall
+    // call above)
     for (unsigned int i = 0; i < MPI_buffer_requests.size(); ++i) {
       myassert(MPI_buffer_requests[i] == MPI_REQUEST_NULL,
                "Not all communications were finished, but the main loop "
@@ -2467,6 +2483,8 @@ int main(int argc, char **argv) {
       }
     }
 
+    // this time we do use MPI_Probe to figure out the size of the incoming
+    // message
     unsigned int num_received = 0;
     while (num_received < num_to_receive) {
       MPI_Status status;
@@ -2488,8 +2506,10 @@ int main(int argc, char **argv) {
       ++num_received;
     }
 
+    // make sure all requests are freed
     MPI_Waitall(requests.size(), &requests[0], MPI_STATUSES_IGNORE);
 
+    // wait for all processes to get here (not necessary, but useful)
     MPI_Barrier(MPI_COMM_WORLD);
 
     logmessage("Done.", 0);
@@ -2538,6 +2558,7 @@ int main(int argc, char **argv) {
       }
     }
 
+    // very similar to the send code above
     num_received = 0;
     while (num_received < num_to_receive) {
       MPI_Status status;
@@ -2570,13 +2591,16 @@ int main(int argc, char **argv) {
     output_costs(iloop, tot_num_subgrid, costs, copies, originals);
 
 #ifdef SINGLE_ITERATION
-    // stop here to see how MPI did for 1 iteration
+    // stop here to see how we did for 1 iteration
     MPI_Barrier(MPI_COMM_WORLD);
 
     output_neutral_fractions(costs, gridvec, tot_num_subgrid);
 
     return MPI_Finalize();
 #endif
+
+    // reset the MPI request counter
+    MPI_last_request = 0;
 
     // clear message log
     message_log_size = 0;

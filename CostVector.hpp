@@ -318,14 +318,11 @@ public:
       idx_t ncon = 3;
       // edge offsets: xadj[0] stores the offset of the edge list of vertex 0 in
       //  adjncy, xadj[1] is the offset of vertex 1... the extra element gives
-      //  the
-      //  total number of edges (times 2, as an edge from a to b is counted
-      //  twice:
-      //  a-b and b-a)
+      //  the total number of edges (times 2, as an edge from a to b is counted
+      //  twice: a-b and b-a)
       idx_t *xadj = new idx_t[nvert + 1];
       // actual edges: adjncy[0] stores the vertex on the other side of the
-      // first
-      //  edge of vertex 0, etc.
+      //  first edge of vertex 0, etc.
       idx_t *adjncy = new idx_t[2 * nedge];
       // vertex weights: the first 3 elements correspond to the 3 weights for
       //  vertex 0, etc.
@@ -364,12 +361,21 @@ public:
       }
       myassert(xadj[nvert] == 2 * nedge, "Wrong number of edges!");
 
+      // array in which the actual partitioning will be stored
       idx_t *part = new idx_t[nvert];
+      // number of desired domains
       idx_t nparts = _number_of_processes;
+      // variable in which METIS will store the edgecut, i.e. the number of
+      // cell pairs on different processes (measure for the communication volume
+      // caused by the partitioning)
       idx_t edgecut;
 
+      // allowed deviations from a perfect load. We don't really require a
+      // strict memory load for the moment, but want a very good source load
       real_t ubvec[3] = {1.03, 1.001, 1.1};
 
+      // set METIS options (we currently only use this to optionally enable
+      // METIS output)
       idx_t options[METIS_NOPTIONS];
       METIS_SetDefaultOptions(options);
 #ifdef SHOW_METIS_OUTPUT
@@ -378,14 +384,17 @@ public:
       }
 #endif
 
+      // call METIS
       int metis_status = METIS_PartGraphKway(&nvert, &ncon, xadj, adjncy, vwgt,
                                              nullptr, adjwgt, &nparts, nullptr,
                                              ubvec, options, &edgecut, part);
 
+      // check that METIS succeeded
       if (metis_status != METIS_OK) {
         cmac_error("Metis error!");
       }
 
+      // set the subgrid ranks based on the METIS result
       for (size_t igrid = 0; igrid < _size; ++igrid) {
         _process_list[igrid] = part[igrid];
       }
@@ -404,7 +413,9 @@ public:
       }
     }
 
-    // argsort the elements based on cost
+    /// second step: local shared memory partitioning
+
+    // argsort the elements based on computational cost
     std::vector< size_t > indices = argsort(_computational_cost, _size);
 
     const size_t max_index = _size - 1;
@@ -412,12 +423,14 @@ public:
     for (int irank = 0; irank < _number_of_processes; ++irank) {
       size_t index = 0;
       size_t current_index = indices[max_index - index];
+      // find the first element that belongs to this rank
       while (index < _size && _process_list[current_index] != irank) {
         ++index;
         current_index = indices[max_index - index];
       }
       myassert(index < _size, "Not enough subgrids!");
       std::vector< unsigned long > threadcost(_number_of_threads, 0);
+      // now give each thread an expensive element
       for (int ithread = 0; ithread < _number_of_threads; ++ithread) {
         _thread_list[current_index] = ithread;
         threadcost[ithread] += _computational_cost[current_index];
@@ -429,6 +442,8 @@ public:
         }
         myassert(index < _size, "Not enough subgrids!");
       }
+      // distribute the remaining elements such that the load is maximally
+      // balanced
       for (; index < _size; ++index) {
         const size_t current_index = indices[max_index - index];
         if (_process_list[current_index] == irank) {
@@ -452,7 +467,7 @@ public:
     }
 
 #ifdef OUTPUT_STATS
-    // output statistics
+    // optionally output statistics
     for (int irank = 0; irank < MPI_size; ++irank) {
       if (irank == MPI_rank) {
         std::stringstream filename;
