@@ -213,15 +213,18 @@ inline void output_costs(const unsigned int iloop, const unsigned int ngrid,
 
       // rank 0 writes the file header
       if (irank == 0) {
-        ofile << "# subgrid\tcost\trank\tthread\n";
+        ofile << "# subgrid\tcomputational cost\tphoton cost\tsource "
+                 "cost\trank\tthread\n";
       }
 
       // output the cost information
       for (unsigned int i = 0; i < ngrid; ++i) {
         // only output local information
         if (costs.get_process(i) == MPI_rank) {
-          ofile << i << "\t" << costs.get_cost(i) << "\t"
-                << costs.get_process(i) << "\t" << costs.get_thread(i) << "\n";
+          ofile << i << "\t" << costs.get_computational_cost(i) << "\t"
+                << costs.get_photon_cost(i) << "\t" << costs.get_source_cost(i)
+                << "\t" << costs.get_process(i) << "\t" << costs.get_thread(i)
+                << "\n";
         }
         if (copies[i] < 0xffffffff) {
           unsigned int copy = copies[i];
@@ -229,7 +232,9 @@ inline void output_costs(const unsigned int iloop, const unsigned int ngrid,
                  originals[copy - ngrid] == i) {
             // only output local information
             if (costs.get_process(copy) == MPI_rank) {
-              ofile << i << "\t" << costs.get_cost(copy) << "\t"
+              ofile << i << "\t" << costs.get_computational_cost(copy) << "\t"
+                    << costs.get_photon_cost(copy) << "\t"
+                    << costs.get_source_cost(copy) << "\t"
                     << costs.get_process(copy) << "\t" << costs.get_thread(copy)
                     << "\n";
             }
@@ -1043,6 +1048,9 @@ inline void execute_photon_traversal_task(
   // keep track of the original number of photons
   unsigned int num_photon_done_now = buffer._actual_size;
 
+  // add to the photon cost of this subgrid
+  costs.add_photon_cost(igrid, num_photon_done_now);
+
   // now do the actual photon traversal
   do_photon_traversal(buffer, this_grid, local_buffers, local_buffer_flags);
 
@@ -1137,7 +1145,7 @@ inline void execute_photon_traversal_task(
 
   // update the cost computation for this subgrid
   task_tick(task_end);
-  costs.add_cost(igrid, task_end - task_start);
+  costs.add_computational_cost(igrid, task_end - task_start);
 }
 
 /**
@@ -1149,7 +1157,6 @@ inline void execute_photon_traversal_task(
  * @param new_queues Task queues for individual threads.
  * @param new_buffers PhotonBuffer memory space.
  * @param random_generator Random_generator for the active thread.
- * @param gridvec List of all subgrids.
  * @param reemission_probability Reemission probability.
  * @param costs CostVector that contains information about the load balancing
  * and domain decomposition.
@@ -1159,13 +1166,8 @@ inline void execute_photon_traversal_task(
 inline void execute_photon_reemit_task(
     Task &task, const int thread_id, ThreadSafeVector< Task > &tasks,
     std::vector< NewQueue * > &new_queues, MemorySpace &new_buffers,
-    RandomGenerator &random_generator, std::vector< DensitySubGrid * > &gridvec,
-    const double reemission_probability, CostVector &costs,
-    unsigned int &num_photon_done) {
-
-  // variables used to determine the cost of photon traversal tasks
-  unsigned long task_start, task_end;
-  task_tick(task_start);
+    RandomGenerator &random_generator, const double reemission_probability,
+    CostVector &costs, unsigned int &num_photon_done) {
 
   // log the start of the task
   task.start(thread_id);
@@ -1198,10 +1200,6 @@ inline void execute_photon_reemit_task(
 
   // log the end time of the task
   task.stop();
-
-  // update the cost computation for this subgrid
-  task_tick(task_end);
-  costs.add_cost(task._cell, task_end - task_start);
 }
 
 /**
@@ -1357,8 +1355,8 @@ inline void execute_task(
     /// reemit absorbed photon packets
 
     execute_photon_reemit_task(task, thread_id, tasks, new_queues, new_buffers,
-                               random_generator, gridvec,
-                               reemission_probability, costs, num_photon_done);
+                               random_generator, reemission_probability, costs,
+                               num_photon_done);
     break;
 
   case TASKTYPE_SEND:
@@ -1881,6 +1879,7 @@ int main(int argc, char **argv) {
   /////////////////////////////
 
   std::vector< unsigned long > initial_cost_vector(tot_num_subgrid, 0);
+  std::vector< unsigned int > initial_photon_cost(tot_num_subgrid, 0);
   std::ifstream initial_costs("costs_00.txt");
   if (initial_costs.good()) {
     // use cost information from a previous run as initial guess for the cost
@@ -1888,19 +1887,23 @@ int main(int argc, char **argv) {
     std::string line;
     std::getline(initial_costs, line);
     unsigned int index;
-    unsigned long cost;
+    unsigned long computational_cost;
+    unsigned int photon_cost, source_cost;
     int rank, thread;
     while (std::getline(initial_costs, line)) {
       std::istringstream lstream(line);
-      lstream >> index >> cost >> rank >> thread;
+      lstream >> index >> computational_cost >> photon_cost >> source_cost >>
+          rank >> thread;
       if (index < tot_num_subgrid) {
-        initial_cost_vector[index] += cost;
+        initial_cost_vector[index] += computational_cost;
+        initial_photon_cost[index] += photon_cost;
       }
     }
   } else {
     // no initial cost information: assume a uniform cost
     for (unsigned int i = 0; i < tot_num_subgrid; ++i) {
       initial_cost_vector[i] = 1;
+      initial_photon_cost[i] = 1;
     }
   }
 
@@ -1984,7 +1987,8 @@ int main(int argc, char **argv) {
 
   // set the initial cost data (either from a file or from a guess)
   for (unsigned int i = 0; i < tot_num_subgrid; ++i) {
-    costs.add_cost(i, initial_cost_vector[i]);
+    costs.add_computational_cost(i, initial_cost_vector[i]);
+    costs.add_photon_cost(i, initial_photon_cost[i]);
   }
 
   // add copy cost data: divide original cost by number of copies
@@ -2000,10 +2004,14 @@ int main(int argc, char **argv) {
     }
     if (this_copies.size() > 0) {
       const unsigned long cost =
-          costs.get_cost(igrid) / (this_copies.size() + 1);
-      costs.set_cost(igrid, cost);
+          costs.get_computational_cost(igrid) / (this_copies.size() + 1);
+      const unsigned int photon_cost =
+          costs.get_photon_cost(igrid) / (this_copies.size() + 1);
+      costs.set_computational_cost(igrid, cost);
+      costs.set_photon_cost(igrid, photon_cost);
       for (unsigned int i = 0; i < this_copies.size(); ++i) {
-        costs.set_cost(this_copies[i], cost);
+        costs.set_computational_cost(this_copies[i], cost);
+        costs.set_photon_cost(this_copies[i], photon_cost);
       }
     }
   }
@@ -2217,6 +2225,8 @@ int main(int argc, char **argv) {
     std::vector< int > central_queue(central_index.size());
     for (unsigned int i = 0; i < central_index.size(); ++i) {
       central_queue[i] = costs.get_thread(central_index[i]);
+      // set the source cost
+      costs.set_source_cost(central_index[i], 1);
     }
 
     // STEP 0: log output
@@ -2582,11 +2592,12 @@ int main(int argc, char **argv) {
     // fill initial_cost_vector with costs
     unsigned long avg_cost_per_thread = 0;
     for (unsigned int i = 0; i < tot_num_subgrid; ++i) {
-      initial_cost_vector[i] = costs.get_cost(i);
+      initial_cost_vector[i] = costs.get_computational_cost(i);
       avg_cost_per_thread += initial_cost_vector[i];
     }
     for (unsigned int i = 0; i < originals.size(); ++i) {
-      initial_cost_vector[originals[i]] += costs.get_cost(tot_num_subgrid + i);
+      initial_cost_vector[originals[i]] +=
+          costs.get_computational_cost(tot_num_subgrid + i);
       avg_cost_per_thread += initial_cost_vector[originals[i]];
     }
     avg_cost_per_thread /= num_threads;
@@ -2654,12 +2665,12 @@ int main(int argc, char **argv) {
       if (this_copies.size() > 0) {
         const unsigned long cost =
             initial_cost_vector[igrid] / (this_copies.size() + 1);
-        costs.set_cost(igrid, cost);
+        costs.set_computational_cost(igrid, cost);
         for (unsigned int i = 0; i < this_copies.size(); ++i) {
-          costs.set_cost(this_copies[i], cost);
+          costs.set_computational_cost(this_copies[i], cost);
         }
       } else {
-        costs.set_cost(igrid, initial_cost_vector[igrid]);
+        costs.set_computational_cost(igrid, initial_cost_vector[igrid]);
       }
     }
 

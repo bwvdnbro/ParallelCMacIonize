@@ -79,11 +79,14 @@ private:
   /*! @brief Number of MPI processes. */
   const int _number_of_processes;
 
-  /*! @brief Computational costs for each element. */
-  unsigned long *_costs;
+  /*! @brief Computational cost for each element. */
+  unsigned long *_computational_cost;
+
+  /*! @brief Photon cost for each element. */
+  unsigned int *_photon_cost;
 
   /*! @brief Source cost for each element. */
-  unsigned int *_source_costs;
+  unsigned int *_source_cost;
 
   /*! @brief Thread list that links elements to threads in an optimal balancing
    *  scheme. */
@@ -106,13 +109,15 @@ public:
       : _size(size), _number_of_threads(number_of_threads),
         _number_of_processes(number_of_processes) {
 
-    _costs = new unsigned long[size];
-    _source_costs = new unsigned int[size];
+    _computational_cost = new unsigned long[size];
+    _photon_cost = new unsigned int[size];
+    _source_cost = new unsigned int[size];
     _thread_list = new int[size];
     _process_list = new int[size];
     for (size_t i = 0; i < size; ++i) {
-      _costs[i] = 0;
-      _source_costs[i] = 0;
+      _computational_cost[i] = 0;
+      _photon_cost[i] = 0;
+      _source_cost[i] = 0;
       // our initial decomposition
       _thread_list[i] = i % number_of_threads;
       _process_list[i] = i % number_of_processes;
@@ -123,8 +128,9 @@ public:
    * @brief Destructor.
    */
   inline ~CostVector() {
-    delete[] _costs;
-    delete[] _source_costs;
+    delete[] _computational_cost;
+    delete[] _photon_cost;
+    delete[] _source_cost;
     delete[] _thread_list;
     delete[] _process_list;
   }
@@ -137,19 +143,22 @@ public:
   inline void reset(const size_t size) {
     _size = size;
 
-    delete[] _costs;
-    delete[] _source_costs;
+    delete[] _computational_cost;
+    delete[] _photon_cost;
+    delete[] _source_cost;
     delete[] _thread_list;
     delete[] _process_list;
 
-    _costs = new unsigned long[size];
-    _source_costs = new unsigned int[size];
+    _computational_cost = new unsigned long[size];
+    _photon_cost = new unsigned int[size];
+    _source_cost = new unsigned int[size];
     _thread_list = new int[size];
     _process_list = new int[size];
 
     for (size_t i = 0; i < size; ++i) {
-      _costs[i] = 0;
-      _source_costs[i] = 0;
+      _computational_cost[i] = 0;
+      _photon_cost[i] = 0;
+      _source_cost[i] = 0;
       // our initial decomposition
       _thread_list[i] = i % _number_of_threads;
       _process_list[i] = i % _number_of_processes;
@@ -162,8 +171,9 @@ public:
   inline void clear_costs() {
 
     for (size_t i = 0; i < _size; ++i) {
-      _costs[i] = 0;
-      _source_costs[i] = 0;
+      _computational_cost[i] = 0;
+      _photon_cost[i] = 0;
+      _source_cost[i] = 0;
     }
   }
 
@@ -193,8 +203,9 @@ public:
    * @param index Index of an element.
    * @param cost Computational cost to add.
    */
-  inline void add_cost(const size_t index, const unsigned long cost) {
-    _costs[index] += cost;
+  inline void add_computational_cost(const size_t index,
+                                     const unsigned long cost) {
+    _computational_cost[index] += cost;
   }
 
   /**
@@ -203,8 +214,9 @@ public:
    * @param index Index of an element.
    * @param cost New computation cost.
    */
-  inline void set_cost(const size_t index, const unsigned long cost) {
-    _costs[index] = cost;
+  inline void set_computational_cost(const size_t index,
+                                     const unsigned long cost) {
+    _computational_cost[index] = cost;
   }
 
   /**
@@ -213,8 +225,38 @@ public:
    * @param index Index of an element.
    * @return Computational cost for that element.
    */
-  inline const unsigned long get_cost(const size_t index) const {
-    return _costs[index];
+  inline const unsigned long get_computational_cost(const size_t index) const {
+    return _computational_cost[index];
+  }
+
+  /**
+   * @brief Add the given photon cost to the given element.
+   *
+   * @param index Index of an element.
+   * @param cost Photon cost to add.
+   */
+  inline void add_photon_cost(const size_t index, const unsigned int cost) {
+    _photon_cost[index] += cost;
+  }
+
+  /**
+   * @brief Set the photon cost for the given element.
+   *
+   * @param index Index of an element.
+   * @param cost New photon cost.
+   */
+  inline void set_photon_cost(const size_t index, const unsigned int cost) {
+    _photon_cost[index] = cost;
+  }
+
+  /**
+   * @brief Get the photon cost for the given element.
+   *
+   * @param index Index of an element.
+   * @return Photon cost for that element.
+   */
+  inline const unsigned int get_photon_cost(const size_t index) const {
+    return _photon_cost[index];
   }
 
   /**
@@ -224,7 +266,7 @@ public:
    * @param cost Source cost to add.
    */
   inline void add_source_cost(const size_t index, const unsigned int cost) {
-    _source_costs[index] += cost;
+    _source_cost[index] += cost;
   }
 
   /**
@@ -234,7 +276,7 @@ public:
    * @param cost New source cost.
    */
   inline void set_source_cost(const size_t index, const unsigned int cost) {
-    _source_costs[index] = cost;
+    _source_cost[index] = cost;
   }
 
   /**
@@ -244,7 +286,7 @@ public:
    * @return Source cost for that element.
    */
   inline const unsigned int get_source_cost(const size_t index) const {
-    return _source_costs[index];
+    return _source_cost[index];
   }
 
   /**
@@ -299,11 +341,11 @@ public:
       for (size_t igrid = 0; igrid < _size; ++igrid) {
 
         // we have 3 weights that we want to equally distribute:
-        //  - the computational cost
-        vwgt[3 * igrid + 0] = _costs[igrid];
+        //  - the photon cost
+        vwgt[3 * igrid + 0] = _photon_cost[igrid];
+        //  - the number of sources
+        vwgt[3 * igrid + 1] = _source_cost[igrid];
         //  - the memory (each subgrid has the same memory requirements for now)
-        vwgt[3 * igrid + 1] = _source_costs[igrid];
-        //  - the number of sources per domain
         vwgt[3 * igrid + 2] = 1;
 
         // xadj[igrid] points to the beginning of the edge list for this vertex
@@ -363,7 +405,7 @@ public:
     }
 
     // argsort the elements based on cost
-    std::vector< size_t > indices = argsort(_costs, _size);
+    std::vector< size_t > indices = argsort(_computational_cost, _size);
 
     const size_t max_index = _size - 1;
     // loop over the processes and load balance the threads on each process
@@ -378,7 +420,7 @@ public:
       std::vector< unsigned long > threadcost(_number_of_threads, 0);
       for (int ithread = 0; ithread < _number_of_threads; ++ithread) {
         _thread_list[current_index] = ithread;
-        threadcost[ithread] += _costs[current_index];
+        threadcost[ithread] += _computational_cost[current_index];
         ++index;
         current_index = indices[max_index - index];
         while (index < _size && _process_list[current_index] != irank) {
@@ -392,10 +434,11 @@ public:
         if (_process_list[current_index] == irank) {
           // find the thread where this cost has the lowest impact
           int cmatch_thread = -1;
-          unsigned long cmatch = threadcost[0] + _costs[current_index];
+          unsigned long cmatch =
+              threadcost[0] + _computational_cost[current_index];
           for (int ithread = 0; ithread < _number_of_threads; ++ithread) {
             const unsigned long cvalue =
-                threadcost[ithread] + _costs[current_index];
+                threadcost[ithread] + _computational_cost[current_index];
             if (cvalue <= cmatch) {
               cmatch = cvalue;
               cmatch_thread = ithread;
@@ -403,7 +446,7 @@ public:
           }
           myassert(cmatch_thread >= 0, "No closest match!");
           _thread_list[current_index] = cmatch_thread;
-          threadcost[cmatch_thread] += _costs[current_index];
+          threadcost[cmatch_thread] += _computational_cost[current_index];
         }
       }
     }
@@ -418,7 +461,8 @@ public:
         sfile << "# rank\tthread\tcomp cost\tsource cost\n";
         for (size_t igrid = 0; igrid < _size; ++igrid) {
           sfile << _process_list[igrid] << "\t" << _thread_list[igrid] << "\t"
-                << _costs[igrid] << "\t" << _source_costs[igrid] << "\n";
+                << _computational_cost[igrid] << "\t" << _photon_cost[igrid]
+                << "\t" << _source_cost[igrid] << "\n";
         }
       }
       MPI_Barrier(MPI_COMM_WORLD);
@@ -427,8 +471,9 @@ public:
 
     // reset costs
     for (size_t i = 0; i < _size; ++i) {
-      _costs[i] = 0;
-      _source_costs[i] = 0;
+      _computational_cost[i] = 0;
+      _photon_cost[i] = 0;
+      _source_cost[i] = 0;
     }
   }
 };
