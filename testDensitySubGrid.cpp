@@ -2025,8 +2025,9 @@ int main(int argc, char **argv) {
            originals[igrid - tot_num_subgrid] == central_index);
 
       DensitySubGrid &subgrid = *gridvec[igrid];
-      // don't include the 0 ngb, as that is a self-reference
-      for (int ingb = 1; ingb < 27; ++ingb) {
+      // only include the face neighbours, as they are the only ones with a
+      // significant communication load
+      for (int ingb = 21; ingb < 27; ++ingb) {
         unsigned int ngb = subgrid.get_neighbour(ingb);
         if (ngb != NEIGHBOUR_OUTSIDE) {
           // try to find the neighbour in the neighbour list for igrid
@@ -2051,89 +2052,6 @@ int main(int argc, char **argv) {
         }
       }
     }
-
-    // ParMETIS version
-    //    idx_t vtxdist[2] = {0, nvert};
-    //    idx_t ncon = 3;
-    //    idx_t *xadj = new idx_t[nvert + 1];
-    //    idx_t *adjncy = new idx_t[2 * nedge];
-    //    idx_t *vwgt = new idx_t[ncon * nvert];
-    //    idx_t *adjwgt = new idx_t[2 * nedge];
-
-    //    xadj[0] = 0;
-    //    for (size_t igrid = 0; igrid < gridvec.size(); ++igrid) {
-    //      // figure out if this subgrid holds the source position
-    //      const int has_source =
-    //          (igrid == central_index) ||
-    //          (igrid > tot_num_subgrid &&
-    //           originals[igrid - tot_num_subgrid] == central_index);
-
-    //      // we have 3 weights that we want to equally distribute:
-    //      //  - the computational cost
-    //      vwgt[3 * igrid + 0] = costs.get_cost(igrid);
-    //      //  - the memory (each subgrid has the same memory requirements for
-    //      now)
-    //      vwgt[3 * igrid + 1] = 1;
-    //      //  - the number of sources per domain
-    //      vwgt[3 * igrid + 2] = has_source;
-
-    //      // xadj[igrid] points to the beginning of the edge list for this
-    //      vertex in
-    //      // adjncy
-    //      // xadj[igrid+1] points to the element beyond the edge list for this
-    //      // vertex (similar to iterator::end())
-    //      xadj[igrid + 1] = xadj[igrid] + ngbs[igrid].size();
-
-    //      double midpoint[3];
-    //      gridvec[igrid]->get_midpoint(midpoint);
-    //      sfile << midpoint[0] << "\t" << midpoint[1] << "\t" << midpoint[2]
-    //            << "\n";
-    //      gfile << costs.get_cost(igrid) << " 1 " << has_source;
-    //      for (unsigned int ingb = 0; ingb < ngbs[igrid].size(); ++ingb) {
-    //        // +1 because metis starts indexing from 1 instead of 0
-    //        gfile << " " << (ngbs[igrid][ingb] + 1) << " 1";
-    //        adjncy[xadj[igrid] + ingb] = ngbs[igrid][ingb];
-    //        // all edges have the same weight
-    //        adjwgt[xadj[igrid] + ingb] = 1;
-    //      }
-    //      gfile << "\n";
-    //    }
-    //    myassert(xadj[nvert] == 2 * nedge, "Wrong number of edges!");
-
-    //    idx_t *part = new idx_t[nvert];
-    //    idx_t nparts = 4;
-    //    idx_t wgtflag = 3;
-    //    idx_t numflag = 0;
-    //    real_t *tpwgts = new real_t[nparts * ncon];
-    //    for (idx_t i = 0; i < nparts * ncon; ++i) {
-    //      tpwgts[i] = 1. / nparts;
-    //    }
-    //    real_t ubvec[3] = {1.05, 1.05, 1.05};
-    //    idx_t options[1] = {0};
-    //    idx_t edgecut;
-
-    //    MPI_Comm comm = MPI_COMM_WORLD;
-
-    //    int metis_status = ParMETIS_V3_PartKway(
-    //        vtxdist, xadj, adjncy, vwgt, adjwgt, &wgtflag, &numflag, &ncon,
-    //        &nparts,
-    //        tpwgts, ubvec, options, &edgecut, part, &comm);
-
-    //    if (metis_status != METIS_OK) {
-    //      cmac_error("Metis error!");
-    //    }
-
-    //    std::ofstream pfile("partition_metis.txt");
-    //    for (size_t igrid = 0; igrid < gridvec.size(); ++igrid) {
-    //      pfile << part[igrid] << "\n";
-    //    }
-
-    //    delete[] xadj;
-    //    delete[] adjncy;
-    //    delete[] vwgt;
-    //    delete[] adjwgt;
-    //    delete[] part;
-    //    delete[] tpwgts;
   }
 
   // broadcast ngbs and source costs to all processes
