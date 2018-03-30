@@ -37,7 +37,7 @@ import os
 # number of cells in one coordinate dimension
 # should be synced with the values used in the unit test
 # we guess based on the file size
-ncell = int(np.cbrt(os.path.getsize("intensities.dat") / (5 * 8)))
+ncell = int(np.round((os.path.getsize("intensities.dat") / (5 * 8))**(1./3.)))
 # number of bins to use to bin the results
 nbin = 100
 

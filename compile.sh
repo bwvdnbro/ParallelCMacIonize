@@ -10,7 +10,7 @@ flags="-Wall -Werror -O3 -ftree-vectorize -funroll-loops -ffast-math"
 #flags="-Wall -Werror -g -fsanitize=address -fno-omit-frame-pointer"
 
 # library dependencies
-libs="-lparmetis -lmetis"
+libs="-lmetis"
 
 for f in testDensitySubGrid.cpp CommandLineOption.cpp CommandLineParser.cpp
 do
