@@ -44,3 +44,5 @@ MPI_buffer_size: 1000000000
 # to get reasonable performance, this value should be at least > 2
 # note that larger values will require more memory to run
 copy_factor: 10
+# size of the general queue that is shared by all threads
+general_queue_size: 20000

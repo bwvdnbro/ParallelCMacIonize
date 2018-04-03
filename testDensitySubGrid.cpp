@@ -765,13 +765,17 @@ inline void parse_command_line(int argc, char **argv, int &num_threads_request,
  * @param number_of_tasks Variable to store the size of the task space in.
  * @param MPI_buffer_size Variable to store the size of the MPI buffer in.
  * @param copy_factor Variable to store the copy factor in.
+ * @param general_queue_size General queue size.
  */
-inline void read_parameters(
-    std::string paramfile_name, double box[6], double &reemission_probability,
-    int ncell[3], int num_subgrid[3], unsigned int &num_photon,
-    unsigned int &number_of_iterations, unsigned int &queue_size_per_thread,
-    unsigned int &memoryspace_size, unsigned int &number_of_tasks,
-    unsigned int &MPI_buffer_size, double &copy_factor) {
+inline void read_parameters(std::string paramfile_name, double box[6],
+                            double &reemission_probability, int ncell[3],
+                            int num_subgrid[3], unsigned int &num_photon,
+                            unsigned int &number_of_iterations,
+                            unsigned int &queue_size_per_thread,
+                            unsigned int &memoryspace_size,
+                            unsigned int &number_of_tasks,
+                            unsigned int &MPI_buffer_size, double &copy_factor,
+                            unsigned int &general_queue_size) {
 
   std::ifstream paramfile(paramfile_name);
   if (!paramfile) {
@@ -819,6 +823,9 @@ inline void read_parameters(
   number_of_tasks = parameters.get_value< unsigned int >("number_of_tasks");
   MPI_buffer_size = parameters.get_value< unsigned int >("MPI_buffer_size");
   copy_factor = parameters.get_value< double >("copy_factor");
+
+  general_queue_size =
+      parameters.get_value< unsigned int >("general_queue_size");
 
   logmessage("\n##\n# Parameters:\n##", 0);
   if (MPI_rank == 0) {
@@ -901,82 +908,37 @@ inline void execute_source_photon_task(
   // log the start time of the task (if task output is enabled)
   task.start(thread_id);
 
-  // check if we should still execute this task (as another thread
-  // could have depleted the photon source by now)
-  if (num_photon_sourced < num_photon_local) {
+  // we will create a new buffer
+  atomic_pre_increment(num_active_buffers);
 
-    // atomically increment the number of photons that was sourced
-    // if this works, then this thread gets the unique right and
-    // obligation to generate the next batch of photons
-    const unsigned int num_photon_sourced_now =
-        atomic_post_add(num_photon_sourced, PHOTONBUFFER_SIZE);
+  unsigned int num_photon_this_loop = task._buffer;
 
-    // the statement above could have been executed by multiple
-    // threads simultaneously, so we need to check that it worked for
-    // this particular thread before we actually continue.
-    if (num_photon_sourced_now < num_photon_local) {
+  // get a free photon buffer in the central queue
+  unsigned int buffer_index = new_buffers.get_free_buffer();
+  PhotonBuffer &input_buffer = new_buffers[buffer_index];
+  // assign the buffer to a random thread that has a copy of the
+  // subgrid that contains the source position. This should ensure
+  // a balanced load for these threads.
+  unsigned int which_central_index =
+      random_generator.get_uniform_random_double() * central_index.size();
+  myassert(which_central_index >= 0 &&
+               which_central_index < central_index.size(),
+           "Invalid source subgrid thread index!");
+  unsigned int this_central_index = central_index[which_central_index];
 
-      // OK, we can (/have to) generate some photons!
+  // now actually fill the buffer with random photon packets
+  fill_buffer(input_buffer, num_photon_this_loop, random_generator,
+              this_central_index);
 
-      // Spawn a new source photon task for this thread and add it to
-      // the end of its queue.
-      // This guarantess we cannot exit the task loop as long as the
-      // source still has photon packets.
-      {
-        const size_t task_index = tasks.get_free_element_safe();
-        myassert(task_index < tasks.max_size(), "Task buffer overflow!");
-        tasks[task_index]._type = TASKTYPE_SOURCE_PHOTON;
-        // buffer is ready to be processed: add to the queue
-        // note that in this case, the statement order does not really
-        // matter, as this task can only be executed by the same
-        // thread that executes the statement
-        new_queues[thread_id]->add_task(task_index);
-      }
-
-      // we will create a new buffer
-      atomic_pre_increment(num_active_buffers);
-
-      // if this is the last buffer: cap the total number of photons
-      // to the requested value
-      // (note that num_photon_done_now is the number of photons that
-      //  was generated BEFORE this task, after this task,
-      //  num_photon_done_now + PHOTONBUFFER_SIZE photons will have
-      //  been generated, unless this number is capped)
-      unsigned int num_photon_this_loop = PHOTONBUFFER_SIZE;
-      if (num_photon_sourced_now + PHOTONBUFFER_SIZE > num_photon_local) {
-        num_photon_this_loop += (num_photon_local - num_photon_sourced_now);
-      }
-
-      // get a free photon buffer in the central queue
-      unsigned int buffer_index = new_buffers.get_free_buffer();
-      PhotonBuffer &input_buffer = new_buffers[buffer_index];
-      // assign the buffer to a random thread that has a copy of the
-      // subgrid that contains the source position. This should ensure
-      // a balanced load for these threads.
-      unsigned int which_central_index =
-          random_generator.get_uniform_random_double() * central_index.size();
-      myassert(which_central_index >= 0 &&
-                   which_central_index < central_index.size(),
-               "Invalid source subgrid thread index!");
-      unsigned int this_central_index = central_index[which_central_index];
-
-      // now actually fill the buffer with random photon packets
-      fill_buffer(input_buffer, num_photon_this_loop, random_generator,
-                  this_central_index);
-
-      // add to the queue of the corresponding thread
-      const size_t task_index = tasks.get_free_element_safe();
-      myassert(task_index < tasks.max_size(), "Task buffer overflow!");
-      tasks[task_index]._type = TASKTYPE_PHOTON_TRAVERSAL;
-      tasks[task_index]._cell = this_central_index;
-      tasks[task_index]._buffer = buffer_index;
-      // note that this statement should be last, as the buffer might
-      // be processed as soon as this statement is executed
-      new_queues[central_queue[which_central_index]]->add_task(task_index);
-
-    } // if (num_photon_sourced_now < num_photon)
-
-  } // if (num_photon_sourced < num_photon)
+  // add to the queue of the corresponding thread
+  const size_t task_index = tasks.get_free_element_safe();
+  myassert(task_index < tasks.max_size(), "Task buffer overflow!");
+  tasks[task_index]._type = TASKTYPE_PHOTON_TRAVERSAL;
+  tasks[task_index]._cell = this_central_index;
+  tasks[task_index]._buffer = buffer_index;
+  // note that this statement should be last, as the buffer might
+  // be processed as soon as this statement is executed
+  new_queues[central_queue[which_central_index]]->add_task(task_index);
 
   // log the end time of the task
   task.stop();
@@ -1695,13 +1657,13 @@ int main(int argc, char **argv) {
   unsigned int num_photon, number_of_iterations;
 
   unsigned int queue_size_per_thread, memoryspace_size, number_of_tasks,
-      MPI_buffer_size;
+      MPI_buffer_size, general_queue_size;
   double copy_factor;
 
   read_parameters(paramfile_name, box, reemission_probability, ncell,
                   num_subgrid, num_photon, number_of_iterations,
                   queue_size_per_thread, memoryspace_size, number_of_tasks,
-                  MPI_buffer_size, copy_factor);
+                  MPI_buffer_size, copy_factor, general_queue_size);
 
   //////////////////////////
 
@@ -1714,6 +1676,8 @@ int main(int argc, char **argv) {
   for (int i = 0; i < num_threads; ++i) {
     new_queues[i] = new NewQueue(queue_size_per_thread);
   }
+
+  NewQueue general_queue(general_queue_size);
 
   // set up the task space used to store tasks
   ThreadSafeVector< Task > tasks(number_of_tasks);
@@ -2271,20 +2235,28 @@ int main(int argc, char **argv) {
         local_buffers[i]._actual_size = 0;
         local_buffer_flags[i] = true;
       }
-      // set up the initial source photon task
-      // this task will respawn itself as long as
-      //   num_photon_sourced < num_photon
-      // (this automatically means that threads with less propagation tasks will
-      //  handle more source tasks)
-      // at the moment, we make sure each process holds at least 1 copy of the
-      // source subgrid, so each process should have this task
-      {
-        const size_t task_index = tasks.get_free_element_safe();
-        myassert(task_index < tasks.max_size(), "Task buffer overflow!");
-        tasks[task_index]._type = TASKTYPE_SOURCE_PHOTON;
-        // buffer is ready to be processed: add to the queue
-        new_queues[thread_id]->add_task(task_index);
+
+      // add source photon tasks to the general queue
+      while (num_photon_sourced < num_photon_local) {
+        const unsigned int num_photon_sourced_now =
+            atomic_post_add(num_photon_sourced, PHOTONBUFFER_SIZE);
+        if (num_photon_sourced_now < num_photon_local) {
+          unsigned int num_photon_this_loop = PHOTONBUFFER_SIZE;
+          if (num_photon_sourced_now + PHOTONBUFFER_SIZE > num_photon_local) {
+            num_photon_this_loop += (num_photon_local - num_photon_sourced_now);
+          }
+
+          // create task
+          const size_t task_index = tasks.get_free_element_safe();
+          myassert(task_index < tasks.max_size(), "Task buffer overflow!");
+          tasks[task_index]._type = TASKTYPE_SOURCE_PHOTON;
+          // store the number of photons in the _buffer field, which is not used
+          // at the moment
+          tasks[task_index]._buffer = num_photon_this_loop;
+          general_queue.add_task(task_index);
+        }
       }
+
       // this loop is repeated until all local photons have been propagated
       // note that this condition automatically covers the condition
       //  num_photon_sourced < num_photon_local
@@ -2310,6 +2282,9 @@ int main(int argc, char **argv) {
         // upon first entry of the while loop, this will be the photon source
         // task we just created
         unsigned int current_index = new_queues[thread_id]->get_task();
+        if (current_index == NO_TASK) {
+          current_index = general_queue.get_task();
+        }
 
         // task activation: if no task is found, try to launch a photon buffer
         // that is not yet full and prematurely schedule it
@@ -2351,6 +2326,9 @@ int main(int argc, char **argv) {
 
           // We finished a task: try to get a new task from the local queue
           current_index = new_queues[thread_id]->get_task();
+          if (current_index == NO_TASK) {
+            current_index = general_queue.get_task();
+          }
 
         } // while (current_index != NO_TASK)
 
