@@ -113,7 +113,8 @@ enum TravelDirection {
   TRAVELDIRECTION_FACE_Y_P,
   TRAVELDIRECTION_FACE_Y_N,
   TRAVELDIRECTION_FACE_Z_P,
-  TRAVELDIRECTION_FACE_Z_N
+  TRAVELDIRECTION_FACE_Z_N,
+  TRAVELDIRECTION_NUMBER
 };
 
 /**
@@ -374,7 +375,7 @@ inline bool is_compatible_input_direction(const double *direction,
            "Number of cells not the same!");                                   \
   myassert(a._number_of_cells[3] == b._number_of_cells[3],                     \
            "Number of cells not the same!");                                   \
-  for (unsigned int i = 0; i < 27; ++i) {                                      \
+  for (unsigned int i = 0; i < TRAVELDIRECTION_NUMBER; ++i) {                  \
     myassert(a._ngbs[i] == b._ngbs[i], "Neighbours not the same!");            \
     myassert(a._active_buffers[i] == b._active_buffers[i],                     \
              "Active buffers not the same!");                                  \
@@ -398,10 +399,10 @@ inline bool is_compatible_input_direction(const double *direction,
 class DensitySubGrid {
 public:
   /*! @brief Indices of the neighbouring subgrids. */
-  unsigned int _ngbs[27];
+  unsigned int _ngbs[TRAVELDIRECTION_NUMBER];
 
   /*! @brief Indices of the active buffers. */
-  unsigned int _active_buffers[27];
+  unsigned int _active_buffers[TRAVELDIRECTION_NUMBER];
 
   /*! @brief Index of the SubGrid in the subgrid list. */
   unsigned int _subgrid_index;
@@ -669,7 +670,9 @@ public:
    */
   inline int get_start_index(const double *position, const int input_direction,
                              int *three_index) const {
+
     three_index[0] = get_x_index(position[0], input_direction);
+
     myassert(std::abs(three_index[0] - (int)(position[0] * _inv_cell_size[0])) <
                  2,
              "input_direction: "
@@ -677,18 +680,23 @@ public:
                  << position[1] << " " << position[2]
                  << "\nthree_index[0]: " << three_index[0]
                  << "\nreal: " << (int)(position[0] * _inv_cell_size[0]));
+
     three_index[1] = get_y_index(position[1], input_direction);
+
     myassert(
         std::abs(three_index[1] - (int)(position[1] * _inv_cell_size[1])) < 2,
         "input_direction: " << input_direction << "\nposition: " << position[0]
                             << " " << position[1] << " " << position[2]
                             << "\nthree_index[1]: " << three_index[1]);
+
     three_index[2] = get_z_index(position[2], input_direction);
+
     myassert(
         std::abs(three_index[2] - (int)(position[2] * _inv_cell_size[2])) < 2,
         "input_direction: " << input_direction << "\nposition: " << position[0]
                             << " " << position[1] << " " << position[2]
                             << "\nthree_index[2]: " << three_index[2]);
+
     myassert(is_inside(three_index),
              "position: " << position[0] + _anchor[0] << " "
                           << position[1] + _anchor[1] << " "
@@ -699,6 +707,7 @@ public:
                           << _cell_size[1] * _number_of_cells[1] << " "
                           << _cell_size[2] * _number_of_cells[2]
                           << "\ndirection: " << input_direction);
+
     return get_one_index(three_index);
   }
 
@@ -915,7 +924,7 @@ public:
    * @return Index of the neighbouring subgrid for that direction.
    */
   inline unsigned int get_neighbour(const int output_direction) const {
-    myassert(output_direction >= 0 && output_direction < 27,
+    myassert(output_direction >= 0 && output_direction < TRAVELDIRECTION_NUMBER,
              "output_direction: " << output_direction);
     return _ngbs[output_direction];
   }
@@ -928,7 +937,7 @@ public:
    */
   inline void set_neighbour(const int output_direction,
                             const unsigned int ngb) {
-    myassert(output_direction >= 0 && output_direction < 27,
+    myassert(output_direction >= 0 && output_direction < TRAVELDIRECTION_NUMBER,
              "output_direction: " << output_direction);
     _ngbs[output_direction] = ngb;
   }
@@ -972,10 +981,10 @@ public:
              &buffer_position, MPI_COMM_WORLD);
     MPI_Pack(_number_of_cells, 4, MPI_INT, buffer, buffer_size,
              &buffer_position, MPI_COMM_WORLD);
-    MPI_Pack(_ngbs, 27, MPI_UNSIGNED, buffer, buffer_size, &buffer_position,
-             MPI_COMM_WORLD);
-    MPI_Pack(_active_buffers, 27, MPI_UNSIGNED, buffer, buffer_size,
+    MPI_Pack(_ngbs, TRAVELDIRECTION_NUMBER, MPI_UNSIGNED, buffer, buffer_size,
              &buffer_position, MPI_COMM_WORLD);
+    MPI_Pack(_active_buffers, TRAVELDIRECTION_NUMBER, MPI_UNSIGNED, buffer,
+             buffer_size, &buffer_position, MPI_COMM_WORLD);
     MPI_Pack(&_subgrid_index, 1, MPI_UNSIGNED, buffer, buffer_size,
              &buffer_position, MPI_COMM_WORLD);
 
@@ -1010,10 +1019,10 @@ public:
     unsigned int new_number_of_cells[4];
     MPI_Unpack(buffer, buffer_size, &buffer_position, new_number_of_cells, 4,
                MPI_INT, MPI_COMM_WORLD);
-    MPI_Unpack(buffer, buffer_size, &buffer_position, _ngbs, 27, MPI_UNSIGNED,
-               MPI_COMM_WORLD);
-    MPI_Unpack(buffer, buffer_size, &buffer_position, _active_buffers, 27,
-               MPI_UNSIGNED, MPI_COMM_WORLD);
+    MPI_Unpack(buffer, buffer_size, &buffer_position, _ngbs,
+               TRAVELDIRECTION_NUMBER, MPI_UNSIGNED, MPI_COMM_WORLD);
+    MPI_Unpack(buffer, buffer_size, &buffer_position, _active_buffers,
+               TRAVELDIRECTION_NUMBER, MPI_UNSIGNED, MPI_COMM_WORLD);
     MPI_Unpack(buffer, buffer_size, &buffer_position, &_subgrid_index, 1,
                MPI_UNSIGNED, MPI_COMM_WORLD);
 
@@ -1105,16 +1114,18 @@ public:
    */
   inline int interact(Photon &photon, const int input_direction) {
 
-    myassert(input_direction >= 0 && input_direction < 27,
+    myassert(input_direction >= 0 && input_direction < TRAVELDIRECTION_NUMBER,
              "input_direction: " << input_direction);
 
     // get some photon variables
     const double direction[3] = {photon._direction[0], photon._direction[1],
                                  photon._direction[2]};
+
     myassert(is_compatible_input_direction(direction, input_direction),
              "direction: " << direction[0] << " " << direction[1] << " "
                            << direction[2]
                            << ", input_direction: " << input_direction);
+
     const double inverse_direction[3] = {photon._inverse_direction[0],
                                          photon._inverse_direction[1],
                                          photon._inverse_direction[2]};
@@ -1124,17 +1135,21 @@ public:
                           photon._position[2] - _anchor[2]};
     double tau_done = photon._current_optical_depth;
     const double tau_target = photon._target_optical_depth;
+
     myassert(tau_done < tau_target, "tau_done: " << tau_done
                                                  << ", target: " << tau_target);
+
     const double cross_section = photon._photoionization_cross_section;
     const double photon_weight = photon._weight;
-    // get the indices of the first cell on the photons path
+    // get the indices of the first cell on the photon's path
     int three_index[3];
     int active_cell = get_start_index(position, input_direction, three_index);
+
     myassert(active_cell >= 0 &&
                  active_cell < _number_of_cells[0] * _number_of_cells[3],
              "active_cell: " << active_cell << ", size: "
                              << _number_of_cells[0] * _number_of_cells[3]);
+
     // enter photon traversal loop
     // double condition:
     //  - target optical depth not reached (tau_done < tau_target)
@@ -1175,6 +1190,7 @@ public:
 
       // find the minimum
       double lmin = std::min(l[0], std::min(l[1], l[2]));
+
       myassert(lmin >= 0.,
                "lmin: " << lmin << "\nl: " << l[0] << " " << l[1] << " " << l[2]
                         << "\ncell: " << cell_low[0] << " " << cell_low[1]
@@ -1183,6 +1199,7 @@ public:
                         << "\nposition: " << position[0] << " " << position[1]
                         << " " << position[2] << "\ndirection: " << direction[0]
                         << " " << direction[1] << " " << direction[2]);
+
       double lminsigma = lmin * cross_section;
       // compute the corresponding optical depth
       const double tau = lminsigma * _number_density[active_cell] *
@@ -1234,8 +1251,10 @@ public:
     } else {
       output_direction = get_output_direction(three_index);
     }
+
     myassert(is_compatible_output_direction(direction, output_direction),
              "wrong output direction!");
+
     return output_direction;
   }
 

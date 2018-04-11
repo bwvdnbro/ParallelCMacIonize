@@ -469,7 +469,7 @@ inline static void do_photon_traversal(PhotonBuffer &input_buffer,
                                        bool *output_buffer_flags) {
 
   // make sure all output buffers are empty initially
-  for (int i = 0; i < 27; ++i) {
+  for (int i = 0; i < TRAVELDIRECTION_NUMBER; ++i) {
     myassert(!output_buffer_flags[i] || output_buffers[i]._actual_size == 0,
              "Non-empty starting output buffer!");
   }
@@ -489,7 +489,7 @@ inline static void do_photon_traversal(PhotonBuffer &input_buffer,
     const int result = subgrid.interact(photon, input_buffer._direction);
 
     // check that the photon ended up in a valid output buffer
-    myassert(result >= 0 && result < 27, "fail");
+    myassert(result >= 0 && result < TRAVELDIRECTION_NUMBER, "fail");
 
     // add the photon to an output buffer, if it still exists (if the
     // corresponding output buffer does not exist, this means the photon left
@@ -632,7 +632,7 @@ inline void create_copies(std::vector< DensitySubGrid * > &gridvec,
       gridvec[copy]->set_active_buffer(0, active_buffer);
     }
     // now do the actual neighbours
-    for (int j = 1; j < 27; ++j) {
+    for (int j = 1; j < TRAVELDIRECTION_NUMBER; ++j) {
       const unsigned int original_ngb = gridvec[i]->get_neighbour(j);
       if (original_ngb != NEIGHBOUR_OUTSIDE) {
         const unsigned char ngb_level = levels[original_ngb];
@@ -993,7 +993,7 @@ inline void execute_photon_traversal_task(
   // prepare output buffers: make sure they are empty and that buffers
   // corresponding to directions outside the simulation box are
   // disabled
-  for (int i = 0; i < 27; ++i) {
+  for (int i = 0; i < TRAVELDIRECTION_NUMBER; ++i) {
     const unsigned int ngb = this_grid.get_neighbour(i);
     if (ngb != NEIGHBOUR_OUTSIDE) {
       local_buffer_flags[i] = true;
@@ -1022,7 +1022,7 @@ inline void execute_photon_traversal_task(
   // we go backwards, so that the local queue is added to the task
   // list last (we want to potentially feed hungry threads before we
   // feed ourselves)
-  for (int i = 26; i >= 0; --i) {
+  for (int i = TRAVELDIRECTION_NUMBER - 1; i >= 0; --i) {
 
     // only process enabled, non-empty output buffers
     if (local_buffer_flags[i] && local_buffers[i]._actual_size > 0) {
@@ -1093,7 +1093,7 @@ inline void execute_photon_traversal_task(
     } // if (local_buffer_flags[i] &&
       //     local_buffers[i]._actual_size > 0)
 
-  } // for (int i = 26; i >= 0; --i)
+  } // for (int i = TRAVELDIRECTION_NUMBER - 1; i >= 0; --i)
 
   // add photons that were absorbed (if reemission was disabled) or
   // that left the system to the global count
@@ -1374,7 +1374,7 @@ inline void activate_buffer(unsigned int &current_index, const int thread_id,
     if (costs.get_process(i) == MPI_rank && costs.get_thread(i) == thread_id) {
       int j = 0;
       // loop over all buffers of this subgrid
-      while (j < 27 && current_index == NO_TASK) {
+      while (j < TRAVELDIRECTION_NUMBER && current_index == NO_TASK) {
         // only process existing buffers that are non empty
         if (gridvec[i]->get_neighbour(j) != NEIGHBOUR_OUTSIDE &&
             new_buffers[gridvec[i]->get_active_buffer(j)]._actual_size > 0) {
@@ -1779,7 +1779,7 @@ int main(int argc, char **argv) {
               // set up neighbouring information. We first make sure all
               // neighbours are initialized to NEIGHBOUR_OUTSIDE, indicating no
               // neighbour
-              for (int i = 0; i < 27; ++i) {
+              for (int i = 0; i < TRAVELDIRECTION_NUMBER; ++i) {
                 this_grid.set_neighbour(i, NEIGHBOUR_OUTSIDE);
                 this_grid.set_active_buffer(i, NEIGHBOUR_OUTSIDE);
               }
@@ -2008,7 +2008,8 @@ int main(int argc, char **argv) {
       DensitySubGrid &subgrid = *gridvec[igrid];
       // only include the face neighbours, as they are the only ones with a
       // significant communication load
-      for (int ingb = 21; ingb < 27; ++ingb) {
+      for (int ingb = TRAVELDIRECTION_FACE_X_P;
+           ingb <= TRAVELDIRECTION_FACE_Z_N; ++ingb) {
         unsigned int ngb = subgrid.get_neighbour(ingb);
         if (ngb != NEIGHBOUR_OUTSIDE) {
           // try to find the neighbour in the neighbour list for igrid
@@ -2129,7 +2130,7 @@ int main(int argc, char **argv) {
   for (unsigned int igrid = 0; igrid < gridvec.size(); ++igrid) {
     if (costs.get_process(igrid) == MPI_rank) {
       DensitySubGrid &this_grid = *gridvec[igrid];
-      for (int i = 0; i < 27; ++i) {
+      for (int i = 0; i < TRAVELDIRECTION_NUMBER; ++i) {
         const unsigned int ngb_index = this_grid.get_neighbour(i);
         if (ngb_index != NEIGHBOUR_OUTSIDE) {
           const unsigned int active_buffer = new_buffers.get_free_buffer();
@@ -2219,8 +2220,9 @@ int main(int argc, char **argv) {
     unsigned int num_photon_done = 0;
     bool global_run_flag = true;
     // local control variables
-    const unsigned int num_empty_target = 27 * gridvec.size();
-    unsigned int num_empty = 27 * gridvec.size();
+    const unsigned int num_empty_target =
+        TRAVELDIRECTION_NUMBER * gridvec.size();
+    unsigned int num_empty = TRAVELDIRECTION_NUMBER * gridvec.size();
     unsigned int num_active_buffers = 0;
     // global control variable
     unsigned int num_photon_done_since_last = 0;
@@ -2228,9 +2230,9 @@ int main(int argc, char **argv) {
     {
       // id of this specific thread
       const int thread_id = omp_get_thread_num();
-      PhotonBuffer local_buffers[27];
-      bool local_buffer_flags[27];
-      for (int i = 0; i < 27; ++i) {
+      PhotonBuffer local_buffers[TRAVELDIRECTION_NUMBER];
+      bool local_buffer_flags[TRAVELDIRECTION_NUMBER];
+      for (int i = 0; i < TRAVELDIRECTION_NUMBER; ++i) {
         local_buffers[i]._direction = output_to_input_direction(i);
         local_buffers[i]._actual_size = 0;
         local_buffer_flags[i] = true;
@@ -2624,7 +2626,7 @@ int main(int argc, char **argv) {
 
     // reset neighbours to old values before we make new copies
     for (unsigned int i = 0; i < tot_num_subgrid; ++i) {
-      for (int j = 1; j < 27; ++j) {
+      for (int j = 1; j < TRAVELDIRECTION_NUMBER; ++j) {
         if (gridvec[i]->get_neighbour(j) != NEIGHBOUR_OUTSIDE) {
           if (gridvec[i]->get_neighbour(j) >= tot_num_subgrid) {
             gridvec[i]->set_neighbour(j, originals[i - tot_num_subgrid]);
@@ -2636,7 +2638,7 @@ int main(int argc, char **argv) {
     // delete old copies
     for (unsigned int i = 0; i < originals.size(); ++i) {
       // free all associated buffers
-      for (int j = 0; j < 27; ++j) {
+      for (int j = 0; j < TRAVELDIRECTION_NUMBER; ++j) {
         if (gridvec[tot_num_subgrid + i]->get_neighbour(j) !=
             NEIGHBOUR_OUTSIDE) {
           new_buffers.free_buffer(

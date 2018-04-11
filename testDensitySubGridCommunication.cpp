@@ -72,7 +72,7 @@ int main(int argc, char **argv) {
   DensitySubGrid test_grid(box, ncell);
   RandomGenerator random_generator(42);
   test_grid._computational_cost = random_generator.get_random_integer();
-  for (unsigned int i = 0; i < 27; ++i) {
+  for (unsigned int i = 0; i < TRAVELDIRECTION_NUMBER; ++i) {
     test_grid._ngbs[i] = random_generator.get_random_integer();
     test_grid._active_buffers[i] = random_generator.get_random_integer();
   }

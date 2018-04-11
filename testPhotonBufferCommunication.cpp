@@ -73,7 +73,8 @@ int main(int argc, char **argv) {
   test_buffer._actual_size =
       random_generator.get_random_integer() % PHOTONBUFFER_SIZE;
   test_buffer._sub_grid_index = random_generator.get_random_integer();
-  test_buffer._direction = random_generator.get_random_integer() % 27;
+  test_buffer._direction =
+      random_generator.get_random_integer() % TRAVELDIRECTION_NUMBER;
   for (unsigned int i = 0; i < test_buffer._actual_size; ++i) {
     Photon &photon = test_buffer._photons[i];
     photon._position[0] = random_generator.get_uniform_random_double();
