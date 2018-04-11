@@ -73,6 +73,9 @@ public:
   /*! @brief Number of photons in the buffer. */
   unsigned int _actual_size;
 
+  /*! @brief Dependency lock. */
+  Lock _dependency;
+
   /*! @brief Actual photon buffer. */
   Photon _photons[PHOTONBUFFER_SIZE];
 

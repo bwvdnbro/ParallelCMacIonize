@@ -935,6 +935,7 @@ inline void execute_source_photon_task(
   tasks[task_index]._type = TASKTYPE_PHOTON_TRAVERSAL;
   tasks[task_index]._cell = this_central_index;
   tasks[task_index]._buffer = buffer_index;
+
   // note that this statement should be last, as the buffer might
   // be processed as soon as this statement is executed
   new_queues[central_queue[which_central_index]]->add_task(task_index);

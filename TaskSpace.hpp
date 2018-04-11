@@ -143,6 +143,16 @@ public:
    * We try to lock all the dependencies of the task. If this fails, we unlock
    * the dependencies that were already locked and return.
    *
+   * Note that to avoid ending up with a Dining Philosphers problem
+   * (https://en.wikipedia.org/wiki/Dining_philosophers_problem), we need to
+   * lock and unlock resources in a well-defined order. This means:
+   *  (a) within this method, the unlock needs to happen in reverse order from
+   *      the lock
+   *  (b) when dependencies are added to the tasks, they should be added in a
+   *      well-defined order. We impose the following order: first all subgrids
+   *      ordered by subgrid index, then all photon buffers ordered by buffer
+   *      index
+   *
    * @param index Index of a task.
    * @return True if all dependencies for the task were successfully locked.
    */
@@ -158,13 +168,16 @@ public:
     }
     if (dependency < last_dependency) {
       // lock failed, unlock all locked dependencies in reverse order
-      for (; dependency > _tasks[index]._first_dependency; --dependency) {
+      for (--dependency; dependency > _tasks[index]._first_dependency;
+           --dependency) {
         _dependencies[dependency]->unlock();
       }
       // unlock the last dependency (we cannot use our exit condition for the
       // last dependency, since dependency is unsigned, which would give
       // problems for first_dependency = 0)
-      _dependencies[dependency]->unlock();
+      if (dependency == _tasks[index]._first_dependency) {
+        _dependencies[dependency]->unlock();
+      }
       return false;
     } else {
       return true;
@@ -173,6 +186,9 @@ public:
 
   /**
    * @brief Unlock all dependencies of the given task
+   *
+   * In this case, we do not care about the unlock order, since we will not try
+   * to lock this same task again.
    *
    * @param index Index of a task that was previously locked.
    */

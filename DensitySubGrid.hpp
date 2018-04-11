@@ -436,6 +436,9 @@ public:
    */
   int _number_of_cells[4];
 
+  /*! @brief Dependency lock. */
+  Lock _dependency;
+
   /*! @brief Number density for each cell (in m^-3). */
   double *_number_density;
 
