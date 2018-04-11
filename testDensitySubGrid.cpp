@@ -113,6 +113,8 @@ int MPI_rank, MPI_size;
 #include <sys/resource.h>
 #include <vector>
 
+volatile unsigned long ngbcount[TRAVELDIRECTION_NUMBER];
+
 /**
  * @brief Write a file with the start and end times of all tasks.
  *
@@ -490,6 +492,8 @@ inline static void do_photon_traversal(PhotonBuffer &input_buffer,
 
     // check that the photon ended up in a valid output buffer
     myassert(result >= 0 && result < TRAVELDIRECTION_NUMBER, "fail");
+
+    atomic_pre_increment(ngbcount[result]);
 
     // add the photon to an output buffer, if it still exists (if the
     // corresponding output buffer does not exist, this means the photon left
@@ -1611,6 +1615,11 @@ int main(int argc, char **argv) {
   Timer program_timer;
   program_timer.start();
 
+  // initialize ngbcount
+  for (int i = 0; i < TRAVELDIRECTION_NUMBER; ++i) {
+    ngbcount[i] = 0;
+  }
+
   //////////////////////////////////////////////////////////////////////////////
   /// Initialization
   //////////////////////////////////////////////////////////////////////////////
@@ -1788,6 +1797,11 @@ int main(int argc, char **argv) {
               for (int nix = -1; nix < 2; ++nix) {
                 for (int niy = -1; niy < 2; ++niy) {
                   for (int niz = -1; niz < 2; ++niz) {
+                    // skip diagonals
+                    if ((nix != 0 && niy != 0) || (nix != 0 && niz != 0) ||
+                        (niy != 0 && niz != 0)) {
+                      continue;
+                    }
                     // get neighbour corrected indices
                     const int cix = ix + nix;
                     const int ciy = iy + niy;
@@ -2753,6 +2767,11 @@ int main(int argc, char **argv) {
   // finally: stop timing and output the result
   program_timer.stop();
   logmessage("Total program time: " << program_timer.value() << " s.", 0);
+
+  // output ngbcount
+  for (int i = 0; i < TRAVELDIRECTION_NUMBER; ++i) {
+    logmessage("ngbcount[" << i << "] = " << ngbcount[i], 0);
+  }
 
   return MPI_exit_code;
 }

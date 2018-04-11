@@ -88,13 +88,33 @@
  */
 enum TravelDirection {
   TRAVELDIRECTION_INSIDE = 0,
-  TRAVELDIRECTION_FACE_X_P, // 1
-  TRAVELDIRECTION_FACE_X_N, // 2
-  TRAVELDIRECTION_FACE_Y_P, // 3
-  TRAVELDIRECTION_FACE_Y_N, // 4
-  TRAVELDIRECTION_FACE_Z_P, // 5
-  TRAVELDIRECTION_FACE_Z_N, // 6
-  TRAVELDIRECTION_NUMBER    // 7
+  TRAVELDIRECTION_CORNER_PPP,
+  TRAVELDIRECTION_CORNER_PPN,
+  TRAVELDIRECTION_CORNER_PNP,
+  TRAVELDIRECTION_CORNER_PNN,
+  TRAVELDIRECTION_CORNER_NPP,
+  TRAVELDIRECTION_CORNER_NPN,
+  TRAVELDIRECTION_CORNER_NNP,
+  TRAVELDIRECTION_CORNER_NNN,
+  TRAVELDIRECTION_EDGE_X_PP,
+  TRAVELDIRECTION_EDGE_X_PN,
+  TRAVELDIRECTION_EDGE_X_NP,
+  TRAVELDIRECTION_EDGE_X_NN,
+  TRAVELDIRECTION_EDGE_Y_PP,
+  TRAVELDIRECTION_EDGE_Y_PN,
+  TRAVELDIRECTION_EDGE_Y_NP,
+  TRAVELDIRECTION_EDGE_Y_NN,
+  TRAVELDIRECTION_EDGE_Z_PP,
+  TRAVELDIRECTION_EDGE_Z_PN,
+  TRAVELDIRECTION_EDGE_Z_NP,
+  TRAVELDIRECTION_EDGE_Z_NN,
+  TRAVELDIRECTION_FACE_X_P,
+  TRAVELDIRECTION_FACE_X_N,
+  TRAVELDIRECTION_FACE_Y_P,
+  TRAVELDIRECTION_FACE_Y_N,
+  TRAVELDIRECTION_FACE_Z_P,
+  TRAVELDIRECTION_FACE_Z_N,
+  TRAVELDIRECTION_NUMBER
 };
 
 /**
@@ -111,6 +131,46 @@ inline static int output_to_input_direction(const int output_direction) {
   switch (output_direction) {
   case TRAVELDIRECTION_INSIDE:
     return TRAVELDIRECTION_INSIDE;
+  case TRAVELDIRECTION_CORNER_PPP:
+    return TRAVELDIRECTION_CORNER_NNN;
+  case TRAVELDIRECTION_CORNER_PPN:
+    return TRAVELDIRECTION_CORNER_NNP;
+  case TRAVELDIRECTION_CORNER_PNP:
+    return TRAVELDIRECTION_CORNER_NPN;
+  case TRAVELDIRECTION_CORNER_PNN:
+    return TRAVELDIRECTION_CORNER_NPP;
+  case TRAVELDIRECTION_CORNER_NPP:
+    return TRAVELDIRECTION_CORNER_PNN;
+  case TRAVELDIRECTION_CORNER_NPN:
+    return TRAVELDIRECTION_CORNER_PNP;
+  case TRAVELDIRECTION_CORNER_NNP:
+    return TRAVELDIRECTION_CORNER_PPN;
+  case TRAVELDIRECTION_CORNER_NNN:
+    return TRAVELDIRECTION_CORNER_PPP;
+  case TRAVELDIRECTION_EDGE_X_PP:
+    return TRAVELDIRECTION_EDGE_X_NN;
+  case TRAVELDIRECTION_EDGE_X_PN:
+    return TRAVELDIRECTION_EDGE_X_NP;
+  case TRAVELDIRECTION_EDGE_X_NP:
+    return TRAVELDIRECTION_EDGE_X_PN;
+  case TRAVELDIRECTION_EDGE_X_NN:
+    return TRAVELDIRECTION_EDGE_X_PP;
+  case TRAVELDIRECTION_EDGE_Y_PP:
+    return TRAVELDIRECTION_EDGE_Y_NN;
+  case TRAVELDIRECTION_EDGE_Y_PN:
+    return TRAVELDIRECTION_EDGE_Y_NP;
+  case TRAVELDIRECTION_EDGE_Y_NP:
+    return TRAVELDIRECTION_EDGE_Y_PN;
+  case TRAVELDIRECTION_EDGE_Y_NN:
+    return TRAVELDIRECTION_EDGE_Y_PP;
+  case TRAVELDIRECTION_EDGE_Z_PP:
+    return TRAVELDIRECTION_EDGE_Z_NN;
+  case TRAVELDIRECTION_EDGE_Z_PN:
+    return TRAVELDIRECTION_EDGE_Z_NP;
+  case TRAVELDIRECTION_EDGE_Z_NP:
+    return TRAVELDIRECTION_EDGE_Z_PN;
+  case TRAVELDIRECTION_EDGE_Z_NN:
+    return TRAVELDIRECTION_EDGE_Z_PP;
   case TRAVELDIRECTION_FACE_X_P:
     return TRAVELDIRECTION_FACE_X_N;
   case TRAVELDIRECTION_FACE_X_N:
@@ -144,6 +204,46 @@ inline bool is_compatible_output_direction(const double *direction,
   switch (output_direction) {
   case TRAVELDIRECTION_INSIDE:
     return true;
+  case TRAVELDIRECTION_CORNER_PPP:
+    return direction[0] > 0. && direction[1] > 0. && direction[2] > 0.;
+  case TRAVELDIRECTION_CORNER_PPN:
+    return direction[0] > 0. && direction[1] > 0. && direction[2] < 0.;
+  case TRAVELDIRECTION_CORNER_PNP:
+    return direction[0] > 0. && direction[1] < 0. && direction[2] > 0.;
+  case TRAVELDIRECTION_CORNER_PNN:
+    return direction[0] > 0. && direction[1] < 0. && direction[2] < 0.;
+  case TRAVELDIRECTION_CORNER_NPP:
+    return direction[0] < 0. && direction[1] > 0. && direction[2] > 0.;
+  case TRAVELDIRECTION_CORNER_NPN:
+    return direction[0] < 0. && direction[1] > 0. && direction[2] < 0.;
+  case TRAVELDIRECTION_CORNER_NNP:
+    return direction[0] < 0. && direction[1] < 0. && direction[2] > 0.;
+  case TRAVELDIRECTION_CORNER_NNN:
+    return direction[0] < 0. && direction[1] < 0. && direction[2] < 0.;
+  case TRAVELDIRECTION_EDGE_X_PP:
+    return direction[1] > 0. && direction[2] > 0.;
+  case TRAVELDIRECTION_EDGE_X_PN:
+    return direction[1] > 0. && direction[2] < 0.;
+  case TRAVELDIRECTION_EDGE_X_NP:
+    return direction[1] < 0. && direction[2] > 0.;
+  case TRAVELDIRECTION_EDGE_X_NN:
+    return direction[1] < 0. && direction[2] < 0.;
+  case TRAVELDIRECTION_EDGE_Y_PP:
+    return direction[0] > 0. && direction[2] > 0.;
+  case TRAVELDIRECTION_EDGE_Y_PN:
+    return direction[0] > 0. && direction[2] < 0.;
+  case TRAVELDIRECTION_EDGE_Y_NP:
+    return direction[0] < 0. && direction[2] > 0.;
+  case TRAVELDIRECTION_EDGE_Y_NN:
+    return direction[0] < 0. && direction[2] < 0.;
+  case TRAVELDIRECTION_EDGE_Z_PP:
+    return direction[0] > 0. && direction[1] > 0.;
+  case TRAVELDIRECTION_EDGE_Z_PN:
+    return direction[0] > 0. && direction[1] < 0.;
+  case TRAVELDIRECTION_EDGE_Z_NP:
+    return direction[0] < 0. && direction[1] > 0.;
+  case TRAVELDIRECTION_EDGE_Z_NN:
+    return direction[0] < 0. && direction[1] < 0.;
   case TRAVELDIRECTION_FACE_X_P:
     return direction[0] > 0.;
   case TRAVELDIRECTION_FACE_X_N:
@@ -177,6 +277,46 @@ inline bool is_compatible_input_direction(const double *direction,
   switch (input_direction) {
   case TRAVELDIRECTION_INSIDE:
     return true;
+  case TRAVELDIRECTION_CORNER_NNN:
+    return direction[0] > 0. && direction[1] > 0. && direction[2] > 0.;
+  case TRAVELDIRECTION_CORNER_NNP:
+    return direction[0] > 0. && direction[1] > 0. && direction[2] < 0.;
+  case TRAVELDIRECTION_CORNER_NPN:
+    return direction[0] > 0. && direction[1] < 0. && direction[2] > 0.;
+  case TRAVELDIRECTION_CORNER_NPP:
+    return direction[0] > 0. && direction[1] < 0. && direction[2] < 0.;
+  case TRAVELDIRECTION_CORNER_PNN:
+    return direction[0] < 0. && direction[1] > 0. && direction[2] > 0.;
+  case TRAVELDIRECTION_CORNER_PNP:
+    return direction[0] < 0. && direction[1] > 0. && direction[2] < 0.;
+  case TRAVELDIRECTION_CORNER_PPN:
+    return direction[0] < 0. && direction[1] < 0. && direction[2] > 0.;
+  case TRAVELDIRECTION_CORNER_PPP:
+    return direction[0] < 0. && direction[1] < 0. && direction[2] < 0.;
+  case TRAVELDIRECTION_EDGE_X_NN:
+    return direction[1] > 0. && direction[2] > 0.;
+  case TRAVELDIRECTION_EDGE_X_NP:
+    return direction[1] > 0. && direction[2] < 0.;
+  case TRAVELDIRECTION_EDGE_X_PN:
+    return direction[1] < 0. && direction[2] > 0.;
+  case TRAVELDIRECTION_EDGE_X_PP:
+    return direction[1] < 0. && direction[2] < 0.;
+  case TRAVELDIRECTION_EDGE_Y_NN:
+    return direction[0] > 0. && direction[2] > 0.;
+  case TRAVELDIRECTION_EDGE_Y_NP:
+    return direction[0] > 0. && direction[2] < 0.;
+  case TRAVELDIRECTION_EDGE_Y_PN:
+    return direction[0] < 0. && direction[2] > 0.;
+  case TRAVELDIRECTION_EDGE_Y_PP:
+    return direction[0] < 0. && direction[2] < 0.;
+  case TRAVELDIRECTION_EDGE_Z_NN:
+    return direction[0] > 0. && direction[1] > 0.;
+  case TRAVELDIRECTION_EDGE_Z_NP:
+    return direction[0] > 0. && direction[1] < 0.;
+  case TRAVELDIRECTION_EDGE_Z_PN:
+    return direction[0] < 0. && direction[1] > 0.;
+  case TRAVELDIRECTION_EDGE_Z_PP:
+    return direction[0] < 0. && direction[1] < 0.;
   case TRAVELDIRECTION_FACE_X_N:
     return direction[0] > 0.;
   case TRAVELDIRECTION_FACE_X_P:
@@ -348,7 +488,6 @@ public:
    * position.
    */
   inline int get_x_index(const double x, const int direction) const {
-
     // we need to distinguish between cases where
     //  - we need to compute the x index (position is inside or on an edge/face
     //    that does not have a fixed x value: EDGE_X and FACE_Y/Z)
@@ -359,17 +498,36 @@ public:
     //    coordinate, or in a not X edge with P x coordinate, or on the P
     //    FACE_X)
     if (direction == TRAVELDIRECTION_INSIDE ||
+        direction == TRAVELDIRECTION_EDGE_X_PP ||
+        direction == TRAVELDIRECTION_EDGE_X_PN ||
+        direction == TRAVELDIRECTION_EDGE_X_NP ||
+        direction == TRAVELDIRECTION_EDGE_X_NN ||
         direction == TRAVELDIRECTION_FACE_Y_P ||
         direction == TRAVELDIRECTION_FACE_Y_N ||
         direction == TRAVELDIRECTION_FACE_Z_P ||
         direction == TRAVELDIRECTION_FACE_Z_N) {
       // need to compute the index
-      const int index = x * _inv_cell_size[0];
-      return std::max(0, std::min(index, _number_of_cells[0] - 1));
-    } else if (direction == TRAVELDIRECTION_FACE_X_N) {
+      return x * _inv_cell_size[0];
+    } else if (direction == TRAVELDIRECTION_CORNER_NPP ||
+               direction == TRAVELDIRECTION_CORNER_NPN ||
+               direction == TRAVELDIRECTION_CORNER_NNP ||
+               direction == TRAVELDIRECTION_CORNER_NNN ||
+               direction == TRAVELDIRECTION_EDGE_Y_NP ||
+               direction == TRAVELDIRECTION_EDGE_Y_NN ||
+               direction == TRAVELDIRECTION_EDGE_Z_NP ||
+               direction == TRAVELDIRECTION_EDGE_Z_NN ||
+               direction == TRAVELDIRECTION_FACE_X_N) {
       // index is lower limit of box
       return 0;
-    } else if (direction == TRAVELDIRECTION_FACE_X_P) {
+    } else if (direction == TRAVELDIRECTION_CORNER_PPP ||
+               direction == TRAVELDIRECTION_CORNER_PPN ||
+               direction == TRAVELDIRECTION_CORNER_PNP ||
+               direction == TRAVELDIRECTION_CORNER_PNN ||
+               direction == TRAVELDIRECTION_EDGE_Y_PP ||
+               direction == TRAVELDIRECTION_EDGE_Y_PN ||
+               direction == TRAVELDIRECTION_EDGE_Z_PP ||
+               direction == TRAVELDIRECTION_EDGE_Z_PN ||
+               direction == TRAVELDIRECTION_FACE_X_P) {
       // index is upper limit of box
       return _number_of_cells[0] - 1;
     } else {
@@ -389,7 +547,6 @@ public:
    * position.
    */
   inline int get_y_index(const double y, const int direction) const {
-
     // we need to distinguish between cases where
     //  - we need to compute the y index (position is inside or on an edge/face
     //    that does not have a fixed y value: EDGE_Y and FACE_X/Z)
@@ -401,17 +558,36 @@ public:
     //    coordinate, or in a not Y edge with P y coordinate, or on the P
     //    FACE_Y)
     if (direction == TRAVELDIRECTION_INSIDE ||
+        direction == TRAVELDIRECTION_EDGE_Y_PP ||
+        direction == TRAVELDIRECTION_EDGE_Y_PN ||
+        direction == TRAVELDIRECTION_EDGE_Y_NP ||
+        direction == TRAVELDIRECTION_EDGE_Y_NN ||
         direction == TRAVELDIRECTION_FACE_X_P ||
         direction == TRAVELDIRECTION_FACE_X_N ||
         direction == TRAVELDIRECTION_FACE_Z_P ||
         direction == TRAVELDIRECTION_FACE_Z_N) {
       // need to compute the index
-      const int index = y * _inv_cell_size[1];
-      return std::max(0, std::min(index, _number_of_cells[1] - 1));
-    } else if (direction == TRAVELDIRECTION_FACE_Y_N) {
+      return y * _inv_cell_size[1];
+    } else if (direction == TRAVELDIRECTION_CORNER_PNP ||
+               direction == TRAVELDIRECTION_CORNER_PNN ||
+               direction == TRAVELDIRECTION_CORNER_NNP ||
+               direction == TRAVELDIRECTION_CORNER_NNN ||
+               direction == TRAVELDIRECTION_EDGE_X_NP ||
+               direction == TRAVELDIRECTION_EDGE_X_NN ||
+               direction == TRAVELDIRECTION_EDGE_Z_PN ||
+               direction == TRAVELDIRECTION_EDGE_Z_NN ||
+               direction == TRAVELDIRECTION_FACE_Y_N) {
       // index is lower limit of box
       return 0;
-    } else if (direction == TRAVELDIRECTION_FACE_Y_P) {
+    } else if (direction == TRAVELDIRECTION_CORNER_PPP ||
+               direction == TRAVELDIRECTION_CORNER_PPN ||
+               direction == TRAVELDIRECTION_CORNER_NPP ||
+               direction == TRAVELDIRECTION_CORNER_NPN ||
+               direction == TRAVELDIRECTION_EDGE_X_PP ||
+               direction == TRAVELDIRECTION_EDGE_X_PN ||
+               direction == TRAVELDIRECTION_EDGE_Z_PP ||
+               direction == TRAVELDIRECTION_EDGE_Z_NP ||
+               direction == TRAVELDIRECTION_FACE_Y_P) {
       // index is upper limit of box
       return _number_of_cells[1] - 1;
     } else {
@@ -431,7 +607,6 @@ public:
    * position.
    */
   inline int get_z_index(const double z, const int direction) const {
-
     // we need to distinguish between cases where
     //  - we need to compute the z index (position is inside or on an edge/face
     //    that does not have a fixed z value: EDGE_Z and FACE_X/Y)
@@ -442,17 +617,36 @@ public:
     //    coordinate, or in a not Z edge with P z coordinate, or on the P
     //    FACE_Z)
     if (direction == TRAVELDIRECTION_INSIDE ||
+        direction == TRAVELDIRECTION_EDGE_Z_PP ||
+        direction == TRAVELDIRECTION_EDGE_Z_PN ||
+        direction == TRAVELDIRECTION_EDGE_Z_NP ||
+        direction == TRAVELDIRECTION_EDGE_Z_NN ||
         direction == TRAVELDIRECTION_FACE_X_P ||
         direction == TRAVELDIRECTION_FACE_X_N ||
         direction == TRAVELDIRECTION_FACE_Y_P ||
         direction == TRAVELDIRECTION_FACE_Y_N) {
       // need to compute the index
-      const int index = z * _inv_cell_size[2];
-      return std::max(0, std::min(index, _number_of_cells[2] - 1));
-    } else if (direction == TRAVELDIRECTION_FACE_Z_N) {
+      return z * _inv_cell_size[2];
+    } else if (direction == TRAVELDIRECTION_CORNER_PPN ||
+               direction == TRAVELDIRECTION_CORNER_PNN ||
+               direction == TRAVELDIRECTION_CORNER_NPN ||
+               direction == TRAVELDIRECTION_CORNER_NNN ||
+               direction == TRAVELDIRECTION_EDGE_X_PN ||
+               direction == TRAVELDIRECTION_EDGE_X_NN ||
+               direction == TRAVELDIRECTION_EDGE_Y_PN ||
+               direction == TRAVELDIRECTION_EDGE_Y_NN ||
+               direction == TRAVELDIRECTION_FACE_Z_N) {
       // index is lower limit of box
       return 0;
-    } else if (direction == TRAVELDIRECTION_FACE_Z_P) {
+    } else if (direction == TRAVELDIRECTION_CORNER_PPP ||
+               direction == TRAVELDIRECTION_CORNER_PNP ||
+               direction == TRAVELDIRECTION_CORNER_NPP ||
+               direction == TRAVELDIRECTION_CORNER_NNP ||
+               direction == TRAVELDIRECTION_EDGE_X_PP ||
+               direction == TRAVELDIRECTION_EDGE_X_NP ||
+               direction == TRAVELDIRECTION_EDGE_Y_PP ||
+               direction == TRAVELDIRECTION_EDGE_Y_NP ||
+               direction == TRAVELDIRECTION_FACE_Z_P) {
       // index is upper limit of box
       return _number_of_cells[2] - 1;
     } else {
@@ -503,16 +697,16 @@ public:
                             << " " << position[1] << " " << position[2]
                             << "\nthree_index[2]: " << three_index[2]);
 
-    //    myassert(is_inside(three_index),
-    //             "position: " << position[0] + _anchor[0] << " "
-    //                          << position[1] + _anchor[1] << " "
-    //                          << position[2] + _anchor[2] << "\nbox:\t"
-    //                          << _anchor[0] << " " << _anchor[1] << " "
-    //                          << _anchor[2] << "\n\t"
-    //                          << _cell_size[0] * _number_of_cells[0] << " "
-    //                          << _cell_size[1] * _number_of_cells[1] << " "
-    //                          << _cell_size[2] * _number_of_cells[2]
-    //                          << "\ndirection: " << input_direction);
+    myassert(is_inside(three_index),
+             "position: " << position[0] + _anchor[0] << " "
+                          << position[1] + _anchor[1] << " "
+                          << position[2] + _anchor[2] << "\nbox:\t"
+                          << _anchor[0] << " " << _anchor[1] << " "
+                          << _anchor[2] << "\n\t"
+                          << _cell_size[0] * _number_of_cells[0] << " "
+                          << _cell_size[1] * _number_of_cells[1] << " "
+                          << _cell_size[2] * _number_of_cells[2]
+                          << "\ndirection: " << input_direction);
 
     return get_one_index(three_index);
   }
@@ -530,23 +724,6 @@ public:
    * @return Outgoing direction corresponding to that 3 index.
    */
   inline int get_output_direction(const int *three_index) const {
-
-    if (three_index[0] < 0) {
-      return TRAVELDIRECTION_FACE_X_N;
-    } else if (three_index[0] >= _number_of_cells[0]) {
-      return TRAVELDIRECTION_FACE_X_P;
-    } else if (three_index[1] < 0) {
-      return TRAVELDIRECTION_FACE_Y_N;
-    } else if (three_index[1] >= _number_of_cells[1]) {
-      return TRAVELDIRECTION_FACE_Y_P;
-    } else if (three_index[2] < 0) {
-      return TRAVELDIRECTION_FACE_Z_N;
-    } else if (three_index[2] >= _number_of_cells[2]) {
-      return TRAVELDIRECTION_FACE_Z_P;
-    } else {
-      return TRAVELDIRECTION_INSIDE;
-    }
-
     // this is hopefully compiled into a bitwise operation rather than an
     // actual condition
     const bool x_low = three_index[0] < 0;
@@ -585,6 +762,66 @@ public:
     case 32:
       // 10 00 00: through upper x face
       return TRAVELDIRECTION_FACE_X_P;
+    case 5:
+      // 00 01 01: through edge with low y and z
+      return TRAVELDIRECTION_EDGE_X_NN;
+    case 6:
+      // 00 01 10: through edge with low y and high z
+      return TRAVELDIRECTION_EDGE_X_NP;
+    case 9:
+      // 00 10 01: through edge with high y and low z
+      return TRAVELDIRECTION_EDGE_X_PN;
+    case 10:
+      // 00 10 10: through edge with high y and z
+      return TRAVELDIRECTION_EDGE_X_PP;
+    case 17:
+      // 01 00 01: through edge with low x and z
+      return TRAVELDIRECTION_EDGE_Y_NN;
+    case 18:
+      // 01 00 10: through edge with low x and high z
+      return TRAVELDIRECTION_EDGE_Y_NP;
+    case 33:
+      // 10 00 01: through edge with high x and low z
+      return TRAVELDIRECTION_EDGE_Y_PN;
+    case 34:
+      // 10 00 10: through edge with high x and z
+      return TRAVELDIRECTION_EDGE_Y_PP;
+    case 20:
+      // 01 01 00: through edge with low x and y
+      return TRAVELDIRECTION_EDGE_Z_NN;
+    case 24:
+      // 01 10 00: through edge with low x and high y
+      return TRAVELDIRECTION_EDGE_Z_NP;
+    case 36:
+      // 10 01 00: through edge with high x and low y
+      return TRAVELDIRECTION_EDGE_Z_PN;
+    case 40:
+      // 10 10 00: through edge with high x and y
+      return TRAVELDIRECTION_EDGE_Z_PP;
+    case 21:
+      // 01 01 01: through corner with low x, y and z
+      return TRAVELDIRECTION_CORNER_NNN;
+    case 22:
+      // 01 01 10: through corner with low x and y, and high z
+      return TRAVELDIRECTION_CORNER_NNP;
+    case 25:
+      // 01 10 01: through corner with low x, high y and low z
+      return TRAVELDIRECTION_CORNER_NPN;
+    case 26:
+      // 01 10 10: through corner with low x and high y and z
+      return TRAVELDIRECTION_CORNER_NPP;
+    case 37:
+      // 10 01 01: through corner with high x and low y and z
+      return TRAVELDIRECTION_CORNER_PNN;
+    case 38:
+      // 10 01 10: through corner with high x, low y and high z
+      return TRAVELDIRECTION_CORNER_PNP;
+    case 41:
+      // 10 10 01: through corner with high x and y, and low z
+      return TRAVELDIRECTION_CORNER_PPN;
+    case 42:
+      // 10 10 10: through corner with high x, y and z
+      return TRAVELDIRECTION_CORNER_PPP;
     default:
       // something went wrong: multiple incompatible conditions flags at the
       // same time
@@ -642,7 +879,6 @@ public:
         _number_of_cells{
             original._number_of_cells[0], original._number_of_cells[1],
             original._number_of_cells[2], original._number_of_cells[3]} {
-
     const int tot_ncell = _number_of_cells[3] * _number_of_cells[0];
     _number_density = new double[tot_ncell];
     _neutral_fraction = new double[tot_ncell];
@@ -909,11 +1145,10 @@ public:
     int three_index[3];
     int active_cell = get_start_index(position, input_direction, three_index);
 
-    //    myassert(active_cell >= 0 &&
-    //                 active_cell < _number_of_cells[0] * _number_of_cells[3],
-    //             "active_cell: " << active_cell << ", size: "
-    //                             << _number_of_cells[0] *
-    //                             _number_of_cells[3]);
+    myassert(active_cell >= 0 &&
+                 active_cell < _number_of_cells[0] * _number_of_cells[3],
+             "active_cell: " << active_cell << ", size: "
+                             << _number_of_cells[0] * _number_of_cells[3]);
 
     // enter photon traversal loop
     // double condition:
@@ -1018,12 +1253,7 @@ public:
     }
 
     myassert(is_compatible_output_direction(direction, output_direction),
-             "wrong output direction (direction: "
-                 << direction[0] << "," << direction[1] << "," << direction[2]
-                 << ", output_direction: " << output_direction
-                 << ", three_index: " << three_index[0] << "," << three_index[1]
-                 << "," << three_index[2]
-                 << ", input_direction: " << input_direction << ")!");
+             "wrong output direction!");
 
     return output_direction;
   }
