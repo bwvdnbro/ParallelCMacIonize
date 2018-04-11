@@ -71,6 +71,12 @@ public:
   /*! @brief Index of the associated input photon buffer (if any). */
   size_t _buffer;
 
+  /*! @brief Index of the first dependency of the task. */
+  size_t _first_dependency;
+
+  /*! @brief Number of dependencies of the task. */
+  size_t _number_of_dependencies;
+
 #ifdef TASK_PLOT
   /*! @brief Rank of the thread that executed the task. */
   int _thread_id;

@@ -98,6 +98,7 @@ int MPI_rank, MPI_size;
 #include "PhotonBuffer.hpp"
 #include "RandomGenerator.hpp"
 #include "Task.hpp"
+#include "TaskSpace.hpp"
 #include "Timer.hpp"
 #include "Utilities.hpp"
 #include "YAMLDictionary.hpp"
@@ -118,8 +119,7 @@ int MPI_rank, MPI_size;
  * @param iloop Iteration number (added to file name).
  * @param tasks Tasks to print.
  */
-inline void output_tasks(const unsigned int iloop,
-                         const ThreadSafeVector< Task > &tasks) {
+inline void output_tasks(const unsigned int iloop, const TaskSpace &tasks) {
 #ifdef TASK_OUTPUT
   // compose the file name
   std::stringstream filename;
@@ -898,7 +898,7 @@ inline void set_number_of_threads(int num_threads_request, int &num_threads) {
  */
 inline void execute_source_photon_task(
     Task &task, const int thread_id, unsigned int &num_photon_sourced,
-    const unsigned int num_photon_local, ThreadSafeVector< Task > &tasks,
+    const unsigned int num_photon_local, TaskSpace &tasks,
     std::vector< NewQueue * > &new_queues, MemorySpace &new_buffers,
     RandomGenerator &random_generator,
     const std::vector< unsigned int > &central_index,
@@ -931,8 +931,7 @@ inline void execute_source_photon_task(
               this_central_index);
 
   // add to the queue of the corresponding thread
-  const size_t task_index = tasks.get_free_element_safe();
-  myassert(task_index < tasks.max_size(), "Task buffer overflow!");
+  const size_t task_index = tasks.get_free_task(28);
   tasks[task_index]._type = TASKTYPE_PHOTON_TRAVERSAL;
   tasks[task_index]._cell = this_central_index;
   tasks[task_index]._buffer = buffer_index;
@@ -967,7 +966,7 @@ inline void execute_source_photon_task(
  * @param num_active_buffers Number of active photon buffers on this process.
  */
 inline void execute_photon_traversal_task(
-    Task &task, const int thread_id, ThreadSafeVector< Task > &tasks,
+    Task &task, const int thread_id, TaskSpace &tasks,
     std::vector< NewQueue * > &new_queues, NewQueue &general_queue,
     MemorySpace &new_buffers, std::vector< DensitySubGrid * > &gridvec,
     PhotonBuffer *local_buffers, bool *local_buffer_flags,
@@ -1050,8 +1049,7 @@ inline void execute_photon_traversal_task(
         atomic_pre_increment(num_active_buffers);
 
         // YES: create a task for the buffer and add it to the queue
-        const size_t task_index = tasks.get_free_element_safe();
-        myassert(task_index < tasks.max_size(), "Task buffer overflow!");
+        const size_t task_index = tasks.get_free_task(28);
         tasks[task_index]._cell = new_buffers[new_index]._sub_grid_index;
         tasks[task_index]._buffer = new_index;
         // the task type depends on the buffer: photon packets in the
@@ -1130,7 +1128,7 @@ inline void execute_photon_traversal_task(
  * finished.
  */
 inline void execute_photon_reemit_task(
-    Task &task, const int thread_id, ThreadSafeVector< Task > &tasks,
+    Task &task, const int thread_id, TaskSpace &tasks,
     std::vector< NewQueue * > &new_queues, MemorySpace &new_buffers,
     RandomGenerator &random_generator, const double reemission_probability,
     CostVector &costs, unsigned int &num_photon_done) {
@@ -1156,8 +1154,7 @@ inline void execute_photon_reemit_task(
 
   // the reemitted photon packets are ready to be propagated: create
   // a new propagation task
-  const size_t task_index = tasks.get_free_element_safe();
-  myassert(task_index < tasks.max_size(), "Task buffer overflow!");
+  const size_t task_index = tasks.get_free_task(28);
   tasks[task_index]._type = TASKTYPE_PHOTON_TRAVERSAL;
   tasks[task_index]._cell = task._cell;
   tasks[task_index]._buffer = current_buffer_index;
@@ -1275,20 +1272,21 @@ inline void execute_send_task(Task &task, const int thread_id,
  * @param num_empty Number of empty buffers on this process.
  * @param num_active_buffers Number of active photon buffers on this process.
  */
-inline void execute_task(
-    Task &task, const int thread_id, unsigned int &num_photon_sourced,
-    const unsigned int num_photon_local, ThreadSafeVector< Task > &tasks,
-    std::vector< NewQueue * > &new_queues, NewQueue &general_queue,
-    MemorySpace &new_buffers, RandomGenerator &random_generator,
-    const std::vector< unsigned int > &central_index,
-    std::vector< DensitySubGrid * > &gridvec,
-    const std::vector< int > &central_queue, PhotonBuffer *local_buffers,
-    bool *local_buffer_flags, const double reemission_probability,
-    CostVector &costs, unsigned int &num_photon_done, Lock &MPI_lock,
-    unsigned int &MPI_last_request,
-    std::vector< MPI_Request > &MPI_buffer_requests, char *MPI_buffer,
-    std::vector< MPIMessage > &message_log, size_t &message_log_size,
-    unsigned int &num_empty, unsigned int &num_active_buffers) {
+inline void
+execute_task(Task &task, const int thread_id, unsigned int &num_photon_sourced,
+             const unsigned int num_photon_local, TaskSpace &tasks,
+             std::vector< NewQueue * > &new_queues, NewQueue &general_queue,
+             MemorySpace &new_buffers, RandomGenerator &random_generator,
+             const std::vector< unsigned int > &central_index,
+             std::vector< DensitySubGrid * > &gridvec,
+             const std::vector< int > &central_queue,
+             PhotonBuffer *local_buffers, bool *local_buffer_flags,
+             const double reemission_probability, CostVector &costs,
+             unsigned int &num_photon_done, Lock &MPI_lock,
+             unsigned int &MPI_last_request,
+             std::vector< MPI_Request > &MPI_buffer_requests, char *MPI_buffer,
+             std::vector< MPIMessage > &message_log, size_t &message_log_size,
+             unsigned int &num_empty, unsigned int &num_active_buffers) {
 
   myassert(task._end_time == 0, "Task already executed!");
 
@@ -1356,7 +1354,7 @@ inline void execute_task(
  * @param num_active_buffers Number of active photon buffers on this process.
  */
 inline void activate_buffer(unsigned int &current_index, const int thread_id,
-                            ThreadSafeVector< Task > &tasks,
+                            TaskSpace &tasks,
                             std::vector< NewQueue * > &new_queues,
                             NewQueue &general_queue, MemorySpace &new_buffers,
                             std::vector< DensitySubGrid * > &gridvec,
@@ -1404,7 +1402,7 @@ inline void activate_buffer(unsigned int &current_index, const int thread_id,
           // feed hungry threads with food from this thread, as we do
           // not allow threads to feed themselves with food that does
           // not belong to them.
-          const size_t task_index = tasks.get_free_element();
+          const size_t task_index = tasks.get_free_task(28);
           tasks[task_index]._cell = new_buffers[non_full_index]._sub_grid_index;
           tasks[task_index]._buffer = non_full_index;
           if (j > 0) {
@@ -1480,8 +1478,8 @@ check_for_finished_sends(std::vector< MPI_Request > &MPI_buffer_requests) {
  */
 inline void check_for_incoming_communications(
     std::vector< MPIMessage > &message_log, size_t &message_log_size,
-    MemorySpace &new_buffers, CostVector &costs,
-    ThreadSafeVector< Task > &tasks, std::vector< NewQueue * > &new_queues,
+    MemorySpace &new_buffers, CostVector &costs, TaskSpace &tasks,
+    std::vector< NewQueue * > &new_queues,
     unsigned int &num_photon_done_since_last, bool &global_run_flag,
     const int thread_id, unsigned int &num_active_buffers) {
 
@@ -1501,8 +1499,7 @@ inline void check_for_incoming_communications(
     if (tag == MPIMESSAGETAG_PHOTONBUFFER) {
 
       // set up a dummy task to show receives in task plots
-      size_t task_index = tasks.get_free_element_safe();
-      myassert(task_index < tasks.max_size(), "Task buffer overflow!");
+      size_t task_index = tasks.get_free_task(0);
       Task &receive_task = tasks[task_index];
       receive_task._type = TASKTYPE_RECV;
 
@@ -1538,8 +1535,7 @@ inline void check_for_incoming_communications(
       unsigned int thread_index = costs.get_thread(subgrid_index);
 
       // add to the queue of the corresponding thread
-      task_index = tasks.get_free_element_safe();
-      myassert(task_index < tasks.max_size(), "Task buffer overflow!");
+      task_index = tasks.get_free_task(28);
       tasks[task_index]._type = TASKTYPE_PHOTON_TRAVERSAL;
       tasks[task_index]._cell = subgrid_index;
       tasks[task_index]._buffer = buffer_index;
@@ -1683,7 +1679,7 @@ int main(int argc, char **argv) {
   NewQueue general_queue(general_queue_size);
 
   // set up the task space used to store tasks
-  ThreadSafeVector< Task > tasks(number_of_tasks);
+  TaskSpace tasks(number_of_tasks, 28 * number_of_tasks);
 
   // set up the memory space used to store photon packet buffers
   MemorySpace new_buffers(memoryspace_size);
@@ -2250,8 +2246,7 @@ int main(int argc, char **argv) {
           }
 
           // create task
-          const size_t task_index = tasks.get_free_element_safe();
-          myassert(task_index < tasks.max_size(), "Task buffer overflow!");
+          const size_t task_index = tasks.get_free_task(0);
           tasks[task_index]._type = TASKTYPE_SOURCE_PHOTON;
           // store the number of photons in the _buffer field, which is not used
           // at the moment
@@ -2347,8 +2342,7 @@ int main(int argc, char **argv) {
           // communication, and an incoming communication can only be received
           // by a thread that holds the MPI lock
           if (MPI_lock.try_lock()) {
-            if (num_photon_sourced == num_photon_local &&
-                num_empty == num_empty_target && num_active_buffers == 0 &&
+            if (num_empty == num_empty_target && num_active_buffers == 0 &&
                 num_photon_done_since_last > 0) {
               if (MPI_rank == 0) {
                 num_photon_done += num_photon_done_since_last;
