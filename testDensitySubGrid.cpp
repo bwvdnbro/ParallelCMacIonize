@@ -79,6 +79,9 @@
  *  between iterations. */
 //#define DO_REBALANCING
 
+/*! @brief Enable this to set up less output buffers. */
+//#define LESS_DIRECTIONS
+
 #ifdef TASK_OUTPUT
 // activate task output in Task.hpp
 #define TASK_PLOT
@@ -1797,11 +1800,13 @@ int main(int argc, char **argv) {
               for (int nix = -1; nix < 2; ++nix) {
                 for (int niy = -1; niy < 2; ++niy) {
                   for (int niz = -1; niz < 2; ++niz) {
-                    // skip diagonals
+// skip diagonals
+#ifdef LESS_DIRECTIONS
                     if ((nix != 0 && niy != 0) || (nix != 0 && niz != 0) ||
                         (niy != 0 && niz != 0)) {
                       continue;
                     }
+#endif
                     // get neighbour corrected indices
                     const int cix = ix + nix;
                     const int ciy = iy + niy;
