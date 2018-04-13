@@ -29,6 +29,8 @@
 /*! @brief Activate this to record the start and end time of each task. */
 //#define TASK_PLOT
 
+#include "Lock.hpp"
+
 /**
  * @brief Get the CPU cycle time stamp.
  *
@@ -71,6 +73,9 @@ public:
   /*! @brief Index of the associated input photon buffer (if any). */
   size_t _buffer;
 
+  /*! @brief Dependency (if any). */
+  Lock *_dependency;
+
   /*! @brief Index of the first dependency of the task. */
   size_t _first_dependency;
 
@@ -112,9 +117,31 @@ public:
   /**
    * @brief Empty constructor.
    *
-   * Used to flag unexecuted tasks.
+   * Used to flag unexecuted tasks and initialize the dependency.
    */
-  Task() : _end_time(0) {}
+  Task() : _dependency(nullptr), _end_time(0) {}
+
+  /**
+   * @brief Try to lock the dependency (if there is one) for the task.
+   *
+   * @return True if locking succeeded, false otherwise.
+   */
+  inline bool lock_dependency() {
+    if (_dependency != nullptr) {
+      return _dependency->try_lock();
+    } else {
+      return true;
+    }
+  }
+
+  /**
+   * @brief Unlock the dependency (if there is one) for the task.
+   */
+  inline void unlock_dependency() {
+    if (_dependency != nullptr) {
+      _dependency->unlock();
+    }
+  }
 };
 
 #endif // TASK_HPP

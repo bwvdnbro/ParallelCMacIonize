@@ -31,6 +31,9 @@
 /*! @brief Uncomment this to enable run time assertions. */
 #define DO_ASSERTS
 
+// global variables, as we need them in the log macro
+int MPI_rank, MPI_size;
+
 #include "Assert.hpp"
 #include "DensitySubGrid.hpp"
 #include "Log.hpp"
@@ -49,11 +52,8 @@ int main(int argc, char **argv) {
 
   // MPI initialisation
   MPI_Init(&argc, &argv);
-  int rank_get, size_get;
-  MPI_Comm_rank(MPI_COMM_WORLD, &rank_get);
-  MPI_Comm_size(MPI_COMM_WORLD, &size_get);
-  const int MPI_rank = rank_get;
-  const int MPI_size = size_get;
+  MPI_Comm_rank(MPI_COMM_WORLD, &MPI_rank);
+  MPI_Comm_size(MPI_COMM_WORLD, &MPI_size);
 
   if (MPI_rank == 0) {
     if (MPI_size > 1) {
@@ -74,7 +74,6 @@ int main(int argc, char **argv) {
   test_grid._computational_cost = random_generator.get_random_integer();
   for (unsigned int i = 0; i < TRAVELDIRECTION_NUMBER; ++i) {
     test_grid._ngbs[i] = random_generator.get_random_integer();
-    test_grid._active_buffers[i] = random_generator.get_random_integer();
   }
   test_grid._subgrid_index = random_generator.get_random_integer();
   const int tot_ncell = ncell[0] * ncell[1] * ncell[2];

@@ -95,6 +95,8 @@ public:
    * @return Read/write reference to the element with that index.
    */
   inline _datatype_ &operator[](const size_t index) {
+    myassert(index < _size, "Element out of range (index: "
+                                << index << ", size: " << _size << ")!");
     myassert(_locks[index], "Element not in use!");
     return _vector[index];
   }
@@ -106,6 +108,8 @@ public:
    * @return Read-only reference to the element with that index.
    */
   inline const _datatype_ &operator[](const size_t index) const {
+    myassert(index < _size, "Element out of range (index: "
+                                << index << ", size: " << _size << ")!");
     myassert(_locks[index], "Element not in use!");
     return _vector[index];
   }

@@ -17,7 +17,7 @@
 ################################################################################
 
 ##
-# @file plot_intensity_profile.py
+# @file plot_neutral_fraction_profile.py
 #
 # @brief Script to plot the neutral fraction profile of the Stromgren test.
 #
@@ -37,7 +37,8 @@ import os
 # number of cells in one coordinate dimension
 # should be synced with the values used in the unit test
 # we guess based on the file size
-ncell = int(np.round((os.path.getsize("intensities.dat") / (5 * 8))**(1./3.)))
+ncell = int(np.round((
+              os.path.getsize("neutral_fractions.dat") / (5 * 8))**(1./3.)))
 # number of bins to use to bin the results
 nbin = 100
 
@@ -57,8 +58,8 @@ pc = 3.086e16 # m
 Rs /= pc
 
 # memory-map the binary output file to a numpy array
-data = np.memmap("intensities.dat", dtype = np.float64, shape = (ncell**3, 5),
-                 mode = 'r')
+data = np.memmap("neutral_fractions.dat", dtype = np.float64,
+                 shape = (ncell**3, 5), mode = 'r')
 # compute the radii
 pos = data[:, 0:3]
 r = np.sqrt(pos[:, 0]**2 + pos[:, 1]**2 + pos[:, 2]**2)

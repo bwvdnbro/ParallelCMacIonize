@@ -13,7 +13,7 @@ task_names = ["source photon", "photon traversal", "reemission", "send",
               "receive"]
 
 def plot_file(name):
-  print "Plotting tasks for", name, "..."
+  print "Reading tasks from", name, "..."
 
   data = np.loadtxt(name)
 

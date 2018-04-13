@@ -29,6 +29,8 @@
 #include "Assert.hpp"
 #include "Atomic.hpp"
 #include "Lock.hpp"
+#include "Task.hpp"
+#include "ThreadSafeVector.hpp"
 
 #define NO_TASK 0xffffffff
 
@@ -40,8 +42,8 @@ private:
   /*! @brief Queue. */
   size_t *_queue;
 
-  /*! @brief Last element in the queue. */
-  size_t _current_queue_index;
+  /*! @brief Current size of the queue. */
+  size_t _current_queue_size;
 
   /*! @brief Size of the queues. */
   const size_t _size;
@@ -55,7 +57,7 @@ public:
    *
    * @param size Size of the queue.
    */
-  inline NewQueue(const size_t size) : _current_queue_index(0), _size(size) {
+  inline NewQueue(const size_t size) : _current_queue_size(0), _size(size) {
     _queue = new size_t[size];
   }
 
@@ -71,25 +73,47 @@ public:
    */
   inline void add_task(const size_t task) {
     _queue_lock.lock();
-    _queue[_current_queue_index] = task;
-    ++_current_queue_index;
-    myassert(_current_queue_index < _size, "Too many tasks in queue!");
+    myassert(_current_queue_size < _size, "Too many tasks in queue!");
+    _queue[_current_queue_size] = task;
+    ++_current_queue_size;
     _queue_lock.unlock();
   }
 
   /**
    * @brief Get a task from the queue.
    *
+   * @param tasks Task space.
    * @return Task, or NO_TASK if no task is available.
    */
-  inline size_t get_task() {
+  inline size_t get_task(ThreadSafeVector< Task > &tasks) {
+
+    // lock the queue while we are getting a task
     _queue_lock.lock();
+
+    // initialize an empty task
     size_t task = NO_TASK;
-    if (_current_queue_index > 0) {
-      --_current_queue_index;
-      task = _queue[_current_queue_index];
+
+    // now try to find a task whose dependency can be locked
+    size_t index = _current_queue_size;
+    while (index > 0 && !tasks[_queue[index - 1]].lock_dependency()) {
+      --index;
     }
+    if (index > 0) {
+      // we found a task and locked it
+      --index;
+      --_current_queue_size;
+      task = _queue[index];
+
+      // shuffle all tasks to close the gap created by removing the task
+      for (; index < _current_queue_size; ++index) {
+        _queue[index] = _queue[index + 1];
+      }
+    }
+
+    // we're done: unlock the queue
     _queue_lock.unlock();
+
+    // return the task
     return task;
   }
 
@@ -98,7 +122,7 @@ public:
    *
    * @return Current size of the queue.
    */
-  inline const size_t size() const { return _current_queue_index; }
+  inline const size_t size() const { return _current_queue_size; }
 };
 
 #endif // NEWQUEUE_HPP

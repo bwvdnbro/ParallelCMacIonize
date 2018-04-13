@@ -340,7 +340,7 @@ inline bool is_compatible_input_direction(const double *direction,
  *  time. */
 #define DENSITYSUBGRID_FIXED_MPI_SIZE                                          \
   (sizeof(unsigned long) + 9 * sizeof(double) + 4 * sizeof(int) +              \
-   55 * sizeof(unsigned int))
+   (TRAVELDIRECTION_NUMBER + 1) * sizeof(unsigned int))
 
 /*! @brief Number of variables stored in each cell of the DensitySubGrid
  *  (excluding potential lock variables). */
@@ -377,8 +377,6 @@ inline bool is_compatible_input_direction(const double *direction,
            "Number of cells not the same!");                                   \
   for (unsigned int i = 0; i < TRAVELDIRECTION_NUMBER; ++i) {                  \
     myassert(a._ngbs[i] == b._ngbs[i], "Neighbours not the same!");            \
-    myassert(a._active_buffers[i] == b._active_buffers[i],                     \
-             "Active buffers not the same!");                                  \
   }                                                                            \
   myassert(a._subgrid_index == b._subgrid_index,                               \
            "Subgrid indices not the same!");                                   \
@@ -403,12 +401,6 @@ public:
 
   /*! @brief Indices of the active buffers. */
   unsigned int _active_buffers[TRAVELDIRECTION_NUMBER];
-
-  /*! @brief Indices that would sort the active buffers list. */
-  unsigned char _active_buffers_sort[TRAVELDIRECTION_NUMBER];
-
-  /*! @brief Number of existing neighbouring subgrids. */
-  unsigned char _existing_ngbs;
 
   /*! @brief Index of the SubGrid in the subgrid list. */
   unsigned int _subgrid_index;
@@ -445,6 +437,12 @@ public:
 
   /*! @brief Dependency lock. */
   Lock _dependency;
+
+  /*! @brief Index of the largest active buffer. */
+  unsigned char _largest_buffer_index;
+
+  /*! @brief Size of the largest active buffer. */
+  unsigned int _largest_buffer_size;
 
   /*! @brief Number density for each cell (in m^-3). */
   double *_number_density;
@@ -850,7 +848,8 @@ public:
       : _computational_cost(0), _anchor{box[0], box[1], box[2]},
         _cell_size{box[3] / ncell[0], box[4] / ncell[1], box[5] / ncell[2]},
         _inv_cell_size{ncell[0] / box[3], ncell[1] / box[4], ncell[2] / box[5]},
-        _number_of_cells{ncell[0], ncell[1], ncell[2], ncell[1] * ncell[2]} {
+        _number_of_cells{ncell[0], ncell[1], ncell[2], ncell[1] * ncell[2]},
+        _largest_buffer_index(TRAVELDIRECTION_NUMBER), _largest_buffer_size(0) {
 
     // allocate memory for data arrays
     const int tot_ncell = _number_of_cells[3] * ncell[0];
@@ -858,11 +857,6 @@ public:
     _neutral_fraction = new double[tot_ncell];
     _intensity_integral = new double[tot_ncell];
     subgrid_cell_lock_init(tot_ncell);
-
-    // initialize active buffers
-    std::fill(_active_buffers, _active_buffers + TRAVELDIRECTION_NUMBER, 0);
-    std::iota(_active_buffers_sort,
-              _active_buffers_sort + TRAVELDIRECTION_NUMBER, 0);
 
     // initialize data arrays
     for (int i = 0; i < tot_ncell; ++i) {
@@ -889,18 +883,14 @@ public:
                        original._inv_cell_size[2]},
         _number_of_cells{
             original._number_of_cells[0], original._number_of_cells[1],
-            original._number_of_cells[2], original._number_of_cells[3]} {
+            original._number_of_cells[2], original._number_of_cells[3]},
+        _largest_buffer_index(TRAVELDIRECTION_NUMBER), _largest_buffer_size(0) {
 
     const int tot_ncell = _number_of_cells[3] * _number_of_cells[0];
     _number_density = new double[tot_ncell];
     _neutral_fraction = new double[tot_ncell];
     _intensity_integral = new double[tot_ncell];
     subgrid_cell_lock_init(tot_ncell);
-
-    // initialize active buffers
-    std::fill(_active_buffers, _active_buffers + TRAVELDIRECTION_NUMBER, 0);
-    std::iota(_active_buffers_sort,
-              _active_buffers_sort + TRAVELDIRECTION_NUMBER, 0);
 
     // copy data arrays
     for (int i = 0; i < tot_ncell; ++i) {
@@ -958,9 +948,6 @@ public:
     myassert(output_direction >= 0 && output_direction < TRAVELDIRECTION_NUMBER,
              "output_direction: " << output_direction);
     _ngbs[output_direction] = ngb;
-    if (ngb != NEIGHBOUR_OUTSIDE) {
-      ++_existing_ngbs;
-    }
   }
 
   /**
@@ -983,35 +970,36 @@ public:
    */
   inline void set_active_buffer(const int direction, const unsigned int index) {
     _active_buffers[direction] = index;
-    // argsort the active buffers list
-    std::sort(_active_buffers_sort,
-              _active_buffers_sort + TRAVELDIRECTION_NUMBER,
-              [this](unsigned char i1, unsigned char i2) {
-                return this->_active_buffers[i1] < this->_active_buffers[i2];
-              });
   }
 
   /**
-   * @brief Get the active buffer with the given index in a hypothetical list
-   * sorted on active buffer index.
+   * @brief Set the size and index of the largest active buffer.
    *
-   * @param index Index in the hypothetical sorted list.
-   * @return Index of the corresponding active buffer.
+   * @param index Index of the largest active buffer.
+   * @param size Size of the largest active buffer.
    */
-  inline unsigned int
-  get_active_buffer_sorted(const unsigned char index) const {
-    myassert(index < _existing_ngbs, "Active buffer does not exist!");
-    return _active_buffers[_active_buffers_sort[index]];
+  inline void set_largest_buffer(const unsigned char index,
+                                 const unsigned int size) {
+    _largest_buffer_index = index;
+    _largest_buffer_size = size;
   }
 
   /**
-   * @brief Get the number of existing neighbours (and active buffers) for this
-   * subgrid.
+   * @brief Get the index of the largest active buffer.
    *
-   * @return Number of existing neighbouring subgrids.
+   * @return Index of the largest active buffer.
    */
-  inline unsigned char get_number_of_neighbours() const {
-    return _existing_ngbs;
+  inline unsigned char get_largest_buffer_index() const {
+    return _largest_buffer_index;
+  }
+
+  /**
+   * @brief Get the size of the largest active buffer.
+   *
+   * @return Size of the largest active buffer.
+   */
+  inline unsigned int get_largest_buffer_size() const {
+    return _largest_buffer_size;
   }
 
   /**
@@ -1032,6 +1020,7 @@ public:
    * @param buffer_size Actual size of the buffer.
    */
   inline void pack(char *buffer, const int buffer_size) {
+
     myassert(buffer_size >= get_MPI_size(), "Buffer too small!");
 
     int buffer_position = 0;
@@ -1047,8 +1036,6 @@ public:
              &buffer_position, MPI_COMM_WORLD);
     MPI_Pack(_ngbs, TRAVELDIRECTION_NUMBER, MPI_UNSIGNED, buffer, buffer_size,
              &buffer_position, MPI_COMM_WORLD);
-    MPI_Pack(_active_buffers, TRAVELDIRECTION_NUMBER, MPI_UNSIGNED, buffer,
-             buffer_size, &buffer_position, MPI_COMM_WORLD);
     MPI_Pack(&_subgrid_index, 1, MPI_UNSIGNED, buffer, buffer_size,
              &buffer_position, MPI_COMM_WORLD);
 
@@ -1084,8 +1071,6 @@ public:
     MPI_Unpack(buffer, buffer_size, &buffer_position, new_number_of_cells, 4,
                MPI_INT, MPI_COMM_WORLD);
     MPI_Unpack(buffer, buffer_size, &buffer_position, _ngbs,
-               TRAVELDIRECTION_NUMBER, MPI_UNSIGNED, MPI_COMM_WORLD);
-    MPI_Unpack(buffer, buffer_size, &buffer_position, _active_buffers,
                TRAVELDIRECTION_NUMBER, MPI_UNSIGNED, MPI_COMM_WORLD);
     MPI_Unpack(buffer, buffer_size, &buffer_position, &_subgrid_index, 1,
                MPI_UNSIGNED, MPI_COMM_WORLD);
@@ -1430,6 +1415,13 @@ public:
   inline const unsigned long get_computational_cost() const {
     return _computational_cost;
   }
+
+  /**
+   * @brief Get the dependency lock for this subgrid.
+   *
+   * @return Pointer to the dependency lock for this subgrid.
+   */
+  inline Lock *get_dependency() { return &_dependency; }
 };
 
 #endif // DENSITYSUBGRID_HPP
