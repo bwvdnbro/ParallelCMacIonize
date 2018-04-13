@@ -374,14 +374,16 @@ public:
       // strict memory load for the moment, but want a very good source load
       real_t ubvec[3] = {1.03, 1.001, 1.1};
 
+#ifdef SHOW_METIS_OUTPUT
       // set METIS options (we currently only use this to optionally enable
       // METIS output)
       idx_t options[METIS_NOPTIONS];
       METIS_SetDefaultOptions(options);
-#ifdef SHOW_METIS_OUTPUT
       if (MPI_rank == 0) {
         options[METIS_OPTION_DBGLVL] = METIS_DBG_INFO;
       }
+#else
+      idx_t *options = nullptr;
 #endif
 
       // call METIS

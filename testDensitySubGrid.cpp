@@ -1545,7 +1545,6 @@ inline void activate_buffer(unsigned int &current_index, const int thread_id,
       }
     }
   }
-  
 }
 
 /**
