@@ -2159,7 +2159,7 @@ int main(int argc, char **argv) {
       DensitySubGrid &subgrid = *gridvec[igrid];
       // only include the face neighbours, as they are the only ones with a
       // significant communication load
-      for (int ingb = 21; ingb < TRAVELDIRECTION_NUMBER; ++ingb) {
+      for (int ingb = 1; ingb < TRAVELDIRECTION_NUMBER; ++ingb) {
         unsigned int ngb = subgrid.get_neighbour(ingb);
         if (ngb != NEIGHBOUR_OUTSIDE) {
           // try to find the neighbour in the neighbour list for igrid
