@@ -1996,7 +1996,7 @@ int main(int argc, char **argv) {
     for (int i = 0; i < TRAVELDIRECTION_NUMBER; ++i) {
       flags[i] = false;
     }
-    for (unsigned int i = 0; i < 100; ++i) {
+    for (unsigned int i = 0; i < 10; ++i) {
       PhotonBuffer buffer;
       fill_buffer(buffer, PHOTONBUFFER_SIZE, coarse_rg, 0);
       do_photon_traversal(buffer, coarse_grid, nullptr, flags);
@@ -2021,8 +2021,16 @@ int main(int argc, char **argv) {
               ix * num_subgrid[1] * num_subgrid[2] + iy * num_subgrid[2] + iz;
           const double intensity =
               coarse_grid.get_intensity_integral(ix, iy, iz);
+          // pro tip: although it is nowhere explicitly stated, it turns out
+          // that metis vertex weight values are only enforced properly if they
+          // are small enough. I suspect that under the hood Metis sums the
+          // weights for each partition, and if these sums cause overflows,
+          // weird partitions are produced. A maximum weight value of 0xffff
+          // seems to produce nice result.
+          // Similar problems were observed when CPU cycles were used as weight,
+          // because again the weights are too large.
           const unsigned long cost = 0xffff * (intensity / maxintensity);
-          initial_photon_cost[igrid] = std::max(1ul, cost);
+          initial_photon_cost[igrid] = cost;
         }
       }
     }
