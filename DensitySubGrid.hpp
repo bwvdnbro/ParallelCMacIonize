@@ -438,6 +438,9 @@ public:
   /*! @brief Dependency lock. */
   Lock _dependency;
 
+  /*! @brief ID of the last thread that used this subgrid. */
+  int _owning_thread;
+
   /*! @brief Index of the largest active buffer. */
   unsigned char _largest_buffer_index;
 
@@ -849,7 +852,8 @@ public:
         _cell_size{box[3] / ncell[0], box[4] / ncell[1], box[5] / ncell[2]},
         _inv_cell_size{ncell[0] / box[3], ncell[1] / box[4], ncell[2] / box[5]},
         _number_of_cells{ncell[0], ncell[1], ncell[2], ncell[1] * ncell[2]},
-        _largest_buffer_index(TRAVELDIRECTION_NUMBER), _largest_buffer_size(0) {
+        _owning_thread(-1), _largest_buffer_index(TRAVELDIRECTION_NUMBER),
+        _largest_buffer_size(0) {
 
     // allocate memory for data arrays
     const int tot_ncell = _number_of_cells[3] * ncell[0];
@@ -884,7 +888,8 @@ public:
         _number_of_cells{
             original._number_of_cells[0], original._number_of_cells[1],
             original._number_of_cells[2], original._number_of_cells[3]},
-        _largest_buffer_index(TRAVELDIRECTION_NUMBER), _largest_buffer_size(0) {
+        _owning_thread(-1), _largest_buffer_index(TRAVELDIRECTION_NUMBER),
+        _largest_buffer_size(0) {
 
     const int tot_ncell = _number_of_cells[3] * _number_of_cells[0];
     _number_density = new double[tot_ncell];

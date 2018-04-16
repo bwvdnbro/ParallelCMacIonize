@@ -188,6 +188,16 @@ public:
   }
 
   /**
+   * @brief Set the thread id for the given element.
+   *
+   * @param index Index of an element.
+   * @param thread Thread id for that element.
+   */
+  inline void set_thread(const size_t index, const int thread) {
+    _thread_list[index] = thread;
+  }
+
+  /**
    * @brief Get the process id for the given element.
    *
    * @param index Index of an element.

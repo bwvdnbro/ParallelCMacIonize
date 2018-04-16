@@ -56,6 +56,12 @@ if nproc > 1 or nthread > 1:
       xpos = 0.5 * (xlim[0] + xlim[1])
       pl.text(xpos, iproc * nthread + ithread, label[:-2], ha = "center",
               bbox = dict(facecolor = "white", alpha = 0.9))
+
+# plot start and end time for overhead reference
+ptime = np.loadtxt("program_time.txt")
+pl.gca().axvline(x = ptime[0], linestyle = "--", linewidth = 0.8, color = "k")
+pl.gca().axvline(x = ptime[1], linestyle = "--", linewidth = 0.8, color = "k")
+
 pl.legend(loc = "upper center", ncol = len(task_colors))
 pl.ylim(-1., nproc * nthread * 1.1)
 pl.gca().set_yticks([])

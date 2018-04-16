@@ -951,9 +951,6 @@ inline void execute_source_photon_task(
   // (the output buffers belong to the subgrid and do not count as a dependency)
   new_task._dependency = subgrid.get_dependency();
 
-  // note that this statement should be last, as the buffer might
-  // be processed as soon as this statement is executed
-  //  new_queues[central_queue[which_central_index]]->add_task(task_index);
   queues_to_add[num_tasks_to_add] = central_queue[which_central_index];
   tasks_to_add[num_tasks_to_add] = task_index;
   ++num_tasks_to_add;
@@ -1390,6 +1387,7 @@ inline void execute_task(
 
     /// propagate photon packets from a buffer through a subgrid
 
+    costs.set_thread(task._cell, thread_id);
     execute_photon_traversal_task(
         task, thread_id, tasks, new_queues, general_queue, new_buffers, gridvec,
         local_buffers, local_buffer_flags, reemission_probability, costs,
@@ -1725,6 +1723,9 @@ int main(int argc, char **argv) {
   // first: start timing
   Timer program_timer;
   program_timer.start();
+
+  unsigned long program_start, program_end;
+  task_tick(program_start);
 
   //////////////////////////////////////////////////////////////////////////////
   /// Initialization
@@ -2264,6 +2265,9 @@ int main(int argc, char **argv) {
   ////////////////////
   // Actual main loop
   ///////////////////
+
+  Timer iteration_timer;
+  iteration_timer.start();
 
   // now for the main loop. This loop
   //  - shoots num_photon photons through the grid to get intensity estimates
@@ -2861,6 +2865,8 @@ int main(int argc, char **argv) {
 
   } // main loop
 
+  iteration_timer.stop();
+
   ///////////////////
 
   //////////////////////////////////////////////////////////////////////////////
@@ -2920,8 +2926,17 @@ int main(int argc, char **argv) {
 
   //////////////////////////////////////////////////////////////////////////////
 
+  task_tick(program_end);
+
+  {
+    std::ofstream ptimefile("program_time.txt");
+    ptimefile << program_start << "\t" << program_end << "\n";
+  }
+
   // finally: stop timing and output the result
   program_timer.stop();
+  logmessage(
+      "Total Monte Carlo loop time: " << iteration_timer.value() << " s.", 0);
   logmessage("Total program time: " << program_timer.value() << " s.", 0);
 
   return MPI_exit_code;
