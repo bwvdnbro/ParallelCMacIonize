@@ -1976,31 +1976,64 @@ int main(int argc, char **argv) {
   //  - a photon cost vector that is a more stable reference for the distributed
   //    memory decomposition
   std::vector< unsigned int > initial_photon_cost(tot_num_subgrid, 0);
-  std::ifstream initial_costs("costs_00.txt");
-  if (initial_costs.good()) {
-    // use cost information from a previous run as initial guess for the cost
-    // skip the initial comment line
-    std::string line;
-    std::getline(initial_costs, line);
-    unsigned int index;
-    unsigned long computational_cost;
-    unsigned int photon_cost, source_cost;
-    int rank, thread;
-    while (std::getline(initial_costs, line)) {
-      std::istringstream lstream(line);
-      lstream >> index >> computational_cost >> photon_cost >> source_cost >>
-          rank >> thread;
-      if (index < tot_num_subgrid) {
-        initial_cost_vector[index] += computational_cost;
-        initial_photon_cost[index] += photon_cost;
+  if (MPI_size > 1) {
+
+    logmessage(
+        "Running low resolution simulation to get initial subgrid costs...", 0);
+    // we need a good cost estimate for each subgrid to load balance across
+    // nodes
+    // to obtain this, we run a low resolution Monte Carlo simulation on the
+    // grid of subgrids (with each subgrid acting as a single cell)
+    DensitySubGrid coarse_grid(box, num_subgrid);
+    // the coarse grid has no neighbours
+    for (int i = 0; i < TRAVELDIRECTION_NUMBER; ++i) {
+      coarse_grid.set_neighbour(i, NEIGHBOUR_OUTSIDE);
+      coarse_grid.set_active_buffer(i, NEIGHBOUR_OUTSIDE);
+    }
+    // run 10 photon buffers
+    RandomGenerator coarse_rg(42);
+    bool flags[TRAVELDIRECTION_NUMBER];
+    for (int i = 0; i < TRAVELDIRECTION_NUMBER; ++i) {
+      flags[i] = false;
+    }
+    for (unsigned int i = 0; i < 100; ++i) {
+      PhotonBuffer buffer;
+      fill_buffer(buffer, PHOTONBUFFER_SIZE, coarse_rg, 0);
+      do_photon_traversal(buffer, coarse_grid, nullptr, flags);
+    }
+
+    // get the maximal intensity
+    double maxintensity = 0.;
+    for (int ix = 0; ix < num_subgrid[0]; ++ix) {
+      for (int iy = 0; iy < num_subgrid[1]; ++iy) {
+        for (int iz = 0; iz < num_subgrid[2]; ++iz) {
+          maxintensity = std::max(
+              maxintensity, coarse_grid.get_intensity_integral(ix, iy, iz));
+        }
       }
     }
-  } else {
-    // no initial cost information: assume a uniform cost
-    for (unsigned int i = 0; i < tot_num_subgrid; ++i) {
-      initial_cost_vector[i] = 1;
-      initial_photon_cost[i] = 1;
+
+    // now set the subgrid cost based on the intensity counters
+    for (int ix = 0; ix < num_subgrid[0]; ++ix) {
+      for (int iy = 0; iy < num_subgrid[1]; ++iy) {
+        for (int iz = 0; iz < num_subgrid[2]; ++iz) {
+          const unsigned int igrid =
+              ix * num_subgrid[1] * num_subgrid[2] + iy * num_subgrid[2] + iz;
+          const double intensity =
+              coarse_grid.get_intensity_integral(ix, iy, iz);
+          const unsigned long cost = 0xffff * (intensity / maxintensity);
+          initial_photon_cost[igrid] = std::max(1ul, cost);
+        }
+      }
     }
+
+    std::fill(initial_cost_vector.begin(), initial_cost_vector.end(), 1);
+
+    logmessage("Done.", 0);
+  } else {
+    // we do no longer need to explicitly load balance shared memory runs
+    std::fill(initial_cost_vector.begin(), initial_cost_vector.end(), 1);
+    std::fill(initial_photon_cost.begin(), initial_photon_cost.end(), 1);
   }
 
   /////////////////////////////
@@ -2026,16 +2059,17 @@ int main(int argc, char **argv) {
     // get the average cost per thread
     unsigned long avg_cost_per_thread = 0;
     for (unsigned int i = 0; i < tot_num_subgrid; ++i) {
-      avg_cost_per_thread += initial_cost_vector[i];
+      avg_cost_per_thread += initial_photon_cost[i];
     }
     avg_cost_per_thread /= (num_threads * MPI_size);
     // now set the levels accordingly
     for (unsigned int i = 0; i < tot_num_subgrid; ++i) {
-      if (copy_factor * initial_cost_vector[i] > avg_cost_per_thread) {
+      if (copy_factor * initial_photon_cost[i] > avg_cost_per_thread ||
+          i == central_index) {
         // note that this in principle should be 1 higher. However, we do not
         // count the original.
         unsigned int number_of_copies =
-            copy_factor * initial_cost_vector[i] / avg_cost_per_thread;
+            copy_factor * initial_photon_cost[i] / avg_cost_per_thread;
         // make sure the number of copies of the source subgrid is at least
         // equal to the number of processes
         if (i == central_index &&
@@ -2125,8 +2159,7 @@ int main(int argc, char **argv) {
       DensitySubGrid &subgrid = *gridvec[igrid];
       // only include the face neighbours, as they are the only ones with a
       // significant communication load
-      for (int ingb = TRAVELDIRECTION_FACE_X_P;
-           ingb <= TRAVELDIRECTION_FACE_Z_N; ++ingb) {
+      for (int ingb = 21; ingb < TRAVELDIRECTION_NUMBER; ++ingb) {
         unsigned int ngb = subgrid.get_neighbour(ingb);
         if (ngb != NEIGHBOUR_OUTSIDE) {
           // try to find the neighbour in the neighbour list for igrid

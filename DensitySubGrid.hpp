@@ -1313,6 +1313,21 @@ public:
   }
 
   /**
+   * @brief Get the intensity integral for the cell with the given indices.
+   *
+   * @param ix X index of the cell.
+   * @param iy Y index of the cell.
+   * @param iz Z index of the cell.
+   * @return Luminosity integral for the cell with the given indices.
+   */
+  inline const double get_intensity_integral(const int ix, const int iy,
+                                             const int iz) const {
+    const int three_index[3] = {ix, iy, iz};
+    const int index = get_one_index(three_index);
+    return _intensity_integral[index];
+  }
+
+  /**
    * @brief Update the ionization state for all the cells in this subgrid.
    *
    * @param num_photon Total number of photon packets that was used, used to

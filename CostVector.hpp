@@ -32,7 +32,7 @@
 
 /*! @brief Activate this to output the partitioning to a file
  *  "cost_stats.txt". */
-//#define OUTPUT_STATS
+#define OUTPUT_STATS
 
 #include "Assert.hpp"
 
@@ -352,7 +352,7 @@ public:
         vwgt[3 * igrid + 0] = _photon_cost[igrid];
         //  - the number of sources
         vwgt[3 * igrid + 1] = _source_cost[igrid];
-        //  - the memory (each subgrid has the same memory requirements for now)
+        //  - the memory usage
         vwgt[3 * igrid + 2] = 1;
 
         // xadj[igrid] points to the beginning of the edge list for this vertex
@@ -382,13 +382,27 @@ public:
 
       // allowed deviations from a perfect load. We don't really require a
       // strict memory load for the moment, but want a very good source load
-      real_t ubvec[3] = {1.03, 1.001, 1.1};
+      real_t *ubvec = nullptr;
+
+#ifdef OUTPUT_STATS
+      // optionally output statistics
+      if (MPI_rank == 0) {
+        std::stringstream filename;
+        filename << "metis_input.txt";
+        std::ofstream sfile(filename.str());
+        sfile << "#photon cost\tsource cost\n";
+        for (idx_t i = 0; i < nvert; ++i) {
+          sfile << vwgt[3 * i] << "\t" << vwgt[3 * i + 1] << "\t"
+                << vwgt[3 * i + 2] << "\n";
+        }
+      }
+#endif
 
 #ifdef SHOW_METIS_OUTPUT
-      // set METIS options (we currently only use this to optionally enable
-      // METIS output)
       idx_t options[METIS_NOPTIONS];
       METIS_SetDefaultOptions(options);
+      // set METIS options (we currently only use this to optionally enable
+      // METIS output)
       if (MPI_rank == 0) {
         options[METIS_OPTION_DBGLVL] = METIS_DBG_INFO;
       }
@@ -405,6 +419,19 @@ public:
       if (metis_status != METIS_OK) {
         cmac_error("Metis error!");
       }
+
+#ifdef OUTPUT_STATS
+      // optionally output statistics
+      if (MPI_rank == 0) {
+        std::stringstream filename;
+        filename << "metis_output.txt";
+        std::ofstream sfile(filename.str());
+        sfile << "#process\n";
+        for (idx_t i = 0; i < nvert; ++i) {
+          sfile << part[i] << "\n";
+        }
+      }
+#endif
 
       // set the subgrid ranks based on the METIS result
       for (size_t igrid = 0; igrid < _size; ++igrid) {
@@ -485,7 +512,7 @@ public:
         std::stringstream filename;
         filename << "cost_stats." << irank << ".txt";
         std::ofstream sfile(filename.str());
-        sfile << "# rank\tthread\tcomp cost\tsource cost\n";
+        sfile << "# rank\tthread\tcomp cost\tphoton cost\tsource cost\n";
         for (size_t igrid = 0; igrid < _size; ++igrid) {
           sfile << _process_list[igrid] << "\t" << _thread_list[igrid] << "\t"
                 << _computational_cost[igrid] << "\t" << _photon_cost[igrid]
