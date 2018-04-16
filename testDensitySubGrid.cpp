@@ -2079,14 +2079,15 @@ int main(int argc, char **argv) {
         unsigned int number_of_copies =
             copy_factor * initial_photon_cost[i] / avg_cost_per_thread;
         // make sure the number of copies of the source subgrid is at least
-        // equal to the number of processes
+        // equal to the number of cores
         if (i == central_index &&
-            number_of_copies < static_cast< unsigned int >(MPI_size)) {
-          number_of_copies = MPI_size;
+            number_of_copies <
+                static_cast< unsigned int >(MPI_size * num_threads)) {
+          number_of_copies = MPI_size * num_threads;
         }
         // get the highest bit
         unsigned int level = 0;
-        while (number_of_copies > 0) {
+        while (number_of_copies > 1) {
           number_of_copies >>= 1;
           ++level;
         }
