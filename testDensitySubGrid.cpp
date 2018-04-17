@@ -76,7 +76,7 @@
 //#define SINGLE_ITERATION
 
 /*! @brief Enable this to rebalance subgrids across threads and processes in
- *  between iterations. */
+ *  between iterations (currently broken). */
 //#define DO_REBALANCING
 
 /*! @brief Enable this to set up less output buffers. */
@@ -1368,7 +1368,7 @@ inline void execute_task(
 
   Task &task = tasks[task_index];
 
-  myassert(task._end_time == 0, "Task already executed!");
+  myassert(!task.done(), "Task already executed!");
 
   // Different tasks are processed in different ways.
   switch (task._type) {

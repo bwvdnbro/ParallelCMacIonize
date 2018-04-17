@@ -48,7 +48,7 @@
  */
 enum TaskType {
   /*! @brief Draw random photons from the source. */
-  TASKTYPE_SOURCE_PHOTON,
+  TASKTYPE_SOURCE_PHOTON = 0,
   /*! @brief Propagate photons through a subgrid. */
   TASKTYPE_PHOTON_TRAVERSAL,
   /*! @brief Reemit photons. */
@@ -56,7 +56,9 @@ enum TaskType {
   /*! @brief Send a buffer to another process. */
   TASKTYPE_SEND,
   /*! @brief Receive a buffer from another process. */
-  TASKTYPE_RECV
+  TASKTYPE_RECV,
+  /*! @brief Task type counter. */
+  TASKTYPE_NUMBER
 };
 
 /**
@@ -111,6 +113,24 @@ public:
   inline void stop() {
 #ifdef TASK_PLOT
     task_tick(_end_time);
+#else
+    // we need another way to flag the end of the task
+    // since we do not care about what task this was (we don't plot it), we can
+    // overwrite the type variable
+    _type = -1;
+#endif
+  }
+
+  /**
+   * @brief Check if the task was already done.
+   *
+   * @return True if the task was executed, false otherwise.
+   */
+  inline bool done() {
+#ifdef TASK_PLOT
+    return _end_time > 0;
+#else
+    return _type == -1;
 #endif
   }
 
@@ -119,7 +139,13 @@ public:
    *
    * Used to flag unexecuted tasks and initialize the dependency.
    */
-  Task() : _dependency(nullptr), _end_time(0) {}
+  Task() : _dependency(nullptr) {
+#ifdef TASK_PLOT
+    _end_time = 0;
+#else
+    _type = TASKTYPE_NUMBER;
+#endif
+  }
 
   /**
    * @brief Try to lock the dependency (if there is one) for the task.
