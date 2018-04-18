@@ -28,7 +28,7 @@ then
   echo "Plotting individual task plots per iteration..."
   for f in tasks_??.txt
   do
-    python plot_tasks.py $f
+    python plot_tasks.py --name $f --labels
   done
   echo "Done."
 fi

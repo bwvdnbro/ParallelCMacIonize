@@ -3,12 +3,22 @@ import matplotlib
 matplotlib.use("Agg")
 import pylab as pl
 import sys
+import argparse
+
+argparser = argparse.ArgumentParser(
+  description = "Plot task plot based on a given task output file.")
+
+argparser.add_argument("-n", "--name", action = "store")
+argparser.add_argument("-m", "--messagefile", action = "store")
+argparser.add_argument("-l", "--labels", action = "store_true")
+
+args = argparser.parse_args(sys.argv[1:])
 
 pl.rcParams["text.usetex"] = True
 pl.rcParams["figure.figsize"] = (12, 10)
 pl.rcParams["font.size"] = 14
 
-name = sys.argv[1]
+name = args.name
 
 task_colors = ["b", "r", "c", "y", "g"]
 task_names = ["source photon", "photon traversal", "reemission", "send",
@@ -30,8 +40,8 @@ nproc = int(data[:,0].max()) + 1
 
 fig, ax = pl.subplots(1, 1, sharex = True)
 
-if len(sys.argv) > 2:
-  mname = sys.argv[2]
+if args.messagefile:
+  mname = args.messagefile
 
   mdata = np.loadtxt(mname)
 
@@ -85,24 +95,26 @@ for iproc in range(nproc):
     colors = [task_colors[int(task[3])] for task in thread]
     ax.broken_barh(bar, (iproc * nthread + i - 0.4, 0.8), facecolors = colors,
                    edgecolor = "none")
-    # status text
-    label = ""
-    if nproc > 1:
-      label += "rank {0} - ".format(iproc)
-    if nthread > 1:
-      label += "thread {0} - ".format(i)
-    label += "{0:.2f} \% load".format(tottime * 100.)
-    ax.text(0.5, iproc * nthread + i + 0.2, label, ha = "center",
-            bbox = dict(facecolor='white', alpha=0.9))
-    # per task fraction text
-    label = ""
-    for itask in range(len(task_colors)):
-      if task_flags[itask]:
-        tottime = np.array([(task[2] - task[1]) * tconv
-                            for task in thread if task[3] == itask]).sum()
-        label += "{0}: {1:.2f} \% - ".format(task_names[itask], tottime * 100.)
-    ax.text(0.5, iproc * nthread + i - 0.2, label[:-2], ha = "center",
-            bbox = dict(facecolor='white', alpha=0.9))
+    if args.labels:
+      # status text
+      label = ""
+      if nproc > 1:
+        label += "rank {0} - ".format(iproc)
+      if nthread > 1:
+        label += "thread {0} - ".format(i)
+      label += "{0:.2f} \% load".format(tottime * 100.)
+      ax.text(0.5, iproc * nthread + i + 0.2, label, ha = "center",
+              bbox = dict(facecolor='white', alpha=0.9))
+      # per task fraction text
+      label = ""
+      for itask in range(len(task_colors)):
+        if task_flags[itask]:
+          tottime = np.array([(task[2] - task[1]) * tconv
+                              for task in thread if task[3] == itask]).sum()
+          label += "{0}: {1:.2f} \% - ".format(
+            task_names[itask], tottime * 100.)
+      ax.text(0.5, iproc * nthread + i - 0.2, label[:-2], ha = "center",
+              bbox = dict(facecolor='white', alpha=0.9))
 
 for i in range(len(task_colors)):
   if task_flags[i]:
