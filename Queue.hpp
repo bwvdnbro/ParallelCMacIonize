@@ -17,14 +17,14 @@
  ******************************************************************************/
 
 /**
- * @file NewQueue.hpp
+ * @file Queue.hpp
  *
- * @brief PhotonBuffer queue for a single thread.
+ * @brief Task queue.
  *
  * @author Bert Vandenbroucke (bv7@st-andrews.ac.uk)
  */
-#ifndef NEWQUEUE_HPP
-#define NEWQUEUE_HPP
+#ifndef QUEUE_HPP
+#define QUEUE_HPP
 
 #include "Assert.hpp"
 #include "Atomic.hpp"
@@ -35,9 +35,9 @@
 #define NO_TASK 0xffffffff
 
 /**
- * @brief PhotonBuffer queue for a single thread.
+ * @brief Task queue.
  */
-class NewQueue {
+class Queue {
 private:
   /*! @brief Queue. */
   size_t *_queue;
@@ -57,14 +57,14 @@ public:
    *
    * @param size Size of the queue.
    */
-  inline NewQueue(const size_t size) : _current_queue_size(0), _size(size) {
+  inline Queue(const size_t size) : _current_queue_size(0), _size(size) {
     _queue = new size_t[size];
   }
 
   /**
    * @brief Destructor.
    */
-  inline ~NewQueue() { delete[] _queue; }
+  inline ~Queue() { delete[] _queue; }
 
   /**
    * @brief Add a task to the queue.
@@ -125,4 +125,4 @@ public:
   inline const size_t size() const { return _current_queue_size; }
 };
 
-#endif // NEWQUEUE_HPP
+#endif // QUEUE_HPP

@@ -97,8 +97,8 @@ int MPI_rank, MPI_size;
 #include "Log.hpp"
 #include "MPIMessage.hpp"
 #include "MemorySpace.hpp"
-#include "NewQueue.hpp"
 #include "PhotonBuffer.hpp"
+#include "Queue.hpp"
 #include "RandomGenerator.hpp"
 #include "Task.hpp"
 #include "Timer.hpp"
@@ -906,7 +906,7 @@ inline void set_number_of_threads(int num_threads_request, int &num_threads) {
 inline void execute_source_photon_task(
     Task &task, const int thread_id, unsigned int &num_photon_sourced,
     const unsigned int num_photon_local, ThreadSafeVector< Task > &tasks,
-    std::vector< NewQueue * > &new_queues, MemorySpace &new_buffers,
+    std::vector< Queue * > &new_queues, MemorySpace &new_buffers,
     RandomGenerator &random_generator,
     const std::vector< unsigned int > &central_index,
     std::vector< DensitySubGrid * > &gridvec,
@@ -987,7 +987,7 @@ inline void execute_source_photon_task(
  */
 inline void execute_photon_traversal_task(
     Task &task, const int thread_id, ThreadSafeVector< Task > &tasks,
-    std::vector< NewQueue * > &new_queues, NewQueue &general_queue,
+    std::vector< Queue * > &new_queues, Queue &general_queue,
     MemorySpace &new_buffers, std::vector< DensitySubGrid * > &gridvec,
     PhotonBuffer *local_buffers, bool *local_buffer_flags,
     const double reemission_probability, CostVector &costs,
@@ -1193,7 +1193,7 @@ inline void execute_photon_traversal_task(
  */
 inline void execute_photon_reemit_task(
     Task &task, const int thread_id, ThreadSafeVector< Task > &tasks,
-    std::vector< NewQueue * > &new_queues, MemorySpace &new_buffers,
+    std::vector< Queue * > &new_queues, MemorySpace &new_buffers,
     RandomGenerator &random_generator, const double reemission_probability,
     CostVector &costs, unsigned int &num_photon_done,
     std::vector< DensitySubGrid * > &gridvec, unsigned int &num_tasks_to_add,
@@ -1353,8 +1353,8 @@ inline void execute_send_task(Task &task, const int thread_id,
 inline void execute_task(
     const unsigned int task_index, const int thread_id,
     unsigned int &num_photon_sourced, const unsigned int num_photon_local,
-    ThreadSafeVector< Task > &tasks, std::vector< NewQueue * > &new_queues,
-    NewQueue &general_queue, MemorySpace &new_buffers,
+    ThreadSafeVector< Task > &tasks, std::vector< Queue * > &new_queues,
+    Queue &general_queue, MemorySpace &new_buffers,
     RandomGenerator &random_generator,
     const std::vector< unsigned int > &central_index,
     std::vector< DensitySubGrid * > &gridvec,
@@ -1446,8 +1446,8 @@ inline void execute_task(
 inline void activate_buffer(unsigned int &current_index, const int thread_id,
                             const int num_threads,
                             ThreadSafeVector< Task > &tasks,
-                            std::vector< NewQueue * > &new_queues,
-                            NewQueue &general_queue, MemorySpace &new_buffers,
+                            std::vector< Queue * > &new_queues,
+                            Queue &general_queue, MemorySpace &new_buffers,
                             std::vector< DensitySubGrid * > &gridvec,
                             CostVector &costs, unsigned int &num_empty,
                             unsigned int &num_active_buffers) {
@@ -1589,7 +1589,7 @@ check_for_finished_sends(std::vector< MPI_Request > &MPI_buffer_requests) {
 inline void check_for_incoming_communications(
     std::vector< MPIMessage > &message_log, size_t &message_log_size,
     MemorySpace &new_buffers, CostVector &costs,
-    ThreadSafeVector< Task > &tasks, std::vector< NewQueue * > &new_queues,
+    ThreadSafeVector< Task > &tasks, std::vector< Queue * > &new_queues,
     unsigned int &num_photon_done_since_last, bool &global_run_flag,
     const int thread_id, unsigned int &num_active_buffers,
     std::vector< DensitySubGrid * > &gridvec) {
@@ -1791,12 +1791,12 @@ int main(int argc, char **argv) {
   ///////////////////////////////
 
   // set up the queues used to queue tasks
-  std::vector< NewQueue * > new_queues(num_threads, nullptr);
+  std::vector< Queue * > new_queues(num_threads, nullptr);
   for (int i = 0; i < num_threads; ++i) {
-    new_queues[i] = new NewQueue(queue_size_per_thread);
+    new_queues[i] = new Queue(queue_size_per_thread);
   }
 
-  NewQueue general_queue(general_queue_size);
+  Queue general_queue(general_queue_size);
 
   // set up the task space used to store tasks
   ThreadSafeVector< Task > tasks(number_of_tasks);
