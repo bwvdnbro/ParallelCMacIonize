@@ -650,7 +650,7 @@ inline void create_copies(std::vector< DensitySubGrid * > &gridvec,
             const unsigned int active_buffer = new_buffers.get_free_buffer();
             new_buffers[active_buffer]._sub_grid_index = ngb_copy;
             new_buffers[active_buffer]._direction =
-                output_to_input_direction(j);
+                TravelDirections::output_to_input_direction(j);
             gridvec[copy]->set_active_buffer(j, active_buffer);
           }
         } else {
@@ -672,7 +672,7 @@ inline void create_copies(std::vector< DensitySubGrid * > &gridvec,
               const unsigned int active_buffer = new_buffers.get_free_buffer();
               new_buffers[active_buffer]._sub_grid_index = ngb_copy;
               new_buffers[active_buffer]._direction =
-                  output_to_input_direction(j);
+                  TravelDirections::output_to_input_direction(j);
               gridvec[copy]->set_active_buffer(j, active_buffer);
             }
           } else {
@@ -688,7 +688,7 @@ inline void create_copies(std::vector< DensitySubGrid * > &gridvec,
               const unsigned int active_buffer = new_buffers.get_free_buffer();
               new_buffers[active_buffer]._sub_grid_index = ngb_copy;
               new_buffers[active_buffer]._direction =
-                  output_to_input_direction(j);
+                  TravelDirections::output_to_input_direction(j);
               gridvec[copy]->set_active_buffer(j, active_buffer);
             }
           }
@@ -1131,7 +1131,7 @@ inline void execute_photon_traversal_task(
         myassert(new_buffers[add_index]._sub_grid_index == ngb,
                  "Wrong subgrid");
         myassert(new_buffers[add_index]._direction ==
-                     output_to_input_direction(i),
+                     TravelDirections::output_to_input_direction(i),
                  "Wrong direction");
 
       } // if (add_index != new_index)
@@ -2295,7 +2295,7 @@ int main(int argc, char **argv) {
           const unsigned int active_buffer = new_buffers.get_free_buffer();
           PhotonBuffer &buffer = new_buffers[active_buffer];
           buffer._sub_grid_index = ngb_index;
-          buffer._direction = output_to_input_direction(i);
+          buffer._direction = TravelDirections::output_to_input_direction(i);
           this_grid.set_active_buffer(i, active_buffer);
         }
       }
@@ -2395,7 +2395,8 @@ int main(int argc, char **argv) {
       PhotonBuffer local_buffers[TRAVELDIRECTION_NUMBER];
       bool local_buffer_flags[TRAVELDIRECTION_NUMBER];
       for (int i = 0; i < TRAVELDIRECTION_NUMBER; ++i) {
-        local_buffers[i]._direction = output_to_input_direction(i);
+        local_buffers[i]._direction =
+            TravelDirections::output_to_input_direction(i);
         local_buffers[i]._actual_size = 0;
         local_buffer_flags[i] = true;
       }
