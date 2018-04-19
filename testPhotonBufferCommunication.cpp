@@ -31,10 +31,13 @@
 /*! @brief Uncomment this to enable run time assertions. */
 #define DO_ASSERTS
 
+int MPI_rank, MPI_size;
+
 #include "Assert.hpp"
 #include "Log.hpp"
 #include "PhotonBuffer.hpp"
 #include "RandomGenerator.hpp"
+#include "TravelDirections.hpp"
 
 #include <mpi.h>
 
@@ -70,13 +73,12 @@ int main(int argc, char **argv) {
 
   // fill the test buffer with random content
   RandomGenerator random_generator(42);
-  test_buffer._actual_size =
-      random_generator.get_random_integer() % PHOTONBUFFER_SIZE;
-  test_buffer._sub_grid_index = random_generator.get_random_integer();
-  test_buffer._direction =
-      random_generator.get_random_integer() % TRAVELDIRECTION_NUMBER;
-  for (unsigned int i = 0; i < test_buffer._actual_size; ++i) {
-    Photon &photon = test_buffer._photons[i];
+  test_buffer.grow(random_generator.get_random_integer() % PHOTONBUFFER_SIZE);
+  test_buffer.set_subgrid_index(random_generator.get_random_integer());
+  test_buffer.set_direction(random_generator.get_random_integer() %
+                            TRAVELDIRECTION_NUMBER);
+  for (unsigned int i = 0; i < test_buffer.size(); ++i) {
+    Photon &photon = test_buffer[i];
     photon._position[0] = random_generator.get_uniform_random_double();
     photon._position[1] = random_generator.get_uniform_random_double();
     photon._position[2] = random_generator.get_uniform_random_double();
@@ -114,7 +116,7 @@ int main(int argc, char **argv) {
     recv_buffer.unpack(MPI_buffer);
 
     // check if the result is what it should be
-    photonbuffer_check_equal(test_buffer, recv_buffer);
+    test_buffer.check_equal(recv_buffer);
   } // other ranks do nothing
 
   if (MPI_rank == 0) {

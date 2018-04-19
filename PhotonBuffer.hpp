@@ -30,6 +30,7 @@
 // project includes
 #include "Assert.hpp"
 #include "Atomic.hpp"
+#include "Lock.hpp"
 #include "Photon.hpp"
 
 // standard library includes
@@ -43,29 +44,14 @@
   (2 * sizeof(unsigned int) + sizeof(int) + PHOTONBUFFER_SIZE * PHOTON_MPI_SIZE)
 
 /**
- * @brief Check if the given PhotonBuffers are equal.
- *
- * @param a First PhotonBuffer.
- * @param b Second PhotonBuffer.
- */
-#define photonbuffer_check_equal(a, b)                                         \
-  myassert(a._sub_grid_index == b._sub_grid_index,                             \
-           "Subgrid indices do not match!");                                   \
-  myassert(a._direction == b._direction, "Directions do not match!");          \
-  myassert(a._actual_size == b._actual_size, "Sizes do not match!");           \
-  for (unsigned int i = 0; i < PHOTONBUFFER_SIZE; ++i) {                       \
-    photon_check_equal(a._photons[i], b._photons[i]);                          \
-  }
-
-/**
  * @brief Photon buffer.
  *
  * All members are public for now.
  */
 class PhotonBuffer {
-public:
+private:
   /*! @brief Subgrid with which this buffer is associated. */
-  unsigned int _sub_grid_index;
+  unsigned int _subgrid_index;
 
   /*! @brief TravelDirection of the photons in the buffer. */
   int _direction;
@@ -73,11 +59,14 @@ public:
   /*! @brief Number of photons in the buffer. */
   unsigned int _actual_size;
 
-  /*! @brief Dependency lock. */
-  Lock _dependency;
-
   /*! @brief Actual photon buffer. */
   Photon _photons[PHOTONBUFFER_SIZE];
+
+public:
+  /**
+   * @brief Empty constructor.
+   */
+  PhotonBuffer() : _actual_size(0) {}
 
   /**
    * @brief Store the contents of the PhotonBuffer in the given MPI
@@ -88,7 +77,7 @@ public:
    */
   inline void pack(char buffer[PHOTONBUFFER_MPI_SIZE]) {
     int buffer_position = 0;
-    MPI_Pack(&_sub_grid_index, 1, MPI_UNSIGNED, buffer, PHOTONBUFFER_MPI_SIZE,
+    MPI_Pack(&_subgrid_index, 1, MPI_UNSIGNED, buffer, PHOTONBUFFER_MPI_SIZE,
              &buffer_position, MPI_COMM_WORLD);
     MPI_Pack(&_direction, 1, MPI_INT, buffer, PHOTONBUFFER_MPI_SIZE,
              &buffer_position, MPI_COMM_WORLD);
@@ -109,8 +98,8 @@ public:
    */
   inline void unpack(char buffer[PHOTONBUFFER_MPI_SIZE]) {
     int buffer_position = 0;
-    MPI_Unpack(buffer, PHOTONBUFFER_MPI_SIZE, &buffer_position,
-               &_sub_grid_index, 1, MPI_UNSIGNED, MPI_COMM_WORLD);
+    MPI_Unpack(buffer, PHOTONBUFFER_MPI_SIZE, &buffer_position, &_subgrid_index,
+               1, MPI_UNSIGNED, MPI_COMM_WORLD);
     MPI_Unpack(buffer, PHOTONBUFFER_MPI_SIZE, &buffer_position, &_direction, 1,
                MPI_INT, MPI_COMM_WORLD);
     MPI_Unpack(buffer, PHOTONBUFFER_MPI_SIZE, &buffer_position, &_actual_size,
@@ -120,6 +109,99 @@ public:
       buffer_position += PHOTON_MPI_SIZE;
     }
   }
+
+  /**
+   * @brief Check that the given PhotonBuffer is equal to this one.
+   *
+   * @param other Other PhotonBuffer.
+   */
+  inline void check_equal(const PhotonBuffer &other) {
+    myassert(_subgrid_index == other._subgrid_index,
+             "Subgrid indices do not match!");
+    myassert(_direction == other._direction, "Directions do not match!");
+    myassert(_actual_size == other._actual_size, "Sizes do not match!");
+    for (unsigned int i = 0; i < PHOTONBUFFER_SIZE; ++i) {
+      photon_check_equal(_photons[i], other._photons[i]);
+    }
+  }
+
+  /**
+   * @brief Get the size of the buffer.
+   *
+   * @return Number of photons in the buffer.
+   */
+  inline const unsigned int size() const { return _actual_size; }
+
+  /**
+   * @brief Reset the buffer by setting its size to 0.
+   */
+  inline void reset() { _actual_size = 0; }
+
+  /**
+   * @brief Get read-only access to the Photon with the given index.
+   *
+   * @param index Index of a photon in the buffer.
+   * @return Read-only reference to the Photon that corresponds to that index.
+   */
+  inline const Photon &operator[](const unsigned int index) const {
+    return _photons[index];
+  }
+
+  /**
+   * @brief Get read/write access to the Photon with the given index.
+   *
+   * @param index Index of a photon in the buffer.
+   * @return Reference to the Photon that corresponds to that index.
+   */
+  inline Photon &operator[](const unsigned int index) {
+    return _photons[index];
+  }
+
+  /**
+   * @brief Get the index of the next available Photon in the buffer.
+   *
+   * @return Index of the next available Photon in the buffer.
+   */
+  inline const unsigned int get_next_free_photon() { return _actual_size++; }
+
+  /**
+   * @brief Grow the buffer to the given size.
+   *
+   * New photons are not initialized by this method.
+   *
+   * @param size New buffer size.
+   */
+  inline void grow(const unsigned int size) { _actual_size = size; }
+
+  /**
+   * @brief Set the subgrid index for this buffer.
+   *
+   * @param subgrid_index Subgrid index for this buffer.
+   */
+  inline void set_subgrid_index(const unsigned int subgrid_index) {
+    _subgrid_index = subgrid_index;
+  }
+
+  /**
+   * @brief Get the subgrid index for this buffer.
+   *
+   * @return Subgrid index for this buffer.
+   */
+  inline const unsigned int get_subgrid_index() const { return _subgrid_index; }
+
+  /**
+   * @brief Set the direction for this buffer.
+   *
+   * @param direction Direction for this buffer.
+   */
+  inline void set_direction(const int direction) { _direction = direction; }
+
+  /**
+   * @brief Get the direction for this buffer.
+   *
+   * @return Direction for this buffer.
+   */
+  inline const int get_direction() const { return _direction; }
 };
 
 #endif // PHOTONBUFFER_HPP

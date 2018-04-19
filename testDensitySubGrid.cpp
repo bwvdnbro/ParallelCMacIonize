@@ -422,14 +422,14 @@ inline static void fill_buffer(PhotonBuffer &buffer,
                                const unsigned int source_index) {
 
   // set general buffer information
-  buffer._actual_size = number_of_photons;
-  buffer._sub_grid_index = source_index;
-  buffer._direction = TRAVELDIRECTION_INSIDE;
+  buffer.grow(number_of_photons);
+  buffer.set_subgrid_index(source_index);
+  buffer.set_direction(TRAVELDIRECTION_INSIDE);
 
   // draw random photons and store them in the buffer
   for (unsigned int i = 0; i < number_of_photons; ++i) {
 
-    Photon &photon = buffer._photons[i];
+    Photon &photon = buffer[i];
 
     // initial position: we currently assume a single source at the origin
     photon._position[0] = 0.;
@@ -473,23 +473,23 @@ inline static void do_photon_traversal(PhotonBuffer &input_buffer,
 
   // make sure all output buffers are empty initially
   for (int i = 0; i < TRAVELDIRECTION_NUMBER; ++i) {
-    myassert(!output_buffer_flags[i] || output_buffers[i]._actual_size == 0,
+    myassert(!output_buffer_flags[i] || output_buffers[i].size() == 0,
              "Non-empty starting output buffer!");
   }
 
   // now loop over the input buffer photons and traverse them one by one
-  for (unsigned int i = 0; i < input_buffer._actual_size; ++i) {
+  for (unsigned int i = 0; i < input_buffer.size(); ++i) {
 
     // active photon
-    Photon &photon = input_buffer._photons[i];
+    Photon &photon = input_buffer[i];
 
     // make sure the photon is moving in *a* direction
     myassert(photon._direction[0] != 0. || photon._direction[1] != 0. ||
                  photon._direction[2] != 0.,
-             "size: " << input_buffer._actual_size);
+             "size: " << input_buffer.size());
 
     // traverse the photon through the active subgrid
-    const int result = subgrid.interact(photon, input_buffer._direction);
+    const int result = subgrid.interact(photon, input_buffer.get_direction());
 
     // check that the photon ended up in a valid output buffer
     myassert(result >= 0 && result < TRAVELDIRECTION_NUMBER, "fail");
@@ -503,27 +503,22 @@ inline static void do_photon_traversal(PhotonBuffer &input_buffer,
       PhotonBuffer &output_buffer = output_buffers[result];
 
       // add the photon
-      const unsigned int index = output_buffer._actual_size;
-      output_buffer._photons[index] = photon;
+      const unsigned int index = output_buffer.get_next_free_photon();
+      output_buffer[index] = photon;
 
       // make sure we actually added this photon
-      myassert(
-          output_buffer._photons[index]._position[0] == photon._position[0] &&
-              output_buffer._photons[index]._position[1] ==
-                  photon._position[1] &&
-              output_buffer._photons[index]._position[2] == photon._position[2],
-          "fail");
-      myassert(output_buffer._photons[index]._direction[0] != 0. ||
-                   output_buffer._photons[index]._direction[1] != 0. ||
-                   output_buffer._photons[index]._direction[2] != 0.,
-               "size: " << output_buffer._actual_size);
-
-      // increase the active size of the output buffer by 1 (we added a photon)
-      ++output_buffer._actual_size;
+      myassert(output_buffer[index]._position[0] == photon._position[0] &&
+                   output_buffer[index]._position[1] == photon._position[1] &&
+                   output_buffer[index]._position[2] == photon._position[2],
+               "fail");
+      myassert(output_buffer[index]._direction[0] != 0. ||
+                   output_buffer[index]._direction[1] != 0. ||
+                   output_buffer[index]._direction[2] != 0.,
+               "size: " << output_buffer.size());
 
       // check that the output buffer did not overflow
-      myassert(output_buffer._actual_size <= PHOTONBUFFER_SIZE,
-               "output buffer size: " << output_buffer._actual_size);
+      myassert(output_buffer.size() <= PHOTONBUFFER_SIZE,
+               "output buffer size: " << output_buffer.size());
     }
   }
 }
@@ -543,12 +538,12 @@ inline static void do_reemission(PhotonBuffer &buffer,
   // we will be overwriting non-reemitted photons, that's why we need two index
   // variables
   unsigned int index = 0;
-  for (unsigned int i = 0; i < buffer._actual_size; ++i) {
+  for (unsigned int i = 0; i < buffer.size(); ++i) {
     // only a fraction (= 'reemission_probability') of the photons is actually
     // reemitted
     if (random_generator.get_uniform_random_double() < reemission_probability) {
       // give the photon a new random isotropic direction
-      Photon &photon = buffer._photons[i];
+      Photon &photon = buffer[i];
       get_random_direction(random_generator, photon._direction,
                            photon._inverse_direction);
       // reset the current optical depth (always zero) and target
@@ -557,13 +552,13 @@ inline static void do_reemission(PhotonBuffer &buffer,
           -std::log(random_generator.get_uniform_random_double());
       // NOTE: we can never overwrite a photon that should be preserved (we
       // either overwrite the photon itself, or a photon that was not reemitted)
-      buffer._photons[index] = photon;
+      buffer[index] = photon;
       ++index;
     }
   }
   // update the active size of the buffer: some photons were not reemitted, so
   // the active size will shrink
-  buffer._actual_size = index;
+  buffer.grow(index);
 }
 
 /**
@@ -630,8 +625,8 @@ inline void create_copies(std::vector< DensitySubGrid * > &gridvec,
       const unsigned int copy = copies[i] + j - 1;
       gridvec[copy]->set_neighbour(0, copy);
       const unsigned int active_buffer = new_buffers.get_free_buffer();
-      new_buffers[active_buffer]._sub_grid_index = copy;
-      new_buffers[active_buffer]._direction = TRAVELDIRECTION_INSIDE;
+      new_buffers[active_buffer].set_subgrid_index(copy);
+      new_buffers[active_buffer].set_direction(TRAVELDIRECTION_INSIDE);
       gridvec[copy]->set_active_buffer(0, active_buffer);
     }
     // now do the actual neighbours
@@ -648,9 +643,9 @@ inline void create_copies(std::vector< DensitySubGrid * > &gridvec,
             const unsigned int ngb_copy = copies[original_ngb] + k - 1;
             gridvec[copy]->set_neighbour(j, ngb_copy);
             const unsigned int active_buffer = new_buffers.get_free_buffer();
-            new_buffers[active_buffer]._sub_grid_index = ngb_copy;
-            new_buffers[active_buffer]._direction =
-                TravelDirections::output_to_input_direction(j);
+            new_buffers[active_buffer].set_subgrid_index(ngb_copy);
+            new_buffers[active_buffer].set_direction(
+                TravelDirections::output_to_input_direction(j));
             gridvec[copy]->set_active_buffer(j, active_buffer);
           }
         } else {
@@ -670,9 +665,9 @@ inline void create_copies(std::vector< DensitySubGrid * > &gridvec,
                                   : original_ngb;
               gridvec[copy]->set_neighbour(j, ngb_copy);
               const unsigned int active_buffer = new_buffers.get_free_buffer();
-              new_buffers[active_buffer]._sub_grid_index = ngb_copy;
-              new_buffers[active_buffer]._direction =
-                  TravelDirections::output_to_input_direction(j);
+              new_buffers[active_buffer].set_subgrid_index(ngb_copy);
+              new_buffers[active_buffer].set_direction(
+                  TravelDirections::output_to_input_direction(j));
               gridvec[copy]->set_active_buffer(j, active_buffer);
             }
           } else {
@@ -686,9 +681,9 @@ inline void create_copies(std::vector< DensitySubGrid * > &gridvec,
                   copies[original_ngb] + (k - 1) * number_of_own_copies;
               gridvec[copy]->set_neighbour(j, ngb_copy);
               const unsigned int active_buffer = new_buffers.get_free_buffer();
-              new_buffers[active_buffer]._sub_grid_index = ngb_copy;
-              new_buffers[active_buffer]._direction =
-                  TravelDirections::output_to_input_direction(j);
+              new_buffers[active_buffer].set_subgrid_index(ngb_copy);
+              new_buffers[active_buffer].set_direction(
+                  TravelDirections::output_to_input_direction(j));
               gridvec[copy]->set_active_buffer(j, active_buffer);
             }
           }
@@ -1003,8 +998,8 @@ inline void execute_photon_traversal_task(
 
   const unsigned int current_buffer_index = task._buffer;
   PhotonBuffer &buffer = new_buffers[current_buffer_index];
-  const unsigned int igrid = buffer._sub_grid_index;
-  DensitySubGrid &this_grid = *gridvec[buffer._sub_grid_index];
+  const unsigned int igrid = buffer.get_subgrid_index();
+  DensitySubGrid &this_grid = *gridvec[igrid];
 
   myassert(costs.get_process(igrid) == MPI_rank,
            "This process should not be working on this subgrid!");
@@ -1016,7 +1011,7 @@ inline void execute_photon_traversal_task(
     const unsigned int ngb = this_grid.get_neighbour(i);
     if (ngb != NEIGHBOUR_OUTSIDE) {
       local_buffer_flags[i] = true;
-      local_buffers[i]._actual_size = 0;
+      local_buffers[i].reset();
     } else {
       local_buffer_flags[i] = false;
     }
@@ -1028,7 +1023,7 @@ inline void execute_photon_traversal_task(
   }
 
   // keep track of the original number of photons
-  unsigned int num_photon_done_now = buffer._actual_size;
+  unsigned int num_photon_done_now = buffer.size();
 
   // add to the photon cost of this subgrid (we need to do this now, as we will
   // be subtracting non-finished packets from num_photon_done_now below)
@@ -1046,18 +1041,18 @@ inline void execute_photon_traversal_task(
   for (int i = TRAVELDIRECTION_NUMBER - 1; i >= 0; --i) {
 
     // only process enabled, non-empty output buffers
-    if (local_buffer_flags[i] && local_buffers[i]._actual_size > 0) {
+    if (local_buffer_flags[i] && local_buffers[i].size() > 0) {
 
       // photon packets that are still present in an output buffer
       // are not done yet
-      num_photon_done_now -= local_buffers[i]._actual_size;
+      num_photon_done_now -= local_buffers[i].size();
 
       // move photon packets from the local temporary buffer (that is
       // guaranteed to be large enough) to the actual output buffer
       // for that direction (which might cause on overflow)
       const unsigned int ngb = this_grid.get_neighbour(i);
       unsigned int new_index = this_grid.get_active_buffer(i);
-      if (new_buffers[new_index]._actual_size == 0) {
+      if (new_buffers[new_index].size() == 0) {
         // we are adding photons to an empty buffer
         atomic_pre_decrement(num_empty);
       }
@@ -1074,7 +1069,7 @@ inline void execute_photon_traversal_task(
         // buffer, set it as the active buffer for this output
         // direction
         this_grid.set_active_buffer(i, add_index);
-        if (new_buffers[add_index]._actual_size == 0) {
+        if (new_buffers[add_index].size() == 0) {
           // we have created a new empty buffer
           atomic_pre_increment(num_empty);
         }
@@ -1088,7 +1083,7 @@ inline void execute_photon_traversal_task(
           if (costs.get_process(ngb) != MPI_rank) {
             const size_t task_index = tasks.get_free_element();
             Task &new_task = tasks[task_index];
-            new_task._cell = new_buffers[new_index]._sub_grid_index;
+            new_task._cell = new_buffers[new_index].get_subgrid_index();
             new_task._buffer = new_index;
             new_task._type = TASKTYPE_SEND;
             // a send task has no direct dependencies
@@ -1098,10 +1093,10 @@ inline void execute_photon_traversal_task(
             ++num_tasks_to_add;
           } else {
             DensitySubGrid &subgrid =
-                *gridvec[new_buffers[new_index]._sub_grid_index];
+                *gridvec[new_buffers[new_index].get_subgrid_index()];
             const size_t task_index = tasks.get_free_element();
             Task &new_task = tasks[task_index];
-            new_task._cell = new_buffers[new_index]._sub_grid_index;
+            new_task._cell = new_buffers[new_index].get_subgrid_index();
             new_task._buffer = new_index;
             new_task._type = TASKTYPE_PHOTON_TRAVERSAL;
 
@@ -1118,7 +1113,7 @@ inline void execute_photon_traversal_task(
         } else {
           const size_t task_index = tasks.get_free_element();
           Task &new_task = tasks[task_index];
-          new_task._cell = new_buffers[new_index]._sub_grid_index;
+          new_task._cell = new_buffers[new_index].get_subgrid_index();
           new_task._buffer = new_index;
           new_task._type = TASKTYPE_PHOTON_REEMIT;
           // a reemit task has no direct dependencies
@@ -1128,9 +1123,9 @@ inline void execute_photon_traversal_task(
           ++num_tasks_to_add;
         }
 
-        myassert(new_buffers[add_index]._sub_grid_index == ngb,
+        myassert(new_buffers[add_index].get_subgrid_index() == ngb,
                  "Wrong subgrid");
-        myassert(new_buffers[add_index]._direction ==
+        myassert(new_buffers[add_index].get_direction() ==
                      TravelDirections::output_to_input_direction(i),
                  "Wrong direction");
 
@@ -1143,9 +1138,9 @@ inline void execute_photon_traversal_task(
     // nothing was added can still be non-empty...
     if (local_buffer_flags[i]) {
       unsigned int new_index = this_grid.get_active_buffer(i);
-      if (new_buffers[new_index]._actual_size > largest_size) {
+      if (new_buffers[new_index].size() > largest_size) {
         largest_index = i;
-        largest_size = new_buffers[new_index]._actual_size;
+        largest_size = new_buffers[new_index].size();
       }
     }
 
@@ -1206,14 +1201,14 @@ inline void execute_photon_reemit_task(
   PhotonBuffer &buffer = new_buffers[current_buffer_index];
 
   // keep track of the original number of photons in the buffer
-  unsigned int num_photon_done_now = buffer._actual_size;
+  unsigned int num_photon_done_now = buffer.size();
 
   // reemit photon packets
   do_reemission(buffer, random_generator, reemission_probability);
 
   // find the number of photon packets that was absorbed and not
   // reemitted...
-  num_photon_done_now -= buffer._actual_size;
+  num_photon_done_now -= buffer.size();
   // ...and add it to the global count
   atomic_pre_add(num_photon_done, num_photon_done_now);
 
@@ -1230,7 +1225,8 @@ inline void execute_photon_reemit_task(
   new_task._dependency = subgrid.get_dependency();
 
   // add it to the queue of the corresponding thread
-  queues_to_add[num_tasks_to_add] = costs.get_thread(buffer._sub_grid_index);
+  queues_to_add[num_tasks_to_add] =
+      costs.get_thread(buffer.get_subgrid_index());
   tasks_to_add[num_tasks_to_add] = task_index;
   ++num_tasks_to_add;
 
@@ -1285,7 +1281,7 @@ inline void execute_send_task(Task &task, const int thread_id,
   buffer.pack(&MPI_buffer[request_index * PHOTONBUFFER_MPI_SIZE]);
 
   // send the message (non-blocking)
-  const int sendto = costs.get_process(buffer._sub_grid_index);
+  const int sendto = costs.get_process(buffer.get_subgrid_index());
   MPI_Isend(&MPI_buffer[request_index * PHOTONBUFFER_MPI_SIZE],
             PHOTONBUFFER_MPI_SIZE, MPI_PACKED, sendto,
             MPIMESSAGETAG_PHOTONBUFFER, MPI_COMM_WORLD, &request);
@@ -1474,10 +1470,10 @@ inline void activate_buffer(unsigned int &current_index, const int thread_id,
             // Create a new empty buffer and set it as active buffer for
             // this subgrid.
             const unsigned int new_index = new_buffers.get_free_buffer();
-            new_buffers[new_index]._sub_grid_index =
-                new_buffers[non_full_index]._sub_grid_index;
-            new_buffers[new_index]._direction =
-                new_buffers[non_full_index]._direction;
+            new_buffers[new_index].set_subgrid_index(
+                new_buffers[non_full_index].get_subgrid_index());
+            new_buffers[new_index].set_direction(
+                new_buffers[non_full_index].get_direction());
             gridvec[igrid]->set_active_buffer(largest_index, new_index);
             // we are creating a new active photon buffer
             atomic_pre_increment(num_active_buffers);
@@ -1486,25 +1482,25 @@ inline void activate_buffer(unsigned int &current_index, const int thread_id,
 
             const size_t task_index = tasks.get_free_element();
             Task &new_task = tasks[task_index];
-            new_task._cell = new_buffers[non_full_index]._sub_grid_index;
+            new_task._cell = new_buffers[non_full_index].get_subgrid_index();
             new_task._buffer = non_full_index;
             if (largest_index > 0) {
               if (costs.get_process(
-                      new_buffers[non_full_index]._sub_grid_index) !=
+                      new_buffers[non_full_index].get_subgrid_index()) !=
                   MPI_rank) {
                 new_task._type = TASKTYPE_SEND;
                 // a send task has no dependencies
                 general_queue.add_task(task_index);
               } else {
                 DensitySubGrid &subgrid =
-                    *gridvec[new_buffers[non_full_index]._sub_grid_index];
+                    *gridvec[new_buffers[non_full_index].get_subgrid_index()];
                 new_task._type = TASKTYPE_PHOTON_TRAVERSAL;
 
                 // add dependency
                 new_task._dependency = subgrid.get_dependency();
 
                 const unsigned int queue_index = costs.get_thread(
-                    new_buffers[non_full_index]._sub_grid_index);
+                    new_buffers[non_full_index].get_subgrid_index());
                 new_queues[queue_index]->add_task(task_index);
               }
             } else {
@@ -1520,11 +1516,11 @@ inline void activate_buffer(unsigned int &current_index, const int thread_id,
                  ++ibuffer) {
               if (gridvec[igrid]->get_neighbour(ibuffer) != NEIGHBOUR_OUTSIDE &&
                   new_buffers[gridvec[igrid]->get_active_buffer(ibuffer)]
-                          ._actual_size > new_largest_size) {
+                          .size() > new_largest_size) {
                 new_largest_index = ibuffer;
                 new_largest_size =
                     new_buffers[gridvec[igrid]->get_active_buffer(ibuffer)]
-                        ._actual_size;
+                        .size();
               }
             }
             gridvec[igrid]->set_largest_buffer(new_largest_index,
@@ -1637,7 +1633,7 @@ inline void check_for_incoming_communications(
       // fill the buffer
       input_buffer.unpack(buffer);
 
-      unsigned int subgrid_index = input_buffer._sub_grid_index;
+      unsigned int subgrid_index = input_buffer.get_subgrid_index();
       myassert(costs.get_process(subgrid_index) == MPI_rank,
                "Message arrived on wrong process!");
       unsigned int thread_index = costs.get_thread(subgrid_index);
@@ -2294,8 +2290,8 @@ int main(int argc, char **argv) {
         if (ngb_index != NEIGHBOUR_OUTSIDE) {
           const unsigned int active_buffer = new_buffers.get_free_buffer();
           PhotonBuffer &buffer = new_buffers[active_buffer];
-          buffer._sub_grid_index = ngb_index;
-          buffer._direction = TravelDirections::output_to_input_direction(i);
+          buffer.set_subgrid_index(ngb_index);
+          buffer.set_direction(TravelDirections::output_to_input_direction(i));
           this_grid.set_active_buffer(i, active_buffer);
         }
       }
@@ -2395,9 +2391,9 @@ int main(int argc, char **argv) {
       PhotonBuffer local_buffers[TRAVELDIRECTION_NUMBER];
       bool local_buffer_flags[TRAVELDIRECTION_NUMBER];
       for (int i = 0; i < TRAVELDIRECTION_NUMBER; ++i) {
-        local_buffers[i]._direction =
-            TravelDirections::output_to_input_direction(i);
-        local_buffers[i]._actual_size = 0;
+        local_buffers[i].set_direction(
+            TravelDirections::output_to_input_direction(i));
+        local_buffers[i].reset();
         local_buffer_flags[i] = true;
       }
 

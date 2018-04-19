@@ -72,7 +72,7 @@ public:
    * @param index Index of a buffer that was in use.
    */
   inline void free_buffer(const size_t index) {
-    _memory_space[index]._actual_size = 0;
+    _memory_space[index].reset();
     _memory_space.free_element(index);
   }
 
@@ -91,30 +91,28 @@ public:
    */
   inline size_t add_photons(const size_t index, PhotonBuffer &buffer) {
     PhotonBuffer &buffer_target = _memory_space[index];
-    unsigned int &counter_target = buffer_target._actual_size;
-    const unsigned int size_in = buffer._actual_size;
+    const unsigned int size_in = buffer.size();
     unsigned int counter_in = 0;
-    while (counter_target < PHOTONBUFFER_SIZE && counter_in < size_in) {
-      buffer_target._photons[counter_target] = buffer._photons[counter_in];
-      ++counter_target;
+    while (buffer_target.size() < PHOTONBUFFER_SIZE && counter_in < size_in) {
+      const unsigned int target_index = buffer_target.get_next_free_photon();
+      buffer_target[target_index] = buffer[counter_in];
       ++counter_in;
     }
     size_t index_out = index;
-    if (counter_target == PHOTONBUFFER_SIZE) {
+    if (buffer_target.size() == PHOTONBUFFER_SIZE) {
       index_out = get_free_buffer();
       // note that the hungry other threads might already be attacking this
       // buffer. We need to make sure they release it without deleting it if
       // it does not (yet) contain any photons.
       PhotonBuffer &buffer_target_new = _memory_space[index_out];
       // copy the old buffer properties
-      buffer_target_new._sub_grid_index = buffer_target._sub_grid_index;
-      buffer_target_new._direction = buffer_target._direction;
-      unsigned int &counter_target_new = buffer_target_new._actual_size;
+      buffer_target_new.set_subgrid_index(buffer_target.get_subgrid_index());
+      buffer_target_new.set_direction(buffer_target.get_direction());
       // maybe assert that this value is indeed 0?
       while (counter_in < size_in) {
-        buffer_target_new._photons[counter_target_new] =
-            buffer._photons[counter_in];
-        ++counter_target_new;
+        const unsigned int target_index =
+            buffer_target_new.get_next_free_photon();
+        buffer_target_new[target_index] = buffer[counter_in];
         ++counter_in;
       }
     }
