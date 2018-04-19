@@ -31,6 +31,8 @@
 /*! @brief Uncomment this to enable run time assertions. */
 #define DO_ASSERTS
 
+int MPI_rank, MPI_size;
+
 #include "Assert.hpp"
 #include "DensitySubGrid.hpp"
 #include "Log.hpp"

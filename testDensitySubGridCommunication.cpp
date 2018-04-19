@@ -71,18 +71,18 @@ int main(int argc, char **argv) {
   const int ncell[3] = {3, 4, 5};
   DensitySubGrid test_grid(box, ncell);
   RandomGenerator random_generator(42);
-  test_grid._computational_cost = random_generator.get_random_integer();
+  test_grid.add_computational_cost(random_generator.get_random_integer());
   for (unsigned int i = 0; i < TRAVELDIRECTION_NUMBER; ++i) {
-    test_grid._ngbs[i] = random_generator.get_random_integer();
+    test_grid.set_neighbour(i, random_generator.get_random_integer());
   }
-  test_grid._subgrid_index = random_generator.get_random_integer();
   const int tot_ncell = ncell[0] * ncell[1] * ncell[2];
   for (int i = 0; i < tot_ncell; ++i) {
-    test_grid._number_density[i] = random_generator.get_uniform_random_double();
-    test_grid._neutral_fraction[i] =
-        random_generator.get_uniform_random_double();
-    test_grid._intensity_integral[i] =
-        random_generator.get_uniform_random_double();
+    test_grid.set_number_density(i,
+                                 random_generator.get_uniform_random_double());
+    test_grid.set_neutral_fraction(
+        i, random_generator.get_uniform_random_double());
+    test_grid.set_intensity_integral(
+        i, random_generator.get_uniform_random_double());
   }
 
   // now communicate:
@@ -107,7 +107,7 @@ int main(int argc, char **argv) {
     recv_grid.unpack(MPI_buffer, buffer_size);
 
     // check if the result is what it should be
-    densitysubgrid_check_equal(test_grid, recv_grid);
+    test_grid.check_equal(recv_grid);
   } // other ranks do nothing
 
   MPI_Barrier(MPI_COMM_WORLD);

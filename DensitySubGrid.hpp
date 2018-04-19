@@ -68,70 +68,23 @@
  *  time. */
 #define DENSITYSUBGRID_FIXED_MPI_SIZE                                          \
   (sizeof(unsigned long) + 9 * sizeof(double) + 4 * sizeof(int) +              \
-   (TRAVELDIRECTION_NUMBER + 1) * sizeof(unsigned int))
+   TRAVELDIRECTION_NUMBER * sizeof(unsigned int))
 
 /*! @brief Number of variables stored in each cell of the DensitySubGrid
  *  (excluding potential lock variables). */
 #define DENSITYSUBGRID_NUMBER_OF_CELL_VARIABLES 3
 
 /**
- * @brief Check if the given DensitySubGrids are the same.
- *
- * @param a First DensitySubGrid.
- * @param b Second DensitySubGrid.
- */
-#define densitysubgrid_check_equal(a, b)                                       \
-  myassert(a._computational_cost == b._computational_cost,                     \
-           "Costs not the same!");                                             \
-  myassert(a._anchor[0] == b._anchor[0], "Anchor not the same!");              \
-  myassert(a._anchor[1] == b._anchor[1], "Anchor not the same!");              \
-  myassert(a._anchor[2] == b._anchor[2], "Anchor not the same!");              \
-  myassert(a._cell_size[0] == b._cell_size[0], "Cell size not the same!");     \
-  myassert(a._cell_size[1] == b._cell_size[1], "Cell size not the same!");     \
-  myassert(a._cell_size[2] == b._cell_size[2], "Cell size not the same!");     \
-  myassert(a._inv_cell_size[0] == b._inv_cell_size[0],                         \
-           "Inverse cell size not the same!");                                 \
-  myassert(a._inv_cell_size[1] == b._inv_cell_size[1],                         \
-           "Inverse cell size not the same!");                                 \
-  myassert(a._inv_cell_size[2] == b._inv_cell_size[2],                         \
-           "Inverse cell size not the same!");                                 \
-  myassert(a._number_of_cells[0] == b._number_of_cells[0],                     \
-           "Number of cells not the same!");                                   \
-  myassert(a._number_of_cells[1] == b._number_of_cells[1],                     \
-           "Number of cells not the same!");                                   \
-  myassert(a._number_of_cells[2] == b._number_of_cells[2],                     \
-           "Number of cells not the same!");                                   \
-  myassert(a._number_of_cells[3] == b._number_of_cells[3],                     \
-           "Number of cells not the same!");                                   \
-  for (unsigned int i = 0; i < TRAVELDIRECTION_NUMBER; ++i) {                  \
-    myassert(a._ngbs[i] == b._ngbs[i], "Neighbours not the same!");            \
-  }                                                                            \
-  myassert(a._subgrid_index == b._subgrid_index,                               \
-           "Subgrid indices not the same!");                                   \
-  const int tot_num_cells = a._number_of_cells[0] * a._number_of_cells[3];     \
-  for (int i = 0; i < tot_num_cells; ++i) {                                    \
-    myassert(a._number_density[i] == b._number_density[i],                     \
-             "Number density not the same!");                                  \
-    myassert(a._neutral_fraction[i] == b._neutral_fraction[i],                 \
-             "Neutral fraction not the same!");                                \
-    myassert(a._intensity_integral[i] == b._intensity_integral[i],             \
-             "Intensity integral not the same!");                              \
-  }
-
-/**
  * @brief Small fraction of a density grid that acts as an individual density
  * grid.
  */
 class DensitySubGrid {
-public:
+private:
   /*! @brief Indices of the neighbouring subgrids. */
   unsigned int _ngbs[TRAVELDIRECTION_NUMBER];
 
   /*! @brief Indices of the active buffers. */
   unsigned int _active_buffers[TRAVELDIRECTION_NUMBER];
-
-  /*! @brief Index of the SubGrid in the subgrid list. */
-  unsigned int _subgrid_index;
 
   /*! @brief Computational cost of this subgrid. */
   unsigned long _computational_cost;
@@ -685,8 +638,6 @@ public:
              &buffer_position, MPI_COMM_WORLD);
     MPI_Pack(_ngbs, TRAVELDIRECTION_NUMBER, MPI_UNSIGNED, buffer, buffer_size,
              &buffer_position, MPI_COMM_WORLD);
-    MPI_Pack(&_subgrid_index, 1, MPI_UNSIGNED, buffer, buffer_size,
-             &buffer_position, MPI_COMM_WORLD);
 
     const int tot_num_cells = _number_of_cells[0] * _number_of_cells[3];
     MPI_Pack(_number_density, tot_num_cells, MPI_DOUBLE, buffer, buffer_size,
@@ -721,8 +672,6 @@ public:
                MPI_INT, MPI_COMM_WORLD);
     MPI_Unpack(buffer, buffer_size, &buffer_position, _ngbs,
                TRAVELDIRECTION_NUMBER, MPI_UNSIGNED, MPI_COMM_WORLD);
-    MPI_Unpack(buffer, buffer_size, &buffer_position, &_subgrid_index, 1,
-               MPI_UNSIGNED, MPI_COMM_WORLD);
 
     const int tot_num_cells = new_number_of_cells[0] * new_number_of_cells[3];
     // DensitySubgrids don't necessarily have the same size, so we make sure
@@ -771,6 +720,39 @@ public:
     for (int i = 0; i < tot_ncell; ++i) {
       _intensity_integral[i] += copy._intensity_integral[i];
     }
+  }
+
+  /**
+   * @brief Set the number density for the cell with the given index.
+   *
+   * @param index Index of a cell.
+   * @param number_density New value for the number density (in kg m^-3).
+   */
+  inline void set_number_density(const unsigned int index,
+                                 const double number_density) {
+    _number_density[index] = number_density;
+  }
+
+  /**
+   * @brief Set the neutral fraction for the cell with the given index.
+   *
+   * @param index Index of a cell.
+   * @param number_density New value for the neutral fraction.
+   */
+  inline void set_neutral_fraction(const unsigned int index,
+                                   const double neutral_fraction) {
+    _neutral_fraction[index] = neutral_fraction;
+  }
+
+  /**
+   * @brief Set the intensity integral for the cell with the given index.
+   *
+   * @param index Index of a cell.
+   * @param number_density New value for the intensity integral.
+   */
+  inline void set_intensity_integral(const unsigned int index,
+                                     const double intensity_integral) {
+    _intensity_integral[index] = intensity_integral;
   }
 
   /**
@@ -1088,6 +1070,51 @@ public:
    * @return Pointer to the dependency lock for this subgrid.
    */
   inline Lock *get_dependency() { return &_dependency; }
+
+  /**
+   * @brief Check if the given DensitySubGrid is equal to this one.
+   *
+   * We only compare variables that are communicated over MPI.
+   *
+   * @param other Other DensitySubGrid.
+   */
+  inline void check_equal(const DensitySubGrid &other) {
+
+    myassert(_computational_cost == other._computational_cost,
+             "Costs not the same!");
+    myassert(_anchor[0] == other._anchor[0], "Anchor not the same!");
+    myassert(_anchor[1] == other._anchor[1], "Anchor not the same!");
+    myassert(_anchor[2] == other._anchor[2], "Anchor not the same!");
+    myassert(_cell_size[0] == other._cell_size[0], "Cell size not the same!");
+    myassert(_cell_size[1] == other._cell_size[1], "Cell size not the same!");
+    myassert(_cell_size[2] == other._cell_size[2], "Cell size not the same!");
+    myassert(_inv_cell_size[0] == other._inv_cell_size[0],
+             "Inverse cell size not the same!");
+    myassert(_inv_cell_size[1] == other._inv_cell_size[1],
+             "Inverse cell size not the same!");
+    myassert(_inv_cell_size[2] == other._inv_cell_size[2],
+             "Inverse cell size not the same!");
+    myassert(_number_of_cells[0] == other._number_of_cells[0],
+             "Number of cells not the same!");
+    myassert(_number_of_cells[1] == other._number_of_cells[1],
+             "Number of cells not the same!");
+    myassert(_number_of_cells[2] == other._number_of_cells[2],
+             "Number of cells not the same!");
+    myassert(_number_of_cells[3] == other._number_of_cells[3],
+             "Number of cells not the same!");
+    for (unsigned int i = 0; i < TRAVELDIRECTION_NUMBER; ++i) {
+      myassert(_ngbs[i] == other._ngbs[i], "Neighbours not the same!");
+    }
+    const int tot_num_cells = _number_of_cells[0] * _number_of_cells[3];
+    for (int i = 0; i < tot_num_cells; ++i) {
+      myassert(_number_density[i] == other._number_density[i],
+               "Number density not the same!");
+      myassert(_neutral_fraction[i] == other._neutral_fraction[i],
+               "Neutral fraction not the same!");
+      myassert(_intensity_integral[i] == other._intensity_integral[i],
+               "Intensity integral not the same!");
+    }
+  }
 };
 
 #endif // DENSITYSUBGRID_HPP
