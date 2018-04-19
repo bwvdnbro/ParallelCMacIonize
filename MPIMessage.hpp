@@ -54,7 +54,7 @@ enum MPIMessageTag {
     message._rank = destination;                                               \
     message._thread = thread;                                                  \
     message._tag = tag;                                                        \
-    task_tick(message._timestamp);                                             \
+    cpucycle_tick(message._timestamp);                                         \
   }
 
 /**
@@ -71,7 +71,7 @@ enum MPIMessageTag {
     message._rank = source;                                                    \
     message._thread = thread;                                                  \
     message._tag = tag;                                                        \
-    task_tick(message._timestamp);                                             \
+    cpucycle_tick(message._timestamp);                                         \
   }
 
 /**

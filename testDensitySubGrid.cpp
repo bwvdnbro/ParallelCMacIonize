@@ -159,8 +159,11 @@ inline void output_tasks(const unsigned int iloop,
       const size_t tsize = tasks.size();
       for (size_t i = 0; i < tsize; ++i) {
         const Task &task = tasks[i];
-        ofile << MPI_rank << "\t" << task._thread_id << "\t" << task._start_time
-              << "\t" << task._end_time << "\t" << task._type << "\n";
+        int type, thread_id;
+        unsigned long start, end;
+        task.get_timing_information(type, thread_id, start, end);
+        ofile << MPI_rank << "\t" << thread_id << "\t" << start << "\t" << end
+              << "\t" << type << "\n";
       }
     }
     // only one process at a time is allowed to write
@@ -917,7 +920,7 @@ inline void execute_source_photon_task(
   // we will create a new buffer
   atomic_pre_increment(num_active_buffers);
 
-  unsigned int num_photon_this_loop = task._buffer;
+  unsigned int num_photon_this_loop = task.get_buffer();
 
   // get a free photon buffer in the central queue
   unsigned int buffer_index = new_buffers.get_free_buffer();
@@ -940,14 +943,14 @@ inline void execute_source_photon_task(
   DensitySubGrid &subgrid = *gridvec[this_central_index];
   const size_t task_index = tasks.get_free_element();
   Task &new_task = tasks[task_index];
-  new_task._type = TASKTYPE_PHOTON_TRAVERSAL;
-  new_task._cell = this_central_index;
-  new_task._buffer = buffer_index;
+  new_task.set_type(TASKTYPE_PHOTON_TRAVERSAL);
+  new_task.set_subgrid(this_central_index);
+  new_task.set_buffer(buffer_index);
 
   // add dependency for task:
   //  - subgrid
   // (the output buffers belong to the subgrid and do not count as a dependency)
-  new_task._dependency = subgrid.get_dependency();
+  new_task.set_dependency(subgrid.get_dependency());
 
   queues_to_add[num_tasks_to_add] = central_queue[which_central_index];
   tasks_to_add[num_tasks_to_add] = task_index;
@@ -994,12 +997,12 @@ inline void execute_photon_traversal_task(
 
   // variables used to determine the cost of photon traversal tasks
   unsigned long task_start, task_end;
-  task_tick(task_start);
+  cpucycle_tick(task_start);
 
   // log the start of the task
   task.start(thread_id);
 
-  const unsigned int current_buffer_index = task._buffer;
+  const unsigned int current_buffer_index = task.get_buffer();
   PhotonBuffer &buffer = new_buffers[current_buffer_index];
   const unsigned int igrid = buffer.get_subgrid_index();
   DensitySubGrid &this_grid = *gridvec[igrid];
@@ -1086,9 +1089,9 @@ inline void execute_photon_traversal_task(
           if (costs.get_process(ngb) != MPI_rank) {
             const size_t task_index = tasks.get_free_element();
             Task &new_task = tasks[task_index];
-            new_task._cell = new_buffers[new_index].get_subgrid_index();
-            new_task._buffer = new_index;
-            new_task._type = TASKTYPE_SEND;
+            new_task.set_subgrid(new_buffers[new_index].get_subgrid_index());
+            new_task.set_buffer(new_index);
+            new_task.set_type(TASKTYPE_SEND);
             // a send task has no direct dependencies
             // add the task to the general queue
             queues_to_add[num_tasks_to_add] = -1;
@@ -1099,13 +1102,13 @@ inline void execute_photon_traversal_task(
                 *gridvec[new_buffers[new_index].get_subgrid_index()];
             const size_t task_index = tasks.get_free_element();
             Task &new_task = tasks[task_index];
-            new_task._cell = new_buffers[new_index].get_subgrid_index();
-            new_task._buffer = new_index;
-            new_task._type = TASKTYPE_PHOTON_TRAVERSAL;
+            new_task.set_subgrid(new_buffers[new_index].get_subgrid_index());
+            new_task.set_buffer(new_index);
+            new_task.set_type(TASKTYPE_PHOTON_TRAVERSAL);
 
             // add dependencies for task:
             //  - subgrid
-            new_task._dependency = subgrid.get_dependency();
+            new_task.set_dependency(subgrid.get_dependency());
 
             // add the task to the queue of the corresponding thread
             const unsigned int queue_index = costs.get_thread(ngb);
@@ -1116,9 +1119,9 @@ inline void execute_photon_traversal_task(
         } else {
           const size_t task_index = tasks.get_free_element();
           Task &new_task = tasks[task_index];
-          new_task._cell = new_buffers[new_index].get_subgrid_index();
-          new_task._buffer = new_index;
-          new_task._type = TASKTYPE_PHOTON_REEMIT;
+          new_task.set_subgrid(new_buffers[new_index].get_subgrid_index());
+          new_task.set_buffer(new_index);
+          new_task.set_type(TASKTYPE_PHOTON_REEMIT);
           // a reemit task has no direct dependencies
           // add the task to the general queue
           queues_to_add[num_tasks_to_add] = -1;
@@ -1165,7 +1168,7 @@ inline void execute_photon_traversal_task(
   task.stop();
 
   // update the cost computation for this subgrid
-  task_tick(task_end);
+  cpucycle_tick(task_end);
   costs.add_computational_cost(igrid, task_end - task_start);
 }
 
@@ -1200,7 +1203,7 @@ inline void execute_photon_reemit_task(
   task.start(thread_id);
 
   // get the buffer
-  const unsigned int current_buffer_index = task._buffer;
+  const unsigned int current_buffer_index = task.get_buffer();
   PhotonBuffer &buffer = new_buffers[current_buffer_index];
 
   // keep track of the original number of photons in the buffer
@@ -1217,15 +1220,15 @@ inline void execute_photon_reemit_task(
 
   // the reemitted photon packets are ready to be propagated: create
   // a new propagation task
-  DensitySubGrid &subgrid = *gridvec[task._cell];
+  DensitySubGrid &subgrid = *gridvec[task.get_subgrid()];
   const size_t task_index = tasks.get_free_element();
   Task &new_task = tasks[task_index];
-  new_task._type = TASKTYPE_PHOTON_TRAVERSAL;
-  new_task._cell = task._cell;
-  new_task._buffer = current_buffer_index;
+  new_task.set_type(TASKTYPE_PHOTON_TRAVERSAL);
+  new_task.set_subgrid(task.get_subgrid());
+  new_task.set_buffer(current_buffer_index);
 
   // add dependency
-  new_task._dependency = subgrid.get_dependency();
+  new_task.set_dependency(subgrid.get_dependency());
 
   // add it to the queue of the corresponding thread
   queues_to_add[num_tasks_to_add] =
@@ -1266,7 +1269,7 @@ inline void execute_send_task(Task &task, const int thread_id,
   task.start(thread_id);
 
   // get the buffer
-  const unsigned int current_buffer_index = task._buffer;
+  const unsigned int current_buffer_index = task.get_buffer();
   PhotonBuffer &buffer = new_buffers[current_buffer_index];
 
   // pack it
@@ -1370,7 +1373,7 @@ inline void execute_task(
   myassert(!task.done(), "Task already executed!");
 
   // Different tasks are processed in different ways.
-  switch (task._type) {
+  switch (task.get_type()) {
   case TASKTYPE_SOURCE_PHOTON:
 
     /// generate random photon packets from the source
@@ -1386,7 +1389,7 @@ inline void execute_task(
 
     /// propagate photon packets from a buffer through a subgrid
 
-    costs.set_thread(task._cell, thread_id);
+    costs.set_thread(task.get_subgrid(), thread_id);
     execute_photon_traversal_task(
         task, thread_id, tasks, new_queues, general_queue, new_buffers, gridvec,
         local_buffers, local_buffer_flags, reemission_probability, costs,
@@ -1416,7 +1419,7 @@ inline void execute_task(
   default:
 
     // should never happen
-    cmac_error("Unknown task: %i!", task._type);
+    cmac_error("Unknown task: %i!", task.get_type());
   }
 
   // we're done with the task, unlock its dependency
@@ -1485,29 +1488,30 @@ inline void activate_buffer(unsigned int &current_index, const int thread_id,
 
             const size_t task_index = tasks.get_free_element();
             Task &new_task = tasks[task_index];
-            new_task._cell = new_buffers[non_full_index].get_subgrid_index();
-            new_task._buffer = non_full_index;
+            new_task.set_subgrid(
+                new_buffers[non_full_index].get_subgrid_index());
+            new_task.set_buffer(non_full_index);
             if (largest_index > 0) {
               if (costs.get_process(
                       new_buffers[non_full_index].get_subgrid_index()) !=
                   MPI_rank) {
-                new_task._type = TASKTYPE_SEND;
+                new_task.set_type(TASKTYPE_SEND);
                 // a send task has no dependencies
                 general_queue.add_task(task_index);
               } else {
                 DensitySubGrid &subgrid =
                     *gridvec[new_buffers[non_full_index].get_subgrid_index()];
-                new_task._type = TASKTYPE_PHOTON_TRAVERSAL;
+                new_task.set_type(TASKTYPE_PHOTON_TRAVERSAL);
 
                 // add dependency
-                new_task._dependency = subgrid.get_dependency();
+                new_task.set_dependency(subgrid.get_dependency());
 
                 const unsigned int queue_index = costs.get_thread(
                     new_buffers[non_full_index].get_subgrid_index());
                 new_queues[queue_index]->add_task(task_index);
               }
             } else {
-              new_task._type = TASKTYPE_PHOTON_REEMIT;
+              new_task.set_type(TASKTYPE_PHOTON_REEMIT);
               // a reemit task has no dependencies
               general_queue.add_task(task_index);
             }
@@ -1608,7 +1612,7 @@ inline void check_for_incoming_communications(
       // set up a dummy task to show receives in task plots
       size_t task_index = tasks.get_free_element();
       Task &receive_task = tasks[task_index];
-      receive_task._type = TASKTYPE_RECV;
+      receive_task.set_type(TASKTYPE_RECV);
 
       receive_task.start(thread_id);
 
@@ -1645,12 +1649,12 @@ inline void check_for_incoming_communications(
       DensitySubGrid &subgrid = *gridvec[subgrid_index];
       task_index = tasks.get_free_element();
       Task &new_task = tasks[task_index];
-      new_task._type = TASKTYPE_PHOTON_TRAVERSAL;
-      new_task._cell = subgrid_index;
-      new_task._buffer = buffer_index;
+      new_task.set_type(TASKTYPE_PHOTON_TRAVERSAL);
+      new_task.set_subgrid(subgrid_index);
+      new_task.set_buffer(buffer_index);
 
       // add dependencies
-      new_task._dependency = subgrid.get_dependency();
+      new_task.set_dependency(subgrid.get_dependency());
 
       // note that this statement should be last, as the buffer might
       // be processed as soon as this statement is executed
@@ -1724,7 +1728,7 @@ int main(int argc, char **argv) {
   program_timer.start();
 
   unsigned long program_start, program_end;
-  task_tick(program_start);
+  cpucycle_tick(program_start);
 
   //////////////////////////////////////////////////////////////////////////////
   /// Initialization
@@ -2412,10 +2416,10 @@ int main(int argc, char **argv) {
 
           // create task
           const size_t task_index = tasks.get_free_element();
-          tasks[task_index]._type = TASKTYPE_SOURCE_PHOTON;
+          tasks[task_index].set_type(TASKTYPE_SOURCE_PHOTON);
           // store the number of photons in the _buffer field, which is not used
           // at the moment
-          tasks[task_index]._buffer = num_photon_this_loop;
+          tasks[task_index].set_buffer(num_photon_this_loop);
           // source photon tasks have no dependencies
           general_queue.add_task(task_index);
         }
@@ -2968,7 +2972,7 @@ int main(int argc, char **argv) {
 
   //////////////////////////////////////////////////////////////////////////////
 
-  task_tick(program_end);
+  cpucycle_tick(program_end);
 
   {
     std::ofstream ptimefile("program_time.txt");
