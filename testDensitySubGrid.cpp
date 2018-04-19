@@ -116,6 +116,66 @@ int MPI_rank, MPI_size;
 #include <vector>
 
 /**
+ * @brief Initialize the message log.
+ *
+ * @param size Size in memory to reserve for the message log vector.
+ * @param message_log Message log vector.
+ * @param message_log_size Current used size of the message log vector.
+ */
+#ifdef MESSAGE_OUTPUT
+#define initialize_message_log(size, message_log, message_log_size)            \
+  if (MPI_size > 1) {                                                          \
+    message_log.resize(size);                                                  \
+  }
+#else
+#define initialize_message_log(size, message_log, message_log_size)
+#endif
+
+/**
+ * @brief Log an MPI send event.
+ *
+ * @param message_log Message log vector.
+ * @param message_log_size Current used size of the message log vector.
+ * @param destination Destination rank of the send.
+ * @param thread Thread that does the communication.
+ * @param tag Associated tag.
+ */
+#ifdef MESSAGE_OUTPUT
+#define log_send(message_log, message_log_size, destination, thread, tag)      \
+  {                                                                            \
+    MPIMessage &message = message_log[message_log_size];                       \
+    ++message_log_size;                                                        \
+    myassert(message_log_size < message_log.size(),                            \
+             "Too many messages for message log!");                            \
+    message.log_event(MPIMESSAGETYPE_SEND, destination, thread, tag);          \
+  }
+#else
+#define log_send(message_log, message_log_size, destination, thread, tag)
+#endif
+
+/**
+ * @brief Log an MPI receive event.
+ *
+ * @param message_log Message log vector.
+ * @param message_log_size Current used size of the message log vector.
+ * @param source Source rank of the communication.
+ * @param thread Thread that does the communication.
+ * @param tag Associated tag.
+ */
+#ifdef MESSAGE_OUTPUT
+#define log_recv(message_log, message_log_size, source, thread, tag)           \
+  {                                                                            \
+    MPIMessage &message = message_log[message_log_size];                       \
+    ++message_log_size;                                                        \
+    myassert(message_log_size < message_log.size(),                            \
+             "Too many messages for message log!");                            \
+    message.log_event(MPIMESSAGETYPE_RECV, source, thread, tag);               \
+  }
+#else
+#define log_recv(message_log, message_log_size, source, thread, tag)
+#endif
+
+/**
  * @brief Write a file with the start and end times of all tasks.
  *
  * @param iloop Iteration number (added to file name).
@@ -301,9 +361,11 @@ inline void output_messages(const unsigned int iloop,
       // output the cost information
       for (size_t i = 0; i < message_log_size; ++i) {
         const MPIMessage &message = message_log[i];
-        ofile << MPI_rank << "\t" << message._thread << "\t" << message._type
-              << "\t" << message._rank << "\t" << message._tag << "\t"
-              << message._timestamp << "\n";
+        int thread, type, rank, tag;
+        unsigned long timestamp;
+        message.get_output_info(type, rank, thread, tag, timestamp);
+        ofile << MPI_rank << "\t" << thread << "\t" << type << "\t" << rank
+              << "\t" << tag << "\t" << timestamp << "\n";
       }
     }
     MPI_Barrier(MPI_COMM_WORLD);
@@ -1293,11 +1355,8 @@ inline void execute_send_task(Task &task, const int thread_id,
             MPIMESSAGETAG_PHOTONBUFFER, MPI_COMM_WORLD, &request);
 
   // log the send event
-  log_send(message_log[message_log_size], sendto, thread_id,
+  log_send(message_log, message_log_size, sendto, thread_id,
            MPIMESSAGETAG_PHOTONBUFFER);
-  ++message_log_size;
-  myassert(message_log_size < message_log.size(),
-           "Too many messages for message log!");
 
   MPI_lock.unlock();
 
@@ -1625,10 +1684,7 @@ inline void check_for_incoming_communications(
                MPI_COMM_WORLD, MPI_STATUS_IGNORE);
 
       // log the receive event
-      log_recv(message_log[message_log_size], source, thread_id, tag);
-      ++message_log_size;
-      myassert(message_log_size < message_log.size(),
-               "Too many messages for message log!");
+      log_recv(message_log, message_log_size, source, thread_id, tag);
 
       // get a new free buffer
       unsigned int buffer_index = new_buffers.get_free_buffer();
@@ -1675,10 +1731,7 @@ inline void check_for_incoming_communications(
                MPI_STATUS_IGNORE);
 
       // log the receive event
-      log_recv(message_log[message_log_size], source, thread_id, tag);
-      ++message_log_size;
-      myassert(message_log_size < message_log.size(),
-               "Too many messages for message log!");
+      log_recv(message_log, message_log_size, source, thread_id, tag);
 
       // add the tally to the current total
       atomic_pre_add(num_photon_done_since_last, tally);
@@ -1696,10 +1749,7 @@ inline void check_for_incoming_communications(
                MPI_STATUS_IGNORE);
 
       // log the receive event
-      log_recv(message_log[message_log_size], source, thread_id, tag);
-      ++message_log_size;
-      myassert(message_log_size < message_log.size(),
-               "Too many messages for message log!");
+      log_recv(message_log, message_log_size, source, thread_id, tag);
 
       // set the stop condition, all threads will stop the propagation step
       global_run_flag = false;
@@ -1838,10 +1888,8 @@ int main(int argc, char **argv) {
   // we don't need to use a thread safe vector, as only one thread is allowed
   // access to MPI at the same time
   std::vector< MPIMessage > message_log;
-  if (MPI_size > 1) {
-    message_log.resize(number_of_tasks);
-  }
-  size_t message_log_size = 0;
+  size_t message_log_size;
+  initialize_message_log(number_of_tasks, message_log, message_log_size);
 
   //////////////////////////////////
 
@@ -2583,11 +2631,8 @@ int main(int argc, char **argv) {
                     MPI_Isend(nullptr, 0, MPI_INT, irank, MPIMESSAGETAG_STOP,
                               MPI_COMM_WORLD, &request);
 
-                    log_send(message_log[message_log_size], irank, thread_id,
+                    log_send(message_log, message_log_size, irank, thread_id,
                              MPIMESSAGETAG_STOP);
-                    ++message_log_size;
-                    myassert(message_log_size < message_log.size(),
-                             "Too many messages for message log!");
 
                     MPI_Request_free(&request);
                   }
@@ -2601,11 +2646,8 @@ int main(int argc, char **argv) {
                           MPIMESSAGETAG_LOCAL_PROCESS_FINISHED, MPI_COMM_WORLD,
                           &request);
 
-                log_send(message_log[message_log_size], 0, thread_id,
+                log_send(message_log, message_log_size, 0, thread_id,
                          MPIMESSAGETAG_LOCAL_PROCESS_FINISHED);
-                ++message_log_size;
-                myassert(message_log_size < message_log.size(),
-                         "Too many messages for message log!");
 
                 // https://www.open-mpi.org/doc/v2.0/man3/MPI_Request_free.3.php
                 //  MPI_Request_free marks the request object for deallocation

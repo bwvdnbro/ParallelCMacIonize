@@ -41,40 +41,6 @@ enum MPIMessageTag {
 };
 
 /**
- * @brief Log an MPI send event.
- *
- * @param message Message field to write the log to.
- * @param destination Destination rank of the send.
- * @param thread Thread that does the communication.
- * @param tag Associated tag.
- */
-#define log_send(message, destination, thread, tag)                            \
-  {                                                                            \
-    message._type = MPIMESSAGETYPE_SEND;                                       \
-    message._rank = destination;                                               \
-    message._thread = thread;                                                  \
-    message._tag = tag;                                                        \
-    cpucycle_tick(message._timestamp);                                         \
-  }
-
-/**
- * @brief Log an MPI receive event.
- *
- * @param message Message field to write the log to.
- * @param source Source rank of the communication.
- * @param thread Thread that does the communication.
- * @param tag Associated tag.
- */
-#define log_recv(message, source, thread, tag)                                 \
-  {                                                                            \
-    message._type = MPIMESSAGETYPE_RECV;                                       \
-    message._rank = source;                                                    \
-    message._thread = thread;                                                  \
-    message._tag = tag;                                                        \
-    cpucycle_tick(message._timestamp);                                         \
-  }
-
-/**
  * @brief MPI message events that are logged.
  */
 enum MPIMessageType {
@@ -88,7 +54,7 @@ enum MPIMessageType {
  * @brief MPI message log information.
  */
 class MPIMessage {
-public:
+private:
   /*! @brief Type of message. */
   MPIMessageType _type;
 
@@ -103,6 +69,42 @@ public:
 
   /*! @brief Time stamp. */
   unsigned long _timestamp;
+
+public:
+  /**
+   * @brief Log an MPI event.
+   *
+   * @param type Event type.
+   * @param rank Rank on the other side of the communication.
+   * @param thread Thread that does the communication.
+   * @param tag Associated tag.
+   */
+  inline void log_event(const MPIMessageType type, const int rank,
+                        const int thread, const int tag) {
+    _type = type;
+    _rank = rank;
+    _thread = thread;
+    _tag = tag;
+    cpucycle_tick(_timestamp);
+  }
+
+  /**
+   * @brief Get the information stored in the message for output purposes.
+   *
+   * @param type Variable to store the message type in.
+   * @param rank Variable to store the message rank in.
+   * @param thread Variable to store the message thread id in.
+   * @param tag Variable to store the message tag in.
+   * @param timestamp Variable to store the message timestamp in.
+   */
+  inline void get_output_info(int &type, int &rank, int &thread, int &tag,
+                              unsigned long &timestamp) const {
+    type = _type;
+    rank = _rank;
+    thread = _thread;
+    tag = _tag;
+    timestamp = _timestamp;
+  }
 };
 
 #endif // MPIMESSAGE_HPP
