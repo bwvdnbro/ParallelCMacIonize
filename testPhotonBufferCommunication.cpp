@@ -79,21 +79,22 @@ int main(int argc, char **argv) {
                             TRAVELDIRECTION_NUMBER);
   for (unsigned int i = 0; i < test_buffer.size(); ++i) {
     Photon &photon = test_buffer[i];
-    photon._position[0] = random_generator.get_uniform_random_double();
-    photon._position[1] = random_generator.get_uniform_random_double();
-    photon._position[2] = random_generator.get_uniform_random_double();
-    photon._direction[0] = random_generator.get_uniform_random_double();
-    photon._direction[1] = random_generator.get_uniform_random_double();
-    photon._direction[2] = random_generator.get_uniform_random_double();
-    photon._inverse_direction[0] = random_generator.get_uniform_random_double();
-    photon._inverse_direction[1] = random_generator.get_uniform_random_double();
-    photon._inverse_direction[2] = random_generator.get_uniform_random_double();
-    photon._weight = random_generator.get_uniform_random_double();
-    photon._current_optical_depth =
-        random_generator.get_uniform_random_double();
-    photon._target_optical_depth = random_generator.get_uniform_random_double();
-    photon._photoionization_cross_section =
-        random_generator.get_uniform_random_double();
+    photon.set_position(random_generator.get_uniform_random_double(),
+                        random_generator.get_uniform_random_double(),
+                        random_generator.get_uniform_random_double());
+    photon.set_direction(random_generator.get_uniform_random_double(),
+                         random_generator.get_uniform_random_double(),
+                         random_generator.get_uniform_random_double());
+    photon.set_inverse_direction(random_generator.get_uniform_random_double(),
+                                 random_generator.get_uniform_random_double(),
+                                 random_generator.get_uniform_random_double());
+    photon.set_weight(random_generator.get_uniform_random_double());
+    photon.set_current_optical_depth(
+        random_generator.get_uniform_random_double());
+    photon.set_target_optical_depth(
+        random_generator.get_uniform_random_double());
+    photon.set_photoionization_cross_section(
+        random_generator.get_uniform_random_double());
   }
 
   // now communicate:

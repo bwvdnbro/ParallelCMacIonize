@@ -798,8 +798,7 @@ public:
              "input_direction: " << input_direction);
 
     // get some photon variables
-    const double direction[3] = {photon._direction[0], photon._direction[1],
-                                 photon._direction[2]};
+    const double *direction = photon.get_direction();
 
     myassert(TravelDirections::is_compatible_input_direction(direction,
                                                              input_direction),
@@ -807,21 +806,19 @@ public:
                            << direction[2]
                            << ", input_direction: " << input_direction);
 
-    const double inverse_direction[3] = {photon._inverse_direction[0],
-                                         photon._inverse_direction[1],
-                                         photon._inverse_direction[2]};
+    const double *inverse_direction = photon.get_inverse_direction();
     // NOTE: position is relative w.r.t. _anchor!!!
-    double position[3] = {photon._position[0] - _anchor[0],
-                          photon._position[1] - _anchor[1],
-                          photon._position[2] - _anchor[2]};
-    double tau_done = photon._current_optical_depth;
-    const double tau_target = photon._target_optical_depth;
+    double position[3] = {photon.get_position()[0] - _anchor[0],
+                          photon.get_position()[1] - _anchor[1],
+                          photon.get_position()[2] - _anchor[2]};
+    double tau_done = photon.get_current_optical_depth();
+    const double tau_target = photon.get_target_optical_depth();
 
     myassert(tau_done < tau_target, "tau_done: " << tau_done
                                                  << ", target: " << tau_target);
 
-    const double cross_section = photon._photoionization_cross_section;
-    const double photon_weight = photon._weight;
+    const double cross_section = photon.get_photoionization_cross_section();
+    const double photon_weight = photon.get_weight();
     // get the indices of the first cell on the photon's path
     int three_index[3];
     int active_cell = get_start_index(position, input_direction, three_index);
@@ -921,10 +918,9 @@ public:
       active_cell = get_one_index(three_index);
     }
     // update photon quantities
-    photon._current_optical_depth = tau_done;
-    photon._position[0] = position[0] + _anchor[0];
-    photon._position[1] = position[1] + _anchor[1];
-    photon._position[2] = position[2] + _anchor[2];
+    photon.set_current_optical_depth(tau_done);
+    photon.set_position(position[0] + _anchor[0], position[1] + _anchor[1],
+                        position[2] + _anchor[2]);
     // get the outgoing direction
     int output_direction;
     if (tau_done >= tau_target) {

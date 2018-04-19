@@ -121,7 +121,7 @@ public:
     myassert(_direction == other._direction, "Directions do not match!");
     myassert(_actual_size == other._actual_size, "Sizes do not match!");
     for (unsigned int i = 0; i < PHOTONBUFFER_SIZE; ++i) {
-      photon_check_equal(_photons[i], other._photons[i]);
+      _photons[i].check_equal(other._photons[i]);
     }
   }
 

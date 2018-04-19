@@ -29,34 +29,6 @@
 /*! @brief Size of the MPI buffer necessary to store a single Photon. */
 #define PHOTON_MPI_SIZE (13 * sizeof(double))
 
-/**
- * @brief Check if the given Photons are the same.
- *
- * @param a First Photon.
- * @param b Second Photon.
- */
-#define photon_check_equal(a, b)                                               \
-  myassert(a._position[0] == b._position[0], "Positions do not match!");       \
-  myassert(a._position[1] == b._position[1], "Positions do not match!");       \
-  myassert(a._position[2] == b._position[2], "Positions do not match!");       \
-  myassert(a._direction[0] == b._direction[0], "Directions do not match!");    \
-  myassert(a._direction[1] == b._direction[1], "Directions do not match!");    \
-  myassert(a._direction[2] == b._direction[2], "Directions do not match!");    \
-  myassert(a._inverse_direction[0] == b._inverse_direction[0],                 \
-           "Inverse directions do not match!");                                \
-  myassert(a._inverse_direction[1] == b._inverse_direction[1],                 \
-           "Inverse directions do not match!");                                \
-  myassert(a._inverse_direction[2] == b._inverse_direction[2],                 \
-           "Inverse directions do not match!");                                \
-  myassert(a._current_optical_depth == b._current_optical_depth,               \
-           "Current optical depths do not match!");                            \
-  myassert(a._target_optical_depth == b._target_optical_depth,                 \
-           "Target optical depths do not match!");                             \
-  myassert(a._photoionization_cross_section ==                                 \
-               b._photoionization_cross_section,                               \
-           "Cross sections do not match!");                                    \
-  myassert(a._weight == b._weight, "Weights do not match!");
-
 #include <mpi.h>
 
 /**
@@ -65,7 +37,7 @@
  * All members are public for now.
  */
 class Photon {
-public:
+private:
   /*! @brief Current position of the photon packet (in m). */
   double _position[3];
 
@@ -89,6 +61,7 @@ public:
   /*! @brief Weight of the photon packet. */
   double _weight;
 
+public:
   /**
    * @brief Store the contents of the Photon in the given MPI communication
    * buffer.
@@ -138,6 +111,183 @@ public:
     MPI_Unpack(buffer, PHOTON_MPI_SIZE, &buffer_position, &_weight, 1,
                MPI_DOUBLE, MPI_COMM_WORLD);
   }
+
+  /**
+   * @brief Check that the given Photon is equal to this one.
+   *
+   * @param other Other Photon.
+   */
+  inline void check_equal(const Photon &other) {
+
+    myassert(_position[0] == other._position[0], "Positions do not match!");
+    myassert(_position[1] == other._position[1], "Positions do not match!");
+    myassert(_position[2] == other._position[2], "Positions do not match!");
+    myassert(_direction[0] == other._direction[0], "Directions do not match!");
+    myassert(_direction[1] == other._direction[1], "Directions do not match!");
+    myassert(_direction[2] == other._direction[2], "Directions do not match!");
+    myassert(_inverse_direction[0] == other._inverse_direction[0],
+             "Inverse directions do not match!");
+    myassert(_inverse_direction[1] == other._inverse_direction[1],
+             "Inverse directions do not match!");
+    myassert(_inverse_direction[2] == other._inverse_direction[2],
+             "Inverse directions do not match!");
+    myassert(_current_optical_depth == other._current_optical_depth,
+             "Current optical depths do not match!");
+    myassert(_target_optical_depth == other._target_optical_depth,
+             "Target optical depths do not match!");
+    myassert(_photoionization_cross_section ==
+                 other._photoionization_cross_section,
+             "Cross sections do not match!");
+    myassert(_weight == other._weight, "Weights do not match!");
+  }
+
+  /**
+   * @brief Get a constant pointer to the direction array.
+   *
+   * @return Constant pointer to the direction array.
+   */
+  inline const double *get_direction() const { return _direction; }
+
+  /**
+   * @brief Get a writable pointer to the direction array.
+   *
+   * @return Writable pointer to the direction array.
+   */
+  inline double *get_direction() { return _direction; }
+
+  /**
+   * @brief Set the direction vector directly.
+   *
+   * @param x x component.
+   * @param y y component.
+   * @param z z component.
+   */
+  inline void set_direction(const double x, const double y, const double z) {
+    _direction[0] = x;
+    _direction[1] = y;
+    _direction[2] = z;
+  }
+
+  /**
+   * @brief Get a constant pointer to the inverse direction array.
+   *
+   * @return Constant pointer to the inverse direction array.
+   */
+  inline const double *get_inverse_direction() const {
+    return _inverse_direction;
+  }
+
+  /**
+   * @brief Get a writable pointer to the inverse direction array.
+   *
+   * @return Writable pointer to the inverse direction array.
+   */
+  inline double *get_inverse_direction() { return _inverse_direction; }
+
+  /**
+   * @brief Set the inverse direction vector directly.
+   *
+   * @param x x component.
+   * @param y y component.
+   * @param z z component.
+   */
+  inline void set_inverse_direction(const double x, const double y,
+                                    const double z) {
+    _inverse_direction[0] = x;
+    _inverse_direction[1] = y;
+    _inverse_direction[2] = z;
+  }
+
+  /**
+   * @brief Get a constant pointer to the position array.
+   *
+   * @return Constant pointer to the position array.
+   */
+  inline const double *get_position() const { return _position; }
+
+  /**
+   * @brief Update the position of the photon packet.
+   *
+   * @param x New x coordinate (in m).
+   * @param y New y coordinate (in m).
+   * @param z New z coordinate (in m).
+   */
+  inline void set_position(const double x, const double y, const double z) {
+    _position[0] = x;
+    _position[1] = y;
+    _position[2] = z;
+  }
+
+  /**
+   * @brief Get the current accumulated optical depth for the photon packet.
+   *
+   * @return Current accumulated optical depth.
+   */
+  inline const double get_current_optical_depth() const {
+    return _current_optical_depth;
+  }
+
+  /**
+   * @brief Update the current accumulated optical depth for the photon packet.
+   *
+   * @param current_optical_depth Current accumulated optical depth for the
+   * photon packet.
+   */
+  inline void set_current_optical_depth(const double current_optical_depth) {
+    _current_optical_depth = current_optical_depth;
+  }
+
+  /**
+   * @brief Get the target optical depth for the photon packet.
+   *
+   * @return Target optical depth.
+   */
+  inline const double get_target_optical_depth() const {
+    return _target_optical_depth;
+  }
+
+  /**
+   * @brief Set the target optical depth for the photon packet.
+   *
+   * @param target_optical_depth New target optical depth.
+   */
+  inline void set_target_optical_depth(const double target_optical_depth) {
+    _target_optical_depth = target_optical_depth;
+  }
+
+  /**
+   * @brief Get the photoionization cross section for the photon packet.
+   *
+   * @return Photoionization cross section for the photon packet (in m^2).
+   */
+  inline const double get_photoionization_cross_section() const {
+    return _photoionization_cross_section;
+  }
+
+  /**
+   * @brief Set the photoionization cross section for the photon packet.
+   *
+   * @param photoionization_cross_section New photoionization cross section
+   * (in m^2).
+   */
+  inline void set_photoionization_cross_section(
+      const double photoionization_cross_section) {
+    _photoionization_cross_section = photoionization_cross_section;
+  }
+
+  /**
+   * @brief Get the weight for the photon packet.
+   *
+   * @return Weight for the photon packet.
+   */
+  inline const double get_weight() const { return _weight; }
+
+  /**
+   * @brief Set the weight for the photon packet.
+   *
+   * @param weight New weight for the photon packet.
+   */
+  inline void set_weight(const double weight) { _weight = weight; }
 };
 
 #endif // PHOTON_HPP

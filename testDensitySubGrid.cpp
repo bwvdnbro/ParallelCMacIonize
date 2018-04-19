@@ -432,28 +432,27 @@ inline static void fill_buffer(PhotonBuffer &buffer,
     Photon &photon = buffer[i];
 
     // initial position: we currently assume a single source at the origin
-    photon._position[0] = 0.;
-    photon._position[1] = 0.;
-    photon._position[2] = 0.;
+    photon.set_position(0., 0., 0.);
 
     // initial direction: isotropic distribution
-    get_random_direction(random_generator, photon._direction,
-                         photon._inverse_direction);
+    get_random_direction(random_generator, photon.get_direction(),
+                         photon.get_inverse_direction());
 
     // we currently assume equal weight for all photons
-    photon._weight = 1.;
+    photon.set_weight(1.);
 
     // current optical depth (always zero) and target (exponential distribution)
-    photon._current_optical_depth = 0.;
-    photon._target_optical_depth =
-        -std::log(random_generator.get_uniform_random_double());
+    photon.set_current_optical_depth(0.);
+    photon.set_target_optical_depth(
+        -std::log(random_generator.get_uniform_random_double()));
 
     // this is the fixed cross section we use for the moment
-    photon._photoionization_cross_section = 6.3e-22;
+    photon.set_photoionization_cross_section(6.3e-22);
 
     // make sure the photon is moving in *a* direction
-    myassert(photon._direction[0] != 0. || photon._direction[1] != 0. ||
-                 photon._direction[2] != 0.,
+    myassert(photon.get_direction()[0] != 0. ||
+                 photon.get_direction()[1] != 0. ||
+                 photon.get_direction()[2] != 0.,
              "fail");
   }
 }
@@ -484,8 +483,9 @@ inline static void do_photon_traversal(PhotonBuffer &input_buffer,
     Photon &photon = input_buffer[i];
 
     // make sure the photon is moving in *a* direction
-    myassert(photon._direction[0] != 0. || photon._direction[1] != 0. ||
-                 photon._direction[2] != 0.,
+    myassert(photon.get_direction()[0] != 0. ||
+                 photon.get_direction()[1] != 0. ||
+                 photon.get_direction()[2] != 0.,
              "size: " << input_buffer.size());
 
     // traverse the photon through the active subgrid
@@ -507,13 +507,16 @@ inline static void do_photon_traversal(PhotonBuffer &input_buffer,
       output_buffer[index] = photon;
 
       // make sure we actually added this photon
-      myassert(output_buffer[index]._position[0] == photon._position[0] &&
-                   output_buffer[index]._position[1] == photon._position[1] &&
-                   output_buffer[index]._position[2] == photon._position[2],
+      myassert(output_buffer[index].get_position()[0] ==
+                       photon.get_position()[0] &&
+                   output_buffer[index].get_position()[1] ==
+                       photon.get_position()[1] &&
+                   output_buffer[index].get_position()[2] ==
+                       photon.get_position()[2],
                "fail");
-      myassert(output_buffer[index]._direction[0] != 0. ||
-                   output_buffer[index]._direction[1] != 0. ||
-                   output_buffer[index]._direction[2] != 0.,
+      myassert(output_buffer[index].get_direction()[0] != 0. ||
+                   output_buffer[index].get_direction()[1] != 0. ||
+                   output_buffer[index].get_direction()[2] != 0.,
                "size: " << output_buffer.size());
 
       // check that the output buffer did not overflow
@@ -544,12 +547,12 @@ inline static void do_reemission(PhotonBuffer &buffer,
     if (random_generator.get_uniform_random_double() < reemission_probability) {
       // give the photon a new random isotropic direction
       Photon &photon = buffer[i];
-      get_random_direction(random_generator, photon._direction,
-                           photon._inverse_direction);
+      get_random_direction(random_generator, photon.get_direction(),
+                           photon.get_inverse_direction());
       // reset the current optical depth (always zero) and target
-      photon._current_optical_depth = 0.;
-      photon._target_optical_depth =
-          -std::log(random_generator.get_uniform_random_double());
+      photon.set_current_optical_depth(0.);
+      photon.set_target_optical_depth(
+          -std::log(random_generator.get_uniform_random_double()));
       // NOTE: we can never overwrite a photon that should be preserved (we
       // either overwrite the photon itself, or a photon that was not reemitted)
       buffer[index] = photon;
