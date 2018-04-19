@@ -14,12 +14,12 @@ done
 
 # neutral fraction result
 echo "Plotting physical result..."
-python plot_neutral_fraction_profile.py
+python scripts/plot_neutral_fraction_profile.py
 echo "Done."
 
 # full task plot timeline
 echo "Plotting full run task plot..."
-python plot_full_timeline.py
+python scripts/plot_full_timeline.py
 echo "Done."
 
 # per step task plot
@@ -28,7 +28,7 @@ then
   echo "Plotting individual task plots per iteration..."
   for f in tasks_??.txt
   do
-    python plot_tasks.py --name $f --labels
+    python scripts/plot_tasks.py --name $f --labels
   done
   echo "Done."
 fi
@@ -39,7 +39,7 @@ then
   echo "Plotting cost distribution per iteration..."
   for f in costs_??.txt
   do
-    python plot_cost_test.py $f
+    python scripts/plot_costs.py --name $f --labels
   done
   echo "Done."
 fi

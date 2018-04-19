@@ -30,8 +30,17 @@ import matplotlib
 matplotlib.use("Agg")
 import pylab as pl
 import scipy.stats as stats
-import sys
+import argparse
 import os
+
+# parse the command line arguments
+argparser = argparse.ArgumentParser(
+  description = "Plot the neutral fraction profile in neutral_fractions.dat")
+
+argparser.add_argument("-r", "--reemission_probability", action = "store",
+                       default = 0.)
+
+args = argparser.parse_args()
 
 ## run parameters
 # number of cells in one coordinate dimension
@@ -46,9 +55,7 @@ nbin = 100
 alphaH = 4.e-19 # m^3 s^-1
 nH = 1.e8 # m^-3
 Q = 4.26e49 # s^-1
-PR = 0.
-if len(sys.argv) > 1:
-  PR = float(sys.argv[1])
+PR = args.reemission_probability
 
 # compute the Stromgren radius (in m)
 Rs = (0.75 * Q / (1. - PR) / (np.pi * nH**2 * alphaH))**(1. / 3.)
