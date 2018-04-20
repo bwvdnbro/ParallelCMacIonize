@@ -174,7 +174,7 @@ public:
    *
    * @return Number of used elements in the vector.
    */
-  inline const size_t size() const {
+  inline size_t size() const {
     myassert(_number_taken.value() == _current_index.value(),
              "Non continuous vector!");
     return _number_taken.value();
@@ -185,7 +185,7 @@ public:
    *
    * @return Maximum number of elements that can be stored in the vector.
    */
-  inline const size_t max_size() const { return _size; }
+  inline size_t max_size() const { return _size; }
 };
 
 #endif // THREADSAFEVECTOR_HPP

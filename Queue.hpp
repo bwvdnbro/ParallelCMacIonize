@@ -122,7 +122,7 @@ public:
    *
    * @return Current size of the queue.
    */
-  inline const size_t size() const { return _current_queue_size; }
+  inline size_t size() const { return _current_queue_size; }
 };
 
 #endif // QUEUE_HPP

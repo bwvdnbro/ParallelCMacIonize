@@ -14,15 +14,15 @@ done
 cflags="-std=c++11 -fopenmp"
 
 # Extra flags: choose one of the two below
-flags=
+flags="-Wall -Werror -Wignored-qualifiers"
 if [ "$debug" = "1" ]
 then
   # optional (debug) flags
-  flags="-Wall -Werror -g -fsanitize=address -fno-omit-frame-pointer"
+  flags="$flags -g -fsanitize=address -fno-omit-frame-pointer"
   echo "Compiling with debug flags"
 else
   # default (optimization) flags
-  flags="-Wall -Werror -O3 -ftree-vectorize -funroll-loops -ffast-math"
+  flags="$flags -O3 -ftree-vectorize -funroll-loops -ffast-math"
 fi
 
 # library dependencies

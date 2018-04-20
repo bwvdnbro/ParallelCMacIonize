@@ -183,7 +183,7 @@ public:
    * @param index Index of an element.
    * @return Thread id that owns that element.
    */
-  inline const int get_thread(const size_t index) const {
+  inline int get_thread(const size_t index) const {
     return _thread_list[index];
   }
 
@@ -203,7 +203,7 @@ public:
    * @param index Index of an element.
    * @return Process rank that owns that element.
    */
-  inline const int get_process(const size_t index) const {
+  inline int get_process(const size_t index) const {
     return _process_list[index];
   }
 
@@ -235,7 +235,7 @@ public:
    * @param index Index of an element.
    * @return Computational cost for that element.
    */
-  inline const unsigned long get_computational_cost(const size_t index) const {
+  inline unsigned long get_computational_cost(const size_t index) const {
     return _computational_cost[index];
   }
 
@@ -265,7 +265,7 @@ public:
    * @param index Index of an element.
    * @return Photon cost for that element.
    */
-  inline const unsigned int get_photon_cost(const size_t index) const {
+  inline unsigned int get_photon_cost(const size_t index) const {
     return _photon_cost[index];
   }
 
@@ -295,7 +295,7 @@ public:
    * @param index Index of an element.
    * @return Source cost for that element.
    */
-  inline const unsigned int get_source_cost(const size_t index) const {
+  inline unsigned int get_source_cost(const size_t index) const {
     return _source_cost[index];
   }
 

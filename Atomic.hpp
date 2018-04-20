@@ -32,9 +32,9 @@
 /*! @brief Activate this to use GNU GCC specific atomic directives. */
 //#define GCC_ATOMIC
 
-#ifdef CPP_ATOMIC
+#if defined(CPP_ATOMIC)
 #include <atomic>
-#elif GCC_ATOMIC
+#elif defined(GCC_ATOMIC)
 // nothing to include
 #else
 #error "No atomic implementation chosen!"
@@ -46,9 +46,9 @@
 template < typename _type_ > class Atomic {
 private:
 /*! @brief Underlying value. */
-#ifdef CPP_ATOMIC
+#if defined(CPP_ATOMIC)
   std::atomic< _type_ > _value;
-#else
+#elif defined(GCC_ATOMIC)
   volatile _type_ _value;
 #endif
 
@@ -71,9 +71,9 @@ public:
    * @return Current value of the variable.
    */
   inline const _type_ value() const {
-#ifdef CPP_ATOMIC
+#if defined(CPP_ATOMIC)
     return _value.load();
-#else
+#elif defined(GCC_ATOMIC)
     return _value;
 #endif
   }
@@ -84,9 +84,9 @@ public:
    * @param value New value for the variable.
    */
   inline void set(const _type_ value) {
-#ifdef CPP_ATOMIC
+#if defined(CPP_ATOMIC)
     _value.store(value);
-#else
+#elif defined(GCC_ATOMIC)
     _value = value;
 #endif
   }
@@ -99,10 +99,10 @@ public:
    * flag has already been set by another thread.
    */
   inline bool lock() {
-#ifdef CPP_ATOMIC
+#if defined(CPP_ATOMIC)
     _type_ expected(false);
     return _value.compare_exchange_strong(expected, true);
-#else
+#elif defined(GCC_ATOMIC)
     return __sync_bool_compare_and_swap(&_value, false, true);
 #endif
   }
@@ -112,10 +112,10 @@ public:
    * to set it.
    */
   inline void unlock() {
-#ifdef CPP_ATOMIC
+#if defined(CPP_ATOMIC)
     _type_ expected(true);
     _value.compare_exchange_strong(expected, false);
-#else
+#elif defined(GCC_ATOMIC)
     __sync_bool_compare_and_swap(&_value, true, false);
 #endif
   }
@@ -127,9 +127,9 @@ public:
    * @return Original value of the variable.
    */
   inline _type_ post_increment() {
-#ifdef CPP_ATOMIC
+#if defined(CPP_ATOMIC)
     return _value++;
-#else
+#elif defined(GCC_ATOMIC)
     return __sync_fetch_and_add(&_value, 1);
 #endif
   }
@@ -140,9 +140,9 @@ public:
    * @return New value of the variable.
    */
   inline _type_ pre_increment() {
-#ifdef CPP_ATOMIC
+#if defined(CPP_ATOMIC)
     return ++_value;
-#else
+#elif defined(GCC_ATOMIC)
     return __sync_add_and_fetch(&_value, 1);
 #endif
   }
@@ -153,9 +153,9 @@ public:
    * @return New value of the variable.
    */
   inline _type_ pre_decrement() {
-#ifdef CPP_ATOMIC
+#if defined(CPP_ATOMIC)
     return --_value;
-#else
+#elif defined(GCC_ATOMIC)
     return __sync_sub_and_fetch(&_value, 1);
 #endif
   }
@@ -168,9 +168,11 @@ public:
    * @return Original value of the variable.
    */
   inline _type_ post_add(const _type_ increment) {
-#ifdef CPP_ATOMIC
-    return (_value += increment);
-#else
+#if defined(CPP_ATOMIC)
+    // we cannot use (_value += increment), as the Intel compiler seems to
+    // replace this (incorrectly) with an add_fetch rather than a fetch_add...
+    return _value.fetch_add(increment);
+#elif defined(GCC_ATOMIC)
     return __sync_fetch_and_add(&_value, increment);
 #endif
   }
@@ -183,9 +185,11 @@ public:
    * @return New value of the variable.
    */
   inline _type_ pre_add(const _type_ increment) {
-#ifdef CPP_ATOMIC
-    return (_value += increment) + increment;
-#else
+#if defined(CPP_ATOMIC)
+    // std::atomic does not have direct support for add_fetch, so we have to
+    // emulate it
+    return _value.fetch_add(increment) + increment;
+#elif defined(GCC_ATOMIC)
     return __sync_add_and_fetch(&_value, increment);
 #endif
   }

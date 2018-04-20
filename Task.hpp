@@ -129,7 +129,7 @@ public:
    *
    * @return True if the task was executed, false otherwise.
    */
-  inline const bool done() const {
+  inline bool done() const {
 #ifdef TASK_PLOT
     return _end_time > 0;
 #else
@@ -149,7 +149,7 @@ public:
    *
    * @return True if locking succeeded, false otherwise.
    */
-  inline const bool lock_dependency() {
+  inline bool lock_dependency() {
     if (_dependency != nullptr) {
       return _dependency->try_lock();
     } else {
@@ -171,7 +171,7 @@ public:
    *
    * @return Type of the task.
    */
-  inline const int get_type() const { return _type; }
+  inline int get_type() const { return _type; }
 
   /**
    * @brief Set the type of the task.
@@ -185,7 +185,7 @@ public:
    *
    * @return Index of the associated buffer.
    */
-  inline const unsigned int get_buffer() const { return _buffer; }
+  inline unsigned int get_buffer() const { return _buffer; }
 
   /**
    * @brief Set the buffer associated with this task.
@@ -199,7 +199,7 @@ public:
    *
    * @return Index of the associated subgrid.
    */
-  inline const unsigned int get_subgrid() const { return _subgrid; }
+  inline unsigned int get_subgrid() const { return _subgrid; }
 
   /**
    * @brief Set the subgrid associated with this task.

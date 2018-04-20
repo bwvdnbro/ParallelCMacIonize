@@ -944,8 +944,8 @@ public:
    * @param iz Z index of the cell.
    * @return Luminosity integral for the cell with the given indices.
    */
-  inline const double get_intensity_integral(const int ix, const int iy,
-                                             const int iz) const {
+  inline double get_intensity_integral(const int ix, const int iy,
+                                       const int iz) const {
     const int three_index[3] = {ix, iy, iz};
     const int index = get_one_index(three_index);
     return _intensity_integral[index];
@@ -1056,7 +1056,7 @@ public:
    *
    * @return Computational cost.
    */
-  inline const unsigned long get_computational_cost() const {
+  inline unsigned long get_computational_cost() const {
     return _computational_cost;
   }
 

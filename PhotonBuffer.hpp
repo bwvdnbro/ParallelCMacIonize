@@ -130,7 +130,7 @@ public:
    *
    * @return Number of photons in the buffer.
    */
-  inline const unsigned int size() const { return _actual_size; }
+  inline unsigned int size() const { return _actual_size; }
 
   /**
    * @brief Reset the buffer by setting its size to 0.
@@ -162,7 +162,7 @@ public:
    *
    * @return Index of the next available Photon in the buffer.
    */
-  inline const unsigned int get_next_free_photon() { return _actual_size++; }
+  inline unsigned int get_next_free_photon() { return _actual_size++; }
 
   /**
    * @brief Grow the buffer to the given size.
@@ -187,7 +187,7 @@ public:
    *
    * @return Subgrid index for this buffer.
    */
-  inline const unsigned int get_subgrid_index() const { return _subgrid_index; }
+  inline unsigned int get_subgrid_index() const { return _subgrid_index; }
 
   /**
    * @brief Set the direction for this buffer.
@@ -201,7 +201,7 @@ public:
    *
    * @return Direction for this buffer.
    */
-  inline const int get_direction() const { return _direction; }
+  inline int get_direction() const { return _direction; }
 };
 
 #endif // PHOTONBUFFER_HPP

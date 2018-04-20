@@ -223,7 +223,7 @@ public:
    *
    * @return Current accumulated optical depth.
    */
-  inline const double get_current_optical_depth() const {
+  inline double get_current_optical_depth() const {
     return _current_optical_depth;
   }
 
@@ -242,7 +242,7 @@ public:
    *
    * @return Target optical depth.
    */
-  inline const double get_target_optical_depth() const {
+  inline double get_target_optical_depth() const {
     return _target_optical_depth;
   }
 
@@ -260,7 +260,7 @@ public:
    *
    * @return Photoionization cross section for the photon packet (in m^2).
    */
-  inline const double get_photoionization_cross_section() const {
+  inline double get_photoionization_cross_section() const {
     return _photoionization_cross_section;
   }
 
@@ -280,7 +280,7 @@ public:
    *
    * @return Weight for the photon packet.
    */
-  inline const double get_weight() const { return _weight; }
+  inline double get_weight() const { return _weight; }
 
   /**
    * @brief Set the weight for the photon packet.
