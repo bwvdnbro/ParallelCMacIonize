@@ -2032,73 +2032,66 @@ int main(int argc, char **argv) {
   //  - a photon cost vector that is a more stable reference for the distributed
   //    memory decomposition
   std::vector< unsigned int > initial_photon_cost(tot_num_subgrid, 0);
-  if (MPI_size > 1) {
 
-    logmessage(
-        "Running low resolution simulation to get initial subgrid costs...", 0);
-    // we need a good cost estimate for each subgrid to load balance across
-    // nodes
-    // to obtain this, we run a low resolution Monte Carlo simulation on the
-    // grid of subgrids (with each subgrid acting as a single cell)
-    DensitySubGrid coarse_grid(box, num_subgrid);
-    // the coarse grid has no neighbours
-    for (int i = 0; i < TRAVELDIRECTION_NUMBER; ++i) {
-      coarse_grid.set_neighbour(i, NEIGHBOUR_OUTSIDE);
-      coarse_grid.set_active_buffer(i, NEIGHBOUR_OUTSIDE);
-    }
-    // run 10 photon buffers
-    RandomGenerator coarse_rg(42);
-    bool flags[TRAVELDIRECTION_NUMBER];
-    for (int i = 0; i < TRAVELDIRECTION_NUMBER; ++i) {
-      flags[i] = false;
-    }
-    for (unsigned int i = 0; i < 10; ++i) {
-      PhotonBuffer buffer;
-      fill_buffer(buffer, PHOTONBUFFER_SIZE, coarse_rg, 0);
-      do_photon_traversal(buffer, coarse_grid, nullptr, flags);
-    }
-
-    // get the maximal intensity
-    double maxintensity = 0.;
-    for (int ix = 0; ix < num_subgrid[0]; ++ix) {
-      for (int iy = 0; iy < num_subgrid[1]; ++iy) {
-        for (int iz = 0; iz < num_subgrid[2]; ++iz) {
-          maxintensity = std::max(
-              maxintensity, coarse_grid.get_intensity_integral(ix, iy, iz));
-        }
-      }
-    }
-
-    // now set the subgrid cost based on the intensity counters
-    for (int ix = 0; ix < num_subgrid[0]; ++ix) {
-      for (int iy = 0; iy < num_subgrid[1]; ++iy) {
-        for (int iz = 0; iz < num_subgrid[2]; ++iz) {
-          const unsigned int igrid =
-              ix * num_subgrid[1] * num_subgrid[2] + iy * num_subgrid[2] + iz;
-          const double intensity =
-              coarse_grid.get_intensity_integral(ix, iy, iz);
-          // pro tip: although it is nowhere explicitly stated, it turns out
-          // that metis vertex weight values are only enforced properly if they
-          // are small enough. I suspect that under the hood Metis sums the
-          // weights for each partition, and if these sums cause overflows,
-          // weird partitions are produced. A maximum weight value of 0xffff
-          // seems to produce nice result.
-          // Similar problems were observed when CPU cycles were used as weight,
-          // because again the weights are too large.
-          const unsigned long cost = 0xffff * (intensity / maxintensity);
-          initial_photon_cost[igrid] = cost;
-        }
-      }
-    }
-
-    std::fill(initial_cost_vector.begin(), initial_cost_vector.end(), 1);
-
-    logmessage("Done.", 0);
-  } else {
-    // we do no longer need to explicitly load balance shared memory runs
-    std::fill(initial_cost_vector.begin(), initial_cost_vector.end(), 1);
-    std::fill(initial_photon_cost.begin(), initial_photon_cost.end(), 1);
+  logmessage(
+      "Running low resolution simulation to get initial subgrid costs...", 0);
+  // we need a good cost estimate for each subgrid to load balance across
+  // nodes
+  // to obtain this, we run a low resolution Monte Carlo simulation on the
+  // grid of subgrids (with each subgrid acting as a single cell)
+  DensitySubGrid coarse_grid(box, num_subgrid);
+  // the coarse grid has no neighbours
+  for (int i = 0; i < TRAVELDIRECTION_NUMBER; ++i) {
+    coarse_grid.set_neighbour(i, NEIGHBOUR_OUTSIDE);
+    coarse_grid.set_active_buffer(i, NEIGHBOUR_OUTSIDE);
   }
+  // run 10 photon buffers
+  RandomGenerator coarse_rg(42);
+  bool flags[TRAVELDIRECTION_NUMBER];
+  for (int i = 0; i < TRAVELDIRECTION_NUMBER; ++i) {
+    flags[i] = false;
+  }
+  for (unsigned int i = 0; i < 10; ++i) {
+    PhotonBuffer buffer;
+    fill_buffer(buffer, PHOTONBUFFER_SIZE, coarse_rg, 0);
+    do_photon_traversal(buffer, coarse_grid, nullptr, flags);
+  }
+
+  // get the maximal intensity
+  double maxintensity = 0.;
+  for (int ix = 0; ix < num_subgrid[0]; ++ix) {
+    for (int iy = 0; iy < num_subgrid[1]; ++iy) {
+      for (int iz = 0; iz < num_subgrid[2]; ++iz) {
+        maxintensity = std::max(maxintensity,
+                                coarse_grid.get_intensity_integral(ix, iy, iz));
+      }
+    }
+  }
+
+  // now set the subgrid cost based on the intensity counters
+  for (int ix = 0; ix < num_subgrid[0]; ++ix) {
+    for (int iy = 0; iy < num_subgrid[1]; ++iy) {
+      for (int iz = 0; iz < num_subgrid[2]; ++iz) {
+        const unsigned int igrid =
+            ix * num_subgrid[1] * num_subgrid[2] + iy * num_subgrid[2] + iz;
+        const double intensity = coarse_grid.get_intensity_integral(ix, iy, iz);
+        // pro tip: although it is nowhere explicitly stated, it turns out
+        // that metis vertex weight values are only enforced properly if they
+        // are small enough. I suspect that under the hood Metis sums the
+        // weights for each partition, and if these sums cause overflows,
+        // weird partitions are produced. A maximum weight value of 0xffff
+        // seems to produce nice result.
+        // Similar problems were observed when CPU cycles were used as weight,
+        // because again the weights are too large.
+        const unsigned long cost = 0xffff * (intensity / maxintensity);
+        initial_photon_cost[igrid] = cost;
+      }
+    }
+  }
+
+  std::fill(initial_cost_vector.begin(), initial_cost_vector.end(), 1);
+
+  logmessage("Done.", 0);
 
   /////////////////////////////
 
