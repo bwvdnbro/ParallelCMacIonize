@@ -62,15 +62,23 @@ data = np.loadtxt(name)
 task_flags = [len(data[data[:,4] == task]) > 0 \
               for task in range(len(task_names))]
 
-# get the minimum and maximum time stamp and compute the time to fraction
-# conversion factor
-tmin = data[:,2].min()
-tmax = data[:,3].max()
-tconv = 1. / (tmax - tmin)
-
 # get information about the system
 nthread = int(data[:,1].max()) + 1
 nproc = int(data[:,0].max()) + 1
+
+# get the minimum and maximum time stamp and compute the time to fraction
+# conversion factor for each node
+tmin = np.zeros(nproc)
+tmax = np.zeros(nproc)
+tconv = np.zeros(nproc)
+for iproc in range(nproc):
+  procline = data[(data[:,0] == iproc) & (data[:,4] == -1)]
+  if len(procline) > 1:
+    print "Too many node information lines!"
+    exit()
+  tmin[iproc] = procline[0,2]
+  tmax[iproc] = procline[0,3]
+  tconv[iproc] = 1. / (tmax[iproc] - tmin[iproc])
 
 ## make the plot
 
@@ -87,7 +95,9 @@ if args.messagefile:
   mdata = mdata[mdata[:, 5].argsort()]
 
   # convert time stamps to fractional time
-  mdata[:, 5] = (mdata[:, 5] - tmin) * tconv
+  for iproc in range(nproc):
+    mdata[mdata[:, 0] == iproc, 5] = \
+      (mdata[mdata[:, 0] == iproc, 5] - tmin[iproc]) * tconv[iproc]
 
   # get the number of tags
   ntag = int(mdata[:, 4].max()) + 1
@@ -133,10 +143,11 @@ for iproc in range(nproc):
   # loop over the threads
   for i in range(nthread):
     # filter out the data for this thread
-    thread = process[process[:,1] == i][:,1:]
+    thread = process[(process[:,1] == i) & (process[:,4] != -1)][:,1:]
 
     # create the task plot
-    bar = [((task[1] - tmin) * tconv, (task[2] - task[1]) * tconv) \
+    bar = [((task[1] - tmin[iproc]) * tconv[iproc],
+            (task[2] - task[1]) * tconv[iproc]) \
              for task in thread]
     tottime = np.array([line[1] for line in bar]).sum()
     alltime += tottime
@@ -158,7 +169,7 @@ for iproc in range(nproc):
       label = ""
       for itask in range(len(task_colors)):
         if task_flags[itask]:
-          tottime = np.array([(task[2] - task[1]) * tconv
+          tottime = np.array([(task[2] - task[1]) * tconv[iproc]
                               for task in thread if task[3] == itask]).sum()
           label += "{0}: {1:.2f} \% - ".format(
             task_names[itask], tottime * 100.)

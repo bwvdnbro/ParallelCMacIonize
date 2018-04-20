@@ -30,6 +30,14 @@ import matplotlib
 matplotlib.use("Agg")
 import pylab as pl
 import glob
+import argparse
+
+argparser = argparse.ArgumentParser(
+  description = "Plot the full task plot timeline for the current directory")
+
+argparser.add_argument("-l", "--labels", action = "store_true")
+
+args = argparser.parse_args()
 
 # change the default matplotlib settings for nicer plots
 pl.rcParams["text.usetex"] = True
@@ -41,6 +49,13 @@ pl.rcParams["font.size"] = 14
 task_colors = ["b", "r", "c", "y", "g"]
 task_names = ["source photon", "photon traversal", "reemission", "send",
               "receive"]
+
+# get the start and end CPU cycle count for each process to normalize the
+# time line
+ptime = np.loadtxt("program_time.txt")
+ptime = sorted(ptime, key = lambda line: line[0])
+tmin = [line[1] for line in ptime]
+tconv = [1. / (line[2] - line[1]) for line in ptime]
 
 ##
 # @brief Add the tasks from the file with the given name to the plot.
@@ -69,7 +84,8 @@ def plot_file(name):
       # filter out data per thread
       thread = process[process[:,1] == i][:,1:]
       # plot the tasks
-      bar = [(task[1], task[2] - task[1]) for task in thread]
+      bar = [((task[1] - tmin[iproc]) * tconv[iproc],
+              (task[2] - task[1]) * tconv[iproc]) for task in thread]
       colors = [task_colors[int(task[3])] for task in thread]
       pl.broken_barh(bar, (iproc * nthread + i-0.4, 0.8), facecolors = colors,
                      edgecolor = "none")
@@ -96,7 +112,7 @@ for i in range(len(task_colors)):
     pl.plot([], [], color = task_colors[i], label = task_names[i])
 
 # add node and thread labels
-if nproc > 1 or nthread > 1:
+if args.labels and (nproc > 1 or nthread > 1):
   for iproc in range(nproc):
     for ithread in range(nthread):
       label = ""
@@ -110,15 +126,14 @@ if nproc > 1 or nthread > 1:
               bbox = dict(facecolor = "white", alpha = 0.9))
 
 # plot start and end time for overhead reference
-ptime = np.loadtxt("program_time.txt")
-pl.gca().axvline(x = ptime[0], linestyle = "--", linewidth = 0.8, color = "k")
-pl.gca().axvline(x = ptime[1], linestyle = "--", linewidth = 0.8, color = "k")
+pl.gca().axvline(x = 0., linestyle = "--", linewidth = 0.8, color = "k")
+pl.gca().axvline(x = 1., linestyle = "--", linewidth = 0.8, color = "k")
 
 # add legend and clean up axes
 pl.legend(loc = "upper center", ncol = len(task_colors))
 pl.ylim(-1., nproc * nthread * 1.1)
 pl.gca().set_yticks([])
-pl.xlabel("CPU cycle")
+pl.xlabel("Fraction of total simulation time")
 
 # finalize and save plot
 pl.tight_layout()

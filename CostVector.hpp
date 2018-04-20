@@ -32,7 +32,7 @@
 
 /*! @brief Activate this to output the partitioning to a file
  *  "cost_stats.txt". */
-#define OUTPUT_STATS
+//#define OUTPUT_STATS
 
 #include "Assert.hpp"
 

@@ -180,9 +180,14 @@ int MPI_rank, MPI_size;
  *
  * @param iloop Iteration number (added to file name).
  * @param tasks Tasks to print.
+ * @param iteration_start Start CPU cycle count of the iteration on this
+ * process.
+ * @param iteration_end End CPU cycle count of the iteration on this process.
  */
 inline void output_tasks(const unsigned int iloop,
-                         const ThreadSafeVector< Task > &tasks) {
+                         const ThreadSafeVector< Task > &tasks,
+                         const unsigned long iteration_start,
+                         const unsigned long iteration_end) {
 #ifdef TASK_OUTPUT
   // compose the file name
   std::stringstream filename;
@@ -214,6 +219,12 @@ inline void output_tasks(const unsigned int iloop,
       if (irank == 0) {
         ofile << "# rank\tthread\tstart\tstop\ttype\n";
       }
+
+      // write the start and end CPU cycle count
+      // this is a dummy task executed by thread 0 (so that the min or max
+      // thread count is not affected), but with non-existing type -1
+      ofile << MPI_rank << "\t0\t" << iteration_start << "\t" << iteration_end
+            << "\t-1\n";
 
       // write the task info
       const size_t tsize = tasks.size();
@@ -2361,6 +2372,10 @@ int main(int argc, char **argv) {
   //  - computes the ionization equilibrium
   for (unsigned int iloop = 0; iloop < number_of_iterations; ++iloop) {
 
+    // store the CPU cycle count at the start of the iteration for this node
+    unsigned long iteration_start, iteration_end;
+    cpucycle_tick(iteration_start);
+
     // make a global list of all subgrids (on this process) that contain the
     // (single) photon source position, we will distribute the initial
     // propagation tasks evenly across these subgrids
@@ -2824,9 +2839,11 @@ int main(int argc, char **argv) {
 
     MPI_Barrier(MPI_COMM_WORLD);
 
+    cpucycle_tick(iteration_end);
+
     // output useful information about this iteration (if enabled)
     logmessage("Writing task and cost information", 0);
-    output_tasks(iloop, tasks);
+    output_tasks(iloop, tasks, iteration_start, iteration_end);
     output_messages(iloop, message_log, message_log_size);
     output_costs(iloop, tot_num_subgrid, costs, copies, originals);
 
@@ -3001,6 +3018,40 @@ int main(int argc, char **argv) {
 
   /////////////////////
 
+  //////////////////////////////////////////////////////////////////////////////
+
+  cpucycle_tick(program_end);
+
+  // write the start and end CPU cycle count for each process
+  {
+    std::string filename = "program_time.txt";
+    for (int irank = 0; irank < MPI_size; ++irank) {
+      // only the active process writes
+      if (irank == MPI_rank) {
+        // the file mode depends on the rank
+        std::ios_base::openmode mode;
+        if (irank == 0) {
+          // rank 0 creates (or overwrites) the file
+          mode = std::ofstream::trunc;
+        } else {
+          // all other ranks append to it
+          mode = std::ofstream::app;
+        }
+        // now open the file
+        std::ofstream ofile(filename, mode);
+
+        // rank 0 writes the header
+        if (irank == 0) {
+          ofile << "# rank\tstart\tstop\n";
+        }
+        ofile << MPI_rank << "\t" << program_start << "\t" << program_end
+              << "\n";
+      }
+      // only one process at a time is allowed to write
+      MPI_Barrier(MPI_COMM_WORLD);
+    }
+  }
+
   ////////////////
   // Clean up MPI
   ///////////////
@@ -3008,15 +3059,6 @@ int main(int argc, char **argv) {
   const int MPI_exit_code = MPI_Finalize();
 
   ///////////////
-
-  //////////////////////////////////////////////////////////////////////////////
-
-  cpucycle_tick(program_end);
-
-  {
-    std::ofstream ptimefile("program_time.txt");
-    ptimefile << program_start << "\t" << program_end << "\n";
-  }
 
   // finally: stop timing and output the result
   program_timer.stop();

@@ -19,7 +19,7 @@ echo "Done."
 
 # full task plot timeline
 echo "Plotting full run task plot..."
-python scripts/plot_full_timeline.py
+python scripts/plot_full_timeline.py --labels
 echo "Done."
 
 # per step task plot
