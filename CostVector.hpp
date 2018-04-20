@@ -58,7 +58,9 @@
 template < typename _datatype_ >
 inline std::vector< size_t > argsort(const _datatype_ *v, const size_t size) {
   std::vector< size_t > indices(size, 0);
-  std::iota(indices.begin(), indices.end(), 0);
+  for (size_t i = 0; i < size; ++i) {
+    indices[i] = i;
+  }
   std::sort(indices.begin(), indices.end(),
             [v](size_t i1, size_t i2) { return v[i1] < v[i2]; });
   return indices;
