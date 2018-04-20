@@ -41,6 +41,8 @@
 #include "Atomic.hpp"
 #elif defined(LOCK_PTHREAD_SPIN)
 #include <pthread.h>
+#else
+#error "No locking implementation chosen!"
 #endif
 
 /**
@@ -52,7 +54,7 @@ private:
 #if defined(LOCK_OPENMP)
   omp_lock_t _lock;
 #elif defined(LOCK_ATOMIC)
-  volatile bool _lock;
+  Atomic< bool > _lock;
 #elif defined(LOCK_PTHREAD_SPIN)
   pthread_spinlock_t _lock;
 #endif
@@ -61,11 +63,13 @@ public:
   /**
    * @brief Constructor.
    */
-  inline Lock() {
+  inline Lock()
+#if defined(LOCK_ATOMIC)
+      : _lock(false)
+#endif
+  {
 #if defined(LOCK_OPENMP)
     omp_init_lock(&_lock);
-#elif defined(LOCK_ATOMIC)
-    _lock = false;
 #elif defined(LOCK_PTHREAD_SPIN)
     pthread_spin_init(&_lock, PTHREAD_PROCESS_PRIVATE);
 #endif
@@ -91,7 +95,7 @@ public:
 #if defined(LOCK_OPENMP)
     return omp_test_lock(&_lock);
 #elif defined(LOCK_ATOMIC)
-    return atomic_lock(_lock);
+    return _lock.lock();
 #elif defined(LOCK_PTHREAD_SPIN)
     return pthread_spin_trylock(&_lock);
 #endif
@@ -106,7 +110,7 @@ public:
 #if defined(LOCK_OPENMP)
     omp_set_lock(&_lock);
 #elif defined(LOCK_ATOMIC)
-    while (!atomic_lock(_lock)) {
+    while (!_lock.lock()) {
     }
 #elif defined(LOCK_PTHREAD_SPIN)
     pthread_spin_lock(&_lock);
@@ -120,7 +124,7 @@ public:
 #if defined(LOCK_OPENMP)
     omp_unset_lock(&_lock);
 #elif defined(LOCK_ATOMIC)
-    atomic_unlock(_lock);
+    _lock.unlock();
 #elif defined(LOCK_PTHREAD_SPIN)
     pthread_spin_unlock(&_lock);
 #endif

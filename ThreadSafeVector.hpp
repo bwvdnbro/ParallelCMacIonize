@@ -34,19 +34,19 @@
 template < typename _datatype_ > class ThreadSafeVector {
 private:
   /*! @brief Current active index in the vector. */
-  size_t _current_index;
+  Atomic< size_t > _current_index;
 
   /*! @brief Size of the vector. */
   const size_t _size;
 
   /*! @brief Number of elements that have been taken. */
-  size_t _number_taken;
+  Atomic< size_t > _number_taken;
 
   /*! @brief Vector itself. */
   _datatype_ *_vector;
 
   /*! @brief Atomic locks for the vector elements. */
-  bool *_locks;
+  Atomic< bool > *_locks;
 
 public:
   /**
@@ -57,10 +57,9 @@ public:
   inline ThreadSafeVector(const size_t size)
       : _current_index(0), _size(size), _number_taken(0) {
     _vector = new _datatype_[size];
-    _locks = new bool[size];
-    for (size_t i = 0; i < size; ++i) {
-      _locks[i] = false;
-    }
+    // Atomic values are automatically initialized to 0 (= false) by the
+    // constructor
+    _locks = new Atomic< bool >[size];
   }
 
   /**
@@ -78,10 +77,10 @@ public:
    */
   inline void clear() {
     for (size_t i = 0; i < _size; ++i) {
-      _locks[i] = false;
+      _locks[i].unlock();
     }
-    _number_taken = 0;
-    _current_index = 0;
+    _number_taken.set(0);
+    _current_index.set(0);
 
     // clear the elements
     delete[] _vector;
@@ -97,7 +96,7 @@ public:
   inline _datatype_ &operator[](const size_t index) {
     myassert(index < _size, "Element out of range (index: "
                                 << index << ", size: " << _size << ")!");
-    myassert(_locks[index], "Element not in use!");
+    myassert(_locks[index].value(), "Element not in use!");
     return _vector[index];
   }
 
@@ -110,7 +109,7 @@ public:
   inline const _datatype_ &operator[](const size_t index) const {
     myassert(index < _size, "Element out of range (index: "
                                 << index << ", size: " << _size << ")!");
-    myassert(_locks[index], "Element not in use!");
+    myassert(_locks[index].value(), "Element not in use!");
     return _vector[index];
   }
 
@@ -123,12 +122,12 @@ public:
    * @return Index of a free element.
    */
   inline size_t get_free_element() {
-    myassert(_number_taken < _size, "No more free elements in vector!");
-    size_t index = atomic_post_increment(_current_index) % _size;
-    while (!atomic_lock(_locks[index])) {
-      index = atomic_post_increment(_current_index) % _size;
+    myassert(_number_taken.value() < _size, "No more free elements in vector!");
+    size_t index = _current_index.post_increment() % _size;
+    while (!_locks[index].lock()) {
+      index = _current_index.post_increment() % _size;
     }
-    atomic_pre_increment(_number_taken);
+    _number_taken.pre_increment();
     return index;
   }
 
@@ -142,12 +141,12 @@ public:
    * @return Index of a free element.
    */
   inline size_t get_free_element_safe() {
-    if (_number_taken < _size) {
-      size_t index = atomic_post_increment(_current_index) % _size;
-      while (!atomic_lock(_locks[index])) {
-        index = atomic_post_increment(_current_index) % _size;
+    if (_number_taken.value() < _size) {
+      size_t index = _current_index.post_increment() % _size;
+      while (!_locks[index].lock()) {
+        index = _current_index.post_increment() % _size;
       }
-      atomic_pre_increment(_number_taken);
+      _number_taken.pre_increment();
       return index;
     } else {
       return _size;
@@ -162,9 +161,9 @@ public:
    * @param index Index of an element that was in use.
    */
   inline void free_element(const size_t index) {
-    myassert(_locks[index], "Element not in use!");
-    atomic_unlock(_locks[index]);
-    atomic_pre_decrement(_number_taken);
+    myassert(_locks[index].value(), "Element not in use!");
+    _locks[index].unlock();
+    _number_taken.pre_decrement();
   }
 
   /**
@@ -176,8 +175,9 @@ public:
    * @return Number of used elements in the vector.
    */
   inline const size_t size() const {
-    myassert(_number_taken == _current_index, "Non continuous vector!");
-    return _number_taken;
+    myassert(_number_taken.value() == _current_index.value(),
+             "Non continuous vector!");
+    return _number_taken.value();
   }
 
   /**
