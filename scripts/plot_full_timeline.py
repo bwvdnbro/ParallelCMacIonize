@@ -129,6 +129,11 @@ if args.labels and (nproc > 1 or nthread > 1):
 pl.gca().axvline(x = 0., linestyle = "--", linewidth = 0.8, color = "k")
 pl.gca().axvline(x = 1., linestyle = "--", linewidth = 0.8, color = "k")
 
+# separate nodes with a horizontal line
+for iproc in range(1, nproc):
+  pl.gca().axhline(y = iproc * nthread - 0.5, linestyle = "-", linewidth = 0.8,
+                   color = "k")
+
 # add legend and clean up axes
 pl.legend(loc = "upper center", ncol = len(task_colors))
 pl.ylim(-1., nproc * nthread * 1.1)

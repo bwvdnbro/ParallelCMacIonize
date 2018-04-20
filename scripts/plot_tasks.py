@@ -192,6 +192,10 @@ alltime /= (nthread * nproc)
 ax.set_title("Total empty fraction: {0:.2f} \%".format((1. - alltime) * 100.))
 ax.set_xlabel("fraction of iteration time")
 
+for iproc in range(1, nproc):
+  ax.axhline(y = iproc * nthread - 0.5, linestyle = "-", linewidth = 0.8,
+             color = "k")
+
 # finalize and save the plot
 pl.tight_layout()
 pl.savefig("{0}.png".format(name[:-4]))
