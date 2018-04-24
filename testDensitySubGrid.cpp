@@ -288,17 +288,17 @@ inline void output_costs(const unsigned int iloop, const unsigned int ngrid,
       // rank 0 writes the file header
       if (irank == 0) {
         ofile << "# subgrid\tcomputational cost\tphoton cost\tsource "
-                 "cost\trank\tthread\n";
+                 "cost\trank\ttype\n";
       }
 
       // output the cost information
       for (unsigned int i = 0; i < ngrid; ++i) {
         // only output local information
         if (costs.get_process(i) == MPI_rank) {
+          // first do the originals (type 0)
           ofile << i << "\t" << costs.get_computational_cost(i) << "\t"
                 << costs.get_photon_cost(i) << "\t" << costs.get_source_cost(i)
-                << "\t" << costs.get_process(i) << "\t" << costs.get_thread(i)
-                << "\n";
+                << "\t" << costs.get_process(i) << "\t0\n";
         }
         if (copies[i] < 0xffffffff) {
           unsigned int copy = copies[i];
@@ -306,11 +306,11 @@ inline void output_costs(const unsigned int iloop, const unsigned int ngrid,
                  originals[copy - ngrid] == i) {
             // only output local information
             if (costs.get_process(copy) == MPI_rank) {
+              // now do the copies (type 1)
               ofile << i << "\t" << costs.get_computational_cost(copy) << "\t"
                     << costs.get_photon_cost(copy) << "\t"
                     << costs.get_source_cost(copy) << "\t"
-                    << costs.get_process(copy) << "\t" << costs.get_thread(copy)
-                    << "\n";
+                    << costs.get_process(copy) << "\t1\n";
             }
             ++copy;
           }
