@@ -1778,13 +1778,6 @@ inline void check_for_incoming_communications(
  */
 int main(int argc, char **argv) {
 
-  // first: start timing
-  Timer program_timer;
-  program_timer.start();
-
-  unsigned long program_start, program_end;
-  cpucycle_tick(program_start);
-
   //////////////////////////////////////////////////////////////////////////////
   /// Initialization
   //////////////////////////////////////////////////////////////////////////////
@@ -1794,6 +1787,15 @@ int main(int argc, char **argv) {
   /////////////////////
 
   initialize_MPI(argc, argv, MPI_rank, MPI_size);
+
+  MPI_Barrier(MPI_COMM_WORLD);
+  // start timing when all processes are at the same point (to make sure the
+  // timelines are compatible)
+  Timer program_timer;
+  program_timer.start();
+
+  unsigned long program_start, program_end;
+  cpucycle_tick(program_start);
 
   // disable std::cout output for all processes other than rank 0 (log messages
   // by default are only written by rank 0)
@@ -3013,9 +3015,13 @@ int main(int argc, char **argv) {
 
   //////////////////////////////////////////////////////////////////////////////
 
+  // stop the timers (after all processes synchronize)
+  MPI_Barrier(MPI_COMM_WORLD);
+  program_timer.stop();
   cpucycle_tick(program_end);
 
-  // write the start and end CPU cycle count for each process
+  // write the start and end CPU cycle count for each process, and the total
+  // program time (for tick to time conversion)
   {
     std::string filename = "program_time.txt";
     for (int irank = 0; irank < MPI_size; ++irank) {
@@ -3035,29 +3041,27 @@ int main(int argc, char **argv) {
 
         // rank 0 writes the header
         if (irank == 0) {
-          ofile << "# rank\tstart\tstop\n";
+          ofile << "# rank\tstart\tstop\ttime\n";
         }
         ofile << MPI_rank << "\t" << program_start << "\t" << program_end
-              << "\n";
+              << "\t" << program_timer.value() << "\n";
       }
       // only one process at a time is allowed to write
       MPI_Barrier(MPI_COMM_WORLD);
     }
   }
 
+  ///////////////
+
+  // output timing results
+  logmessage(
+      "Total Monte Carlo loop time: " << iteration_timer.value() << " s.", 0);
+  logmessage("Total program time: " << program_timer.value() << " s.", 0);
+
   ////////////////
   // Clean up MPI
   ///////////////
 
   const int MPI_exit_code = MPI_Finalize();
-
-  ///////////////
-
-  // finally: stop timing and output the result
-  program_timer.stop();
-  logmessage(
-      "Total Monte Carlo loop time: " << iteration_timer.value() << " s.", 0);
-  logmessage("Total program time: " << program_timer.value() << " s.", 0);
-
   return MPI_exit_code;
 }

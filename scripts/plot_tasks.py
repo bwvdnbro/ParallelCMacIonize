@@ -28,6 +28,7 @@
 import numpy as np
 import matplotlib
 matplotlib.use("Agg")
+from matplotlib.ticker import AutoMinorLocator
 import pylab as pl
 import sys
 import argparse
@@ -55,6 +56,13 @@ task_colors = ["b", "r", "c", "y", "g"]
 task_names = ["source photon", "photon traversal", "reemission", "send",
               "receive"]
 
+# load the program time data
+ptime = np.loadtxt("program_time.txt")
+if len(ptime.shape) > 1:
+  ptime = np.array(sorted(ptime, key = lambda line: line[0]))
+else:
+  ptime = np.array([ptime])
+
 # load the data
 print "Plotting tasks for", name, "..."
 data = np.loadtxt(name)
@@ -69,20 +77,35 @@ nproc = int(data[:,0].max()) + 1
 # get the minimum and maximum time stamp and compute the time to fraction
 # conversion factor for each node
 tmin = np.zeros(nproc)
+tmin_in_s = np.zeros(nproc)
 tmax = np.zeros(nproc)
+tmax_in_s = np.zeros(nproc)
 tconv = np.zeros(nproc)
+tconv_in_s = np.zeros(nproc)
 for iproc in range(nproc):
   procline = data[(data[:,0] == iproc) & (data[:,4] == -1)]
   if len(procline) > 1:
     print "Too many node information lines!"
     exit()
   tmin[iproc] = procline[0,2]
+  tmin_in_s[iproc] = (tmin[iproc] - ptime[iproc][1]) * \
+                     ptime[iproc][3] / (ptime[iproc][2] - ptime[iproc][1])
   tmax[iproc] = procline[0,3]
+  tmax_in_s[iproc] = (tmax[iproc] - ptime[iproc][1]) * \
+                     ptime[iproc][3] / (ptime[iproc][2] - ptime[iproc][1])
   tconv[iproc] = 1. / (tmax[iproc] - tmin[iproc])
+  tconv_in_s[iproc] = (tmax[iproc] - tmin[iproc]) * \
+                      ptime[iproc][3] / (ptime[iproc][2] - ptime[iproc][1])
+
+ttot_min = tmin_in_s.min()
+ttot_max = tmax_in_s.max()
 
 ## make the plot
 
 fig, ax = pl.subplots(1, 1, sharex = True)
+
+ax.set_xlim(ttot_min - 0.005 * (ttot_max - ttot_min),
+            ttot_max + 0.005 * (ttot_max - ttot_min))
 
 # first plot the MPI communications (if requested)
 if args.messagefile:
@@ -94,10 +117,11 @@ if args.messagefile:
   # sort on time
   mdata = mdata[mdata[:, 5].argsort()]
 
-  # convert time stamps to fractional time
+  # convert time stamps to actual time
   for iproc in range(nproc):
     mdata[mdata[:, 0] == iproc, 5] = \
-      (mdata[mdata[:, 0] == iproc, 5] - tmin[iproc]) * tconv[iproc]
+      (mdata[mdata[:, 0] == iproc, 5] - tmin[iproc]) * tconv[iproc] * \
+      tconv_in_s[iproc] + tmin_in_s[iproc]
 
   # get the number of tags
   ntag = int(mdata[:, 4].max()) + 1
@@ -138,12 +162,12 @@ alltime = 0
 # loop over the processes
 for iproc in range(nproc):
   # filter out the data for this process
-  process = data[data[:,0] == iproc]
+  process = data[(data[:,0] == iproc) & (data[:,4] != -1)]
 
   # loop over the threads
   for i in range(nthread):
     # filter out the data for this thread
-    thread = process[(process[:,1] == i) & (process[:,4] != -1)][:,1:]
+    thread = process[(process[:,1] == i)][:,1:]
 
     # create the task plot
     bar = [((task[1] - tmin[iproc]) * tconv[iproc],
@@ -151,6 +175,9 @@ for iproc in range(nproc):
              for task in thread]
     tottime = np.array([line[1] for line in bar]).sum()
     alltime += tottime
+    bar = [(line[0] * tconv_in_s[iproc] + tmin_in_s[iproc],
+            line[1] * tconv_in_s[iproc])
+           for line in bar]
     colors = [task_colors[int(task[3])] for task in thread]
     ax.broken_barh(bar, (iproc * nthread + i - 0.4, 0.8), facecolors = colors,
                    edgecolor = "none")
@@ -163,8 +190,8 @@ for iproc in range(nproc):
       if nthread > 1:
         label += "thread {0} - ".format(i)
       label += "{0:.2f} \% load".format(tottime * 100.)
-      ax.text(0.5, iproc * nthread + i + 0.2, label, ha = "center",
-              bbox = dict(facecolor='white', alpha=0.9))
+      ax.text(0.5 * (ttot_min + ttot_max), iproc * nthread + i + 0.2, label,
+              ha = "center", bbox = dict(facecolor='white', alpha=0.9))
       # per task fraction text
       label = ""
       for itask in range(len(task_colors)):
@@ -173,7 +200,8 @@ for iproc in range(nproc):
                               for task in thread if task[3] == itask]).sum()
           label += "{0}: {1:.2f} \% - ".format(
             task_names[itask], tottime * 100.)
-      ax.text(0.5, iproc * nthread + i - 0.2, label[:-2], ha = "center",
+      ax.text(0.5 * (ttot_min + ttot_max), iproc * nthread + i - 0.2,
+              label[:-2], ha = "center",
               bbox = dict(facecolor='white', alpha=0.9))
 
 # add empty blocks for the legend
@@ -185,12 +213,13 @@ for i in range(len(task_colors)):
 ax.legend(loc = "upper center", ncol = len(task_colors))
 ax.set_ylim(-1., nproc * nthread * 1.1)
 ax.set_yticks([])
-ax.set_xlim(-0.05, 1.05)
 
 # get the total idle time and add information to the title
 alltime /= (nthread * nproc)
 ax.set_title("Total empty fraction: {0:.2f} \%".format((1. - alltime) * 100.))
-ax.set_xlabel("fraction of iteration time")
+ax.set_xlabel("Simulation time (s)")
+
+ax.xaxis.set_minor_locator(AutoMinorLocator())
 
 for iproc in range(1, nproc):
   ax.axhline(y = iproc * nthread - 0.5, linestyle = "-", linewidth = 0.8,

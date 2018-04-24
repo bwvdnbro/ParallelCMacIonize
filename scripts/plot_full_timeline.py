@@ -29,6 +29,7 @@ import numpy as np
 import matplotlib
 matplotlib.use("Agg")
 import pylab as pl
+from matplotlib.ticker import AutoMinorLocator
 import glob
 import argparse
 
@@ -53,9 +54,15 @@ task_names = ["source photon", "photon traversal", "reemission", "send",
 # get the start and end CPU cycle count for each process to normalize the
 # time line
 ptime = np.loadtxt("program_time.txt")
-ptime = sorted(ptime, key = lambda line: line[0])
-tmin = [line[1] for line in ptime]
-tconv = [1. / (line[2] - line[1]) for line in ptime]
+if len(ptime.shape) > 1:
+  ptime = sorted(ptime, key = lambda line: line[0])
+  tmin = [line[1] for line in ptime]
+  tconv = [1. / (line[2] - line[1]) for line in ptime]
+  total_time = np.array([line[3] for line in ptime]).mean()
+else:
+  tmin = [ptime[1]]
+  tconv = [1. / (ptime[2] - ptime[1])]
+  total_time = ptime[3]
 
 ##
 # @brief Add the tasks from the file with the given name to the plot.
@@ -78,14 +85,15 @@ def plot_file(name):
   # loop over the processes
   for iproc in range(nproc):
     # filter out data per process
-    process = data[data[:,0] == iproc]
+    process = data[(data[:,0] == iproc) & (data[:,4] != -1)]
     # loop over the threads
     for i in range(nthread):
       # filter out data per thread
       thread = process[process[:,1] == i][:,1:]
       # plot the tasks
-      bar = [((task[1] - tmin[iproc]) * tconv[iproc],
-              (task[2] - task[1]) * tconv[iproc]) for task in thread]
+      bar = [((task[1] - tmin[iproc]) * tconv[iproc] * total_time,
+              (task[2] - task[1]) * tconv[iproc] * total_time)
+             for task in thread]
       colors = [task_colors[int(task[3])] for task in thread]
       pl.broken_barh(bar, (iproc * nthread + i-0.4, 0.8), facecolors = colors,
                      edgecolor = "none")
@@ -127,7 +135,8 @@ if args.labels and (nproc > 1 or nthread > 1):
 
 # plot start and end time for overhead reference
 pl.gca().axvline(x = 0., linestyle = "--", linewidth = 0.8, color = "k")
-pl.gca().axvline(x = 1., linestyle = "--", linewidth = 0.8, color = "k")
+pl.gca().axvline(x = total_time, linestyle = "--", linewidth = 0.8, color = "k")
+pl.gca().xaxis.set_minor_locator(AutoMinorLocator())
 
 # separate nodes with a horizontal line
 for iproc in range(1, nproc):
@@ -138,7 +147,7 @@ for iproc in range(1, nproc):
 pl.legend(loc = "upper center", ncol = len(task_colors))
 pl.ylim(-1., nproc * nthread * 1.1)
 pl.gca().set_yticks([])
-pl.xlabel("Fraction of total simulation time")
+pl.xlabel("Simulation time (s)")
 
 # finalize and save plot
 pl.tight_layout()
