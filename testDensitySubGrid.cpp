@@ -1110,12 +1110,9 @@ inline void execute_photon_traversal_task(
   do_photon_traversal(buffer, this_grid, local_buffers, local_buffer_flags);
 
   // add none empty buffers to the appropriate queues
-  // we go backwards, so that the local queue is added to the task
-  // list last (we want to potentially feed hungry threads before we
-  // feed ourselves)
   unsigned char largest_index = TRAVELDIRECTION_NUMBER;
   unsigned int largest_size = 0;
-  for (int i = TRAVELDIRECTION_NUMBER - 1; i >= 0; --i) {
+  for (int i = 0; i < TRAVELDIRECTION_NUMBER; ++i) {
 
     // only process enabled, non-empty output buffers
     if (local_buffer_flags[i] && local_buffers[i].size() > 0) {
@@ -1270,6 +1267,10 @@ inline void execute_photon_reemit_task(
     std::vector< DensitySubGrid * > &gridvec, unsigned int &num_tasks_to_add,
     unsigned int *tasks_to_add, int *queues_to_add) {
 
+  // variables used to determine the cost of the task
+  unsigned long task_start, task_end;
+  cpucycle_tick(task_start);
+
   // log the start of the task
   task.start(thread_id);
 
@@ -1309,6 +1310,10 @@ inline void execute_photon_reemit_task(
 
   // log the end time of the task
   task.stop();
+
+  // update the cost computation for this subgrid
+  cpucycle_tick(task_end);
+  costs.add_computational_cost(task.get_subgrid(), task_end - task_start);
 }
 
 /**

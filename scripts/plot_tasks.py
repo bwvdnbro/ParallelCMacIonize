@@ -104,8 +104,8 @@ ttot_max = tmax_in_s.max()
 
 fig, ax = pl.subplots(1, 1, sharex = True)
 
-ax.set_xlim(ttot_min - 0.005 * (ttot_max - ttot_min),
-            ttot_max + 0.005 * (ttot_max - ttot_min))
+ax.set_xlim(ttot_min - 0.05 * (ttot_max - ttot_min),
+            ttot_max + 0.05 * (ttot_max - ttot_min))
 
 # first plot the MPI communications (if requested)
 if args.messagefile:
