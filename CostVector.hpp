@@ -90,10 +90,6 @@ private:
   /*! @brief Source cost for each element. */
   unsigned int *_source_cost;
 
-  /*! @brief Thread list that links elements to threads in an optimal balancing
-   *  scheme. */
-  int *_thread_list;
-
   /*! @brief Process list that links elements to MPI processes in an optimal
    *  balancing scheme. */
   int *_process_list;
@@ -114,14 +110,12 @@ public:
     _computational_cost = new unsigned long[size];
     _photon_cost = new unsigned int[size];
     _source_cost = new unsigned int[size];
-    _thread_list = new int[size];
     _process_list = new int[size];
     for (size_t i = 0; i < size; ++i) {
       _computational_cost[i] = 0;
       _photon_cost[i] = 0;
       _source_cost[i] = 0;
       // our initial decomposition
-      _thread_list[i] = i % number_of_threads;
       _process_list[i] = i % number_of_processes;
     }
   }
@@ -133,7 +127,6 @@ public:
     delete[] _computational_cost;
     delete[] _photon_cost;
     delete[] _source_cost;
-    delete[] _thread_list;
     delete[] _process_list;
   }
 
@@ -148,13 +141,11 @@ public:
     delete[] _computational_cost;
     delete[] _photon_cost;
     delete[] _source_cost;
-    delete[] _thread_list;
     delete[] _process_list;
 
     _computational_cost = new unsigned long[size];
     _photon_cost = new unsigned int[size];
     _source_cost = new unsigned int[size];
-    _thread_list = new int[size];
     _process_list = new int[size];
 
     for (size_t i = 0; i < size; ++i) {
@@ -162,7 +153,6 @@ public:
       _photon_cost[i] = 0;
       _source_cost[i] = 0;
       // our initial decomposition
-      _thread_list[i] = i % _number_of_threads;
       _process_list[i] = i % _number_of_processes;
     }
   }
@@ -177,26 +167,6 @@ public:
       _photon_cost[i] = 0;
       _source_cost[i] = 0;
     }
-  }
-
-  /**
-   * @brief Get the thread id for the given element.
-   *
-   * @param index Index of an element.
-   * @return Thread id that owns that element.
-   */
-  inline int get_thread(const size_t index) const {
-    return _thread_list[index];
-  }
-
-  /**
-   * @brief Set the thread id for the given element.
-   *
-   * @param index Index of an element.
-   * @param thread Thread id for that element.
-   */
-  inline void set_thread(const size_t index, const int thread) {
-    _thread_list[index] = thread;
   }
 
   /**
@@ -454,59 +424,6 @@ public:
       }
     }
 
-    /// second step: local shared memory partitioning
-
-    // argsort the elements based on computational cost
-    std::vector< size_t > indices = argsort(_computational_cost, _size);
-
-    const size_t max_index = _size - 1;
-    // loop over the processes and load balance the threads on each process
-    for (int irank = 0; irank < _number_of_processes; ++irank) {
-      size_t index = 0;
-      size_t current_index = indices[max_index - index];
-      // find the first element that belongs to this rank
-      while (index < _size && _process_list[current_index] != irank) {
-        ++index;
-        current_index = indices[max_index - index];
-      }
-      myassert(index < _size, "Not enough subgrids!");
-      std::vector< unsigned long > threadcost(_number_of_threads, 0);
-      // now give each thread an expensive element
-      for (int ithread = 0; ithread < _number_of_threads; ++ithread) {
-        _thread_list[current_index] = ithread;
-        threadcost[ithread] += _computational_cost[current_index];
-        ++index;
-        current_index = indices[max_index - index];
-        while (index < _size && _process_list[current_index] != irank) {
-          ++index;
-          current_index = indices[max_index - index];
-        }
-        myassert(index < _size, "Not enough subgrids!");
-      }
-      // distribute the remaining elements such that the load is maximally
-      // balanced
-      for (; index < _size; ++index) {
-        const size_t current_index = indices[max_index - index];
-        if (_process_list[current_index] == irank) {
-          // find the thread where this cost has the lowest impact
-          int cmatch_thread = -1;
-          unsigned long cmatch =
-              threadcost[0] + _computational_cost[current_index];
-          for (int ithread = 0; ithread < _number_of_threads; ++ithread) {
-            const unsigned long cvalue =
-                threadcost[ithread] + _computational_cost[current_index];
-            if (cvalue <= cmatch) {
-              cmatch = cvalue;
-              cmatch_thread = ithread;
-            }
-          }
-          myassert(cmatch_thread >= 0, "No closest match!");
-          _thread_list[current_index] = cmatch_thread;
-          threadcost[cmatch_thread] += _computational_cost[current_index];
-        }
-      }
-    }
-
 #ifdef OUTPUT_STATS
     // optionally output statistics
     for (int irank = 0; irank < MPI_size; ++irank) {
@@ -516,9 +433,9 @@ public:
         std::ofstream sfile(filename.str());
         sfile << "# rank\tthread\tcomp cost\tphoton cost\tsource cost\n";
         for (size_t igrid = 0; igrid < _size; ++igrid) {
-          sfile << _process_list[igrid] << "\t" << _thread_list[igrid] << "\t"
-                << _computational_cost[igrid] << "\t" << _photon_cost[igrid]
-                << "\t" << _source_cost[igrid] << "\n";
+          sfile << _process_list[igrid] << "\t0\t" << _computational_cost[igrid]
+                << "\t" << _photon_cost[igrid] << "\t" << _source_cost[igrid]
+                << "\n";
         }
       }
       MPI_Barrier(MPI_COMM_WORLD);

@@ -449,7 +449,7 @@ public:
         _cell_size{box[3] / ncell[0], box[4] / ncell[1], box[5] / ncell[2]},
         _inv_cell_size{ncell[0] / box[3], ncell[1] / box[4], ncell[2] / box[5]},
         _number_of_cells{ncell[0], ncell[1], ncell[2], ncell[1] * ncell[2]},
-        _owning_thread(-1), _largest_buffer_index(TRAVELDIRECTION_NUMBER),
+        _owning_thread(0), _largest_buffer_index(TRAVELDIRECTION_NUMBER),
         _largest_buffer_size(0) {
 
     // allocate memory for data arrays
@@ -485,8 +485,8 @@ public:
         _number_of_cells{
             original._number_of_cells[0], original._number_of_cells[1],
             original._number_of_cells[2], original._number_of_cells[3]},
-        _owning_thread(-1), _largest_buffer_index(TRAVELDIRECTION_NUMBER),
-        _largest_buffer_size(0) {
+        _owning_thread(original._owning_thread),
+        _largest_buffer_index(TRAVELDIRECTION_NUMBER), _largest_buffer_size(0) {
 
     const int tot_ncell = _number_of_cells[3] * _number_of_cells[0];
     _number_density = new double[tot_ncell];
@@ -1066,6 +1066,22 @@ public:
    * @return Pointer to the dependency lock for this subgrid.
    */
   inline Lock *get_dependency() { return &_dependency; }
+
+  /**
+   * @brief Get the id of the thread that owns this subgrid.
+   *
+   * @return Id of the thread that owns this subgrid.
+   */
+  inline int get_owning_thread() const { return _owning_thread; }
+
+  /**
+   * @brief Set the id of the thread that owns this subgrid.
+   *
+   * @param owning_thread Id of the thread that owns this subgrid.
+   */
+  inline void set_owning_thread(const int owning_thread) {
+    _owning_thread = owning_thread;
+  }
 
   /**
    * @brief Check if the given DensitySubGrid is equal to this one.

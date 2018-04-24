@@ -230,6 +230,7 @@ inline void output_tasks(const unsigned int iloop,
       const size_t tsize = tasks.size();
       for (size_t i = 0; i < tsize; ++i) {
         const Task &task = tasks[i];
+        myassert(task.done(), "Task was never executed!");
         int type, thread_id;
         unsigned long start, end;
         task.get_timing_information(type, thread_id, start, end);
@@ -1181,7 +1182,7 @@ inline void execute_photon_traversal_task(
             new_task.set_dependency(subgrid.get_dependency());
 
             // add the task to the queue of the corresponding thread
-            const unsigned int queue_index = costs.get_thread(ngb);
+            const unsigned int queue_index = gridvec[ngb]->get_owning_thread();
             queues_to_add[num_tasks_to_add] = queue_index;
             tasks_to_add[num_tasks_to_add] = task_index;
             ++num_tasks_to_add;
@@ -1302,7 +1303,7 @@ inline void execute_photon_reemit_task(
 
   // add it to the queue of the corresponding thread
   queues_to_add[num_tasks_to_add] =
-      costs.get_thread(buffer.get_subgrid_index());
+      gridvec[buffer.get_subgrid_index()]->get_owning_thread();
   tasks_to_add[num_tasks_to_add] = task_index;
   ++num_tasks_to_add;
 
@@ -1452,7 +1453,6 @@ inline void execute_task(
 
     /// propagate photon packets from a buffer through a subgrid
 
-    costs.set_thread(task.get_subgrid(), thread_id);
     execute_photon_traversal_task(
         task, thread_id, tasks, new_queues, general_queue, new_buffers, gridvec,
         local_buffers, local_buffer_flags, reemission_probability, costs,
@@ -1570,8 +1570,9 @@ inline void activate_buffer(unsigned int &current_index, const int thread_id,
                 // add dependency
                 new_task.set_dependency(subgrid.get_dependency());
 
-                const unsigned int queue_index = costs.get_thread(
-                    new_buffers[non_full_index].get_subgrid_index());
+                const unsigned int queue_index =
+                    gridvec[new_buffers[non_full_index].get_subgrid_index()]
+                        ->get_owning_thread();
                 new_queues[queue_index]->add_task(task_index);
               }
             } else {
@@ -1704,7 +1705,7 @@ inline void check_for_incoming_communications(
       unsigned int subgrid_index = input_buffer.get_subgrid_index();
       myassert(costs.get_process(subgrid_index) == MPI_rank,
                "Message arrived on wrong process!");
-      unsigned int thread_index = costs.get_thread(subgrid_index);
+      unsigned int thread_index = gridvec[subgrid_index]->get_owning_thread();
 
       // add to the queue of the corresponding thread
       DensitySubGrid &subgrid = *gridvec[subgrid_index];
@@ -1931,78 +1932,78 @@ int main(int argc, char **argv) {
                                  ncell[1] / num_subgrid[1],
                                  ncell[2] / num_subgrid[2]};
 
-// set up the subgrids (in parallel)
+    // set up the subgrids (in parallel)
+    Atomic< unsigned int > atomic_index(0);
 #pragma omp parallel default(shared)
     {
       // id of this specific thread
       const int thread_id = omp_get_thread_num();
-      for (int ix = 0; ix < num_subgrid[0]; ++ix) {
-        for (int iy = 0; iy < num_subgrid[1]; ++iy) {
-          for (int iz = 0; iz < num_subgrid[2]; ++iz) {
-            const unsigned int index =
-                ix * num_subgrid[1] * num_subgrid[2] + iy * num_subgrid[2] + iz;
-            if (costs.get_thread(index) == thread_id) {
-              const double subbox[6] = {box[0] + ix * subbox_side[0],
-                                        box[1] + iy * subbox_side[1],
-                                        box[2] + iz * subbox_side[2],
-                                        subbox_side[0],
-                                        subbox_side[1],
-                                        subbox_side[2]};
-              gridvec[index] = new DensitySubGrid(subbox, subbox_ncell);
-              DensitySubGrid &this_grid = *gridvec[index];
-              // set up neighbouring information. We first make sure all
-              // neighbours are initialized to NEIGHBOUR_OUTSIDE, indicating no
-              // neighbour
-              for (int i = 0; i < TRAVELDIRECTION_NUMBER; ++i) {
-                this_grid.set_neighbour(i, NEIGHBOUR_OUTSIDE);
-                this_grid.set_active_buffer(i, NEIGHBOUR_OUTSIDE);
-              }
-              // now set up the correct neighbour relations for the neighbours
-              // that exist
-              for (int nix = -1; nix < 2; ++nix) {
-                for (int niy = -1; niy < 2; ++niy) {
-                  for (int niz = -1; niz < 2; ++niz) {
+      while (atomic_index.value() < tot_num_subgrid) {
+        const unsigned int index = atomic_index.post_increment();
+        if (index < tot_num_subgrid) {
+          const int ix = index / (num_subgrid[1] * num_subgrid[2]);
+          const int iy =
+              (index - ix * num_subgrid[1] * num_subgrid[2]) / num_subgrid[2];
+          const int iz = index - ix * num_subgrid[1] * num_subgrid[2] -
+                         iy * num_subgrid[2];
+          const double subbox[6] = {box[0] + ix * subbox_side[0],
+                                    box[1] + iy * subbox_side[1],
+                                    box[2] + iz * subbox_side[2],
+                                    subbox_side[0],
+                                    subbox_side[1],
+                                    subbox_side[2]};
+          gridvec[index] = new DensitySubGrid(subbox, subbox_ncell);
+          DensitySubGrid &this_grid = *gridvec[index];
+          this_grid.set_owning_thread(thread_id);
+          // set up neighbouring information. We first make sure all
+          // neighbours are initialized to NEIGHBOUR_OUTSIDE, indicating no
+          // neighbour
+          for (int i = 0; i < TRAVELDIRECTION_NUMBER; ++i) {
+            this_grid.set_neighbour(i, NEIGHBOUR_OUTSIDE);
+            this_grid.set_active_buffer(i, NEIGHBOUR_OUTSIDE);
+          }
+          // now set up the correct neighbour relations for the neighbours
+          // that exist
+          for (int nix = -1; nix < 2; ++nix) {
+            for (int niy = -1; niy < 2; ++niy) {
+              for (int niz = -1; niz < 2; ++niz) {
 // skip diagonals
 #ifdef LESS_DIRECTIONS
-                    if ((nix != 0 && niy != 0) || (nix != 0 && niz != 0) ||
-                        (niy != 0 && niz != 0)) {
-                      continue;
-                    }
+                if ((nix != 0 && niy != 0) || (nix != 0 && niz != 0) ||
+                    (niy != 0 && niz != 0)) {
+                  continue;
+                }
 #endif
-                    // get neighbour corrected indices
-                    const int cix = ix + nix;
-                    const int ciy = iy + niy;
-                    const int ciz = iz + niz;
-                    // if the indices above point to a real subgrid: set up the
-                    // neighbour relations
-                    if (cix >= 0 && cix < num_subgrid[0] && ciy >= 0 &&
-                        ciy < num_subgrid[1] && ciz >= 0 &&
-                        ciz < num_subgrid[2]) {
-                      // we use get_output_direction() to get the correct index
-                      // for the neighbour
-                      // the three_index components will either be
-                      //  - -ncell --> negative --> lower limit
-                      //  - 0 --> in range --> inside
-                      //  - ncell --> upper limit
-                      const int three_index[3] = {nix * subbox_ncell[0],
-                                                  niy * subbox_ncell[1],
-                                                  niz * subbox_ncell[2]};
-                      const int ngbi =
-                          this_grid.get_output_direction(three_index);
-                      // now get the actual ngb index
-                      const unsigned int ngb_index =
-                          cix * num_subgrid[1] * num_subgrid[2] +
-                          ciy * num_subgrid[2] + ciz;
-                      this_grid.set_neighbour(ngbi, ngb_index);
-                    } // if ci
-                  }   // for niz
-                }     // for niy
-              }       // for nix
-            }         // if local index
-          }           // for iz
-        }             // for iy
-      }               // for ix
-    }                 // end parallel region
+                // get neighbour corrected indices
+                const int cix = ix + nix;
+                const int ciy = iy + niy;
+                const int ciz = iz + niz;
+                // if the indices above point to a real subgrid: set up the
+                // neighbour relations
+                if (cix >= 0 && cix < num_subgrid[0] && ciy >= 0 &&
+                    ciy < num_subgrid[1] && ciz >= 0 && ciz < num_subgrid[2]) {
+                  // we use get_output_direction() to get the correct index
+                  // for the neighbour
+                  // the three_index components will either be
+                  //  - -ncell --> negative --> lower limit
+                  //  - 0 --> in range --> inside
+                  //  - ncell --> upper limit
+                  const int three_index[3] = {nix * subbox_ncell[0],
+                                              niy * subbox_ncell[1],
+                                              niz * subbox_ncell[2]};
+                  const int ngbi = this_grid.get_output_direction(three_index);
+                  // now get the actual ngb index
+                  const unsigned int ngb_index =
+                      cix * num_subgrid[1] * num_subgrid[2] +
+                      ciy * num_subgrid[2] + ciz;
+                  this_grid.set_neighbour(ngbi, ngb_index);
+                } // if ci
+              }   // for niz
+            }     // for niy
+          }       // for nix
+        }         // if local index
+      }
+    } // end parallel region
 
   } // if(MPI_rank == 0)
 
@@ -2419,7 +2420,8 @@ int main(int argc, char **argv) {
     // get the corresponding thread ranks
     std::vector< int > central_queue(central_index.size());
     for (unsigned int i = 0; i < central_index.size(); ++i) {
-      central_queue[i] = costs.get_thread(central_index[i]);
+      central_queue[i] = gridvec[central_index[i]]->get_owning_thread();
+      myassert(central_queue[i] >= 0, "Invalid queue index!");
       // set the source cost
       costs.set_source_cost(central_index[i], 1);
     }
@@ -2510,6 +2512,12 @@ int main(int argc, char **argv) {
               if (ithread != thread_id) {
                 current_index = new_queues[ithread]->get_task(tasks);
                 if (current_index != NO_TASK) {
+                  // stealing means transferring ownership...
+                  if (tasks[current_index].get_type() ==
+                      TASKTYPE_PHOTON_TRAVERSAL) {
+                    gridvec[tasks[current_index].get_subgrid()]
+                        ->set_owning_thread(thread_id);
+                  }
                   break;
                 }
               }
@@ -2532,6 +2540,12 @@ int main(int argc, char **argv) {
                 if (ithread != thread_id) {
                   current_index = new_queues[ithread]->get_task(tasks);
                   if (current_index != NO_TASK) {
+                    // stealing means transferring ownership...
+                    if (tasks[current_index].get_type() ==
+                        TASKTYPE_PHOTON_TRAVERSAL) {
+                      gridvec[tasks[current_index].get_subgrid()]
+                          ->set_owning_thread(thread_id);
+                    }
                     break;
                   }
                 }
@@ -2596,6 +2610,12 @@ int main(int argc, char **argv) {
                 if (ithread != thread_id) {
                   current_index = new_queues[ithread]->get_task(tasks);
                   if (current_index != NO_TASK) {
+                    // stealing means transferring ownership...
+                    if (tasks[current_index].get_type() ==
+                        TASKTYPE_PHOTON_TRAVERSAL) {
+                      gridvec[tasks[current_index].get_subgrid()]
+                          ->set_owning_thread(thread_id);
+                    }
                     break;
                   }
                 }

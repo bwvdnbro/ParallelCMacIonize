@@ -138,6 +138,8 @@ pl.gca().axvline(x = 0., linestyle = "--", linewidth = 0.8, color = "k")
 pl.gca().axvline(x = total_time, linestyle = "--", linewidth = 0.8, color = "k")
 pl.gca().xaxis.set_minor_locator(AutoMinorLocator())
 
+pl.xlim(-0.05 * total_time, 1.05 * total_time)
+
 # separate nodes with a horizontal line
 for iproc in range(1, nproc):
   pl.gca().axhline(y = iproc * nthread - 0.5, linestyle = "-", linewidth = 0.8,
