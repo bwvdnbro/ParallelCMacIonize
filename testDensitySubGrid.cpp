@@ -44,14 +44,6 @@
 //
 // GCC thread sanitizer does not seem to work: it gives false positives on
 // OpenMP functions...
-//
-// Send tasks do not have to be executed by the thread that spawns them and
-// could act as filler tasks for idle threads. However, to enable this, we would
-// need a general queue (which could also contain the photon source tasks)...
-//
-// Receive tasks cannot be put in a queue (at least not as a general "check for
-// incoming communications" task). We could let the check for incoming
-// communications spawn receive tasks that are put in the general queue though.
 
 // Defines: we do these first, as some includes depend on them
 
@@ -75,19 +67,27 @@
  *  output is written). */
 //#define SINGLE_ITERATION
 
-/*! @brief Enable this to rebalance subgrids across threads and processes in
- *  between iterations (currently broken). */
-//#define DO_REBALANCING
-
-/*! @brief Enable this to set up less output buffers. */
-//#define LESS_DIRECTIONS
-
 /*! @brief Enable this to output an ASCII file with the result. */
 //#define OUTPUT_ASCII_RESULT
+
+/*! @brief Enable this to output queue statistics. */
+#define QUEUE_OUTPUT
+
+/*! @brief Enable this to output memory space statistics. */
+#define MEMORYSPACE_OUTPUT
 
 #ifdef TASK_OUTPUT
 // activate task output in Task.hpp
 #define TASK_PLOT
+#endif
+
+#ifdef QUEUE_OUTPUT
+// activate queue statistics in Queue.hpp
+#define QUEUE_STATS
+#endif
+
+#ifdef MEMORYSPACE_OUTPUT
+#define THREADSAFEVECTOR_STATS
 #endif
 
 // global variables, as we need them in the log macro
@@ -330,11 +330,8 @@ inline void output_costs(const unsigned int iloop, const unsigned int ngrid,
  * @brief Write file with communication information for an iteration.
  *
  * @param iloop Iteration number (added to file names).
- * @param ngrid Number of subgrids.
- * @param nthread Number of threads.
- * @param costs CostVector to print.
- * @param copies List that links subgrids to copies.
- * @param original List that links subgrid copies to originals.
+ * @param message_log Message log.
+ * @param message_log_size Size of the message log.
  */
 inline void output_messages(const unsigned int iloop,
                             const std::vector< MPIMessage > &message_log,
@@ -382,6 +379,120 @@ inline void output_messages(const unsigned int iloop,
         ofile << MPI_rank << "\t" << thread << "\t" << type << "\t" << rank
               << "\t" << tag << "\t" << timestamp << "\n";
       }
+    }
+    MPI_Barrier(MPI_COMM_WORLD);
+  }
+#endif
+}
+
+/**
+ * @brief Write file with queue size information for an iteration.
+ *
+ * @param iloop Iteration number (added to file names).
+ * @param queues Per thread queues.
+ * @param general_queue General queue.
+ */
+inline void output_queues(const unsigned int iloop,
+                          std::vector< Queue * > &queues,
+                          Queue &general_queue) {
+#ifdef QUEUE_OUTPUT
+  // first compose the file name
+  std::stringstream filename;
+  filename << "queues_";
+  filename.fill('0');
+  filename.width(2);
+  filename << iloop;
+  filename << ".txt";
+
+  // now output
+  // each process outputs its own costs in turn, process 0 is responsible for
+  // creating the file and the other processes append to it
+  // note that in principle each process holds all cost information. However,
+  // the actual costs will only be up to date on the local process that holds
+  // the subgrid.
+  for (int irank = 0; irank < MPI_size; ++irank) {
+    if (irank == MPI_rank) {
+      // the file mode depends on the rank
+      std::ios_base::openmode mode;
+      if (irank == 0) {
+        // rank 0 creates (or overwrites) the file
+        mode = std::ofstream::trunc;
+      } else {
+        // all other ranks append to it
+        mode = std::ofstream::app;
+      }
+      // now open the file
+      std::ofstream ofile(filename.str(), mode);
+
+      // rank 0 writes the file header
+      if (irank == 0) {
+        ofile << "# rank\tqueue\tsize\n";
+      }
+
+      // start with the general queue (-1)
+      ofile << MPI_rank << "\t-1\t" << general_queue.get_max_queue_size()
+            << "\n";
+      general_queue.reset_max_queue_size();
+
+      // now do the other queues
+      for (size_t i = 0; i < queues.size(); ++i) {
+        Queue &queue = *queues[i];
+        ofile << MPI_rank << "\t" << i << "\t" << queue.get_max_queue_size()
+              << "\n";
+        queue.reset_max_queue_size();
+      }
+    }
+    MPI_Barrier(MPI_COMM_WORLD);
+  }
+#endif
+}
+
+/**
+ * @brief Write file with memory space size information for an iteration.
+ *
+ * @param iloop Iteration number (added to file names).
+ * @param memory_space Memory space.
+ */
+inline void output_memoryspace(const unsigned int iloop,
+                               MemorySpace &memory_space) {
+#ifdef MEMORYSPACE_OUTPUT
+  // first compose the file name
+  std::stringstream filename;
+  filename << "memoryspace_";
+  filename.fill('0');
+  filename.width(2);
+  filename << iloop;
+  filename << ".txt";
+
+  // now output
+  // each process outputs its own costs in turn, process 0 is responsible for
+  // creating the file and the other processes append to it
+  // note that in principle each process holds all cost information. However,
+  // the actual costs will only be up to date on the local process that holds
+  // the subgrid.
+  for (int irank = 0; irank < MPI_size; ++irank) {
+    if (irank == MPI_rank) {
+      // the file mode depends on the rank
+      std::ios_base::openmode mode;
+      if (irank == 0) {
+        // rank 0 creates (or overwrites) the file
+        mode = std::ofstream::trunc;
+      } else {
+        // all other ranks append to it
+        mode = std::ofstream::app;
+      }
+      // now open the file
+      std::ofstream ofile(filename.str(), mode);
+
+      // rank 0 writes the file header
+      if (irank == 0) {
+        ofile << "# rank\tsize\n";
+      }
+
+      // start with the general queue (-1)
+      ofile << MPI_rank << "\t" << memory_space.get_max_number_elements()
+            << "\n";
+      memory_space.reset_max_number_elements();
     }
     MPI_Barrier(MPI_COMM_WORLD);
   }
@@ -2017,13 +2128,6 @@ int main(int argc, char **argv) {
           for (int nix = -1; nix < 2; ++nix) {
             for (int niy = -1; niy < 2; ++niy) {
               for (int niz = -1; niz < 2; ++niz) {
-// skip diagonals
-#ifdef LESS_DIRECTIONS
-                if ((nix != 0 && niy != 0) || (nix != 0 && niz != 0) ||
-                    (niy != 0 && niz != 0)) {
-                  continue;
-                }
-#endif
                 // get neighbour corrected indices
                 const int cix = ix + nix;
                 const int ciy = iy + niy;
@@ -2411,6 +2515,9 @@ int main(int argc, char **argv) {
   ///////////////////
 
   Timer iteration_timer;
+  // make sure all processes are here before starting the timer, to make sure
+  // the timings are consistent
+  MPI_Barrier(MPI_COMM_WORLD);
   iteration_timer.start();
 
   // now for the main loop. This loop
@@ -2420,6 +2527,7 @@ int main(int argc, char **argv) {
 
     // store the CPU cycle count at the start of the iteration for this node
     unsigned long iteration_start, iteration_end;
+    MPI_Barrier(MPI_COMM_WORLD);
     cpucycle_tick(iteration_start);
 
     // make a global list of all subgrids (on this process) that contain the
@@ -2708,11 +2816,6 @@ int main(int argc, char **argv) {
 
       } // while (global_run_flag)
 
-      logmessage("Thread " << thread_id << " exited loop!", 0);
-
-// make sure all threads finished before continuing
-#pragma omp barrier
-
     } // parallel region
 
     // make sure all requests are freed
@@ -2866,8 +2969,9 @@ int main(int argc, char **argv) {
 
     MPI_Waitall(requests.size(), &requests[0], MPI_STATUSES_IGNORE);
 
+    // synchronize all processes before recording the iteration end tick, to
+    // make sure the timelines are synchronized
     MPI_Barrier(MPI_COMM_WORLD);
-
     cpucycle_tick(iteration_end);
 
     // output useful information about this iteration (if enabled)
@@ -2875,15 +2979,8 @@ int main(int argc, char **argv) {
     output_tasks(iloop, tasks, iteration_start, iteration_end);
     output_messages(iloop, message_log, message_log_size);
     output_costs(iloop, tot_num_subgrid, costs, copies, originals);
-
-#ifdef SINGLE_ITERATION
-    // stop here to see how we did for 1 iteration
-    MPI_Barrier(MPI_COMM_WORLD);
-
-    output_neutral_fractions(costs, gridvec, tot_num_subgrid);
-
-    return MPI_Finalize();
-#endif
+    output_queues(iloop, new_queues, general_queue);
+    output_memoryspace(iloop, new_buffers);
 
     // reset the MPI request counter
     MPI_last_request = 0;
@@ -2894,108 +2991,22 @@ int main(int argc, char **argv) {
     // clear task buffer
     tasks.clear();
 
-#ifdef DO_REBALANCING
-    // rebalance the work based on the cost information during the last
-    // iteration
-    // we first need to communicate cost information
-    logmessage("Rebalancing", 0);
-    // fill initial_cost_vector with costs
-    unsigned long avg_cost_per_thread = 0;
-    for (unsigned int i = 0; i < tot_num_subgrid; ++i) {
-      initial_cost_vector[i] = costs.get_computational_cost(i);
-      avg_cost_per_thread += initial_cost_vector[i];
-    }
-    for (unsigned int i = 0; i < originals.size(); ++i) {
-      initial_cost_vector[originals[i]] +=
-          costs.get_computational_cost(tot_num_subgrid + i);
-      avg_cost_per_thread += initial_cost_vector[originals[i]];
-    }
-    avg_cost_per_thread /= num_threads;
-
-    // update the copy levels
-    for (unsigned int i = 0; i < tot_num_subgrid; ++i) {
-      if (copy_factor * initial_cost_vector[i] > avg_cost_per_thread) {
-        // note that this in principle should be 1 higher. However, we do not
-        // count the original.
-        unsigned int number_of_copies =
-            copy_factor * initial_cost_vector[i] / avg_cost_per_thread;
-        // get the highest bit
-        unsigned int level = 0;
-        while (number_of_copies > 0) {
-          number_of_copies >>= 1;
-          ++level;
-        }
-        levels[i] = level;
-      }
-    }
-
-    // reset neighbours to old values before we make new copies
-    for (unsigned int i = 0; i < tot_num_subgrid; ++i) {
-      for (int j = 1; j < TRAVELDIRECTION_NUMBER; ++j) {
-        if (gridvec[i]->get_neighbour(j) != NEIGHBOUR_OUTSIDE) {
-          if (gridvec[i]->get_neighbour(j) >= tot_num_subgrid) {
-            gridvec[i]->set_neighbour(j, originals[i - tot_num_subgrid]);
-          }
-        }
-      }
-    }
-
-    // delete old copies
-    for (unsigned int i = 0; i < originals.size(); ++i) {
-      // free all associated buffers
-      for (int j = 0; j < TRAVELDIRECTION_NUMBER; ++j) {
-        if (gridvec[tot_num_subgrid + i]->get_neighbour(j) !=
-            NEIGHBOUR_OUTSIDE) {
-          new_buffers.free_buffer(
-              gridvec[tot_num_subgrid + i]->get_active_buffer(j));
-        }
-      }
-      delete gridvec[tot_num_subgrid + i];
-    }
-    gridvec.resize(tot_num_subgrid);
-
-    // make new copies
-    originals.clear();
-    copies.clear();
-    copies.resize(tot_num_subgrid, 0xffffffff);
-    create_copies(gridvec, levels, new_buffers, originals, copies);
-
-    costs.reset(gridvec.size());
-    // make sure costs are up to date
-    for (unsigned int igrid = 0; igrid < tot_num_subgrid; ++igrid) {
-      std::vector< unsigned int > this_copies;
-      unsigned int copy = copies[igrid];
-      if (copy < 0xffffffff) {
-        while (copy < gridvec.size() &&
-               originals[copy - tot_num_subgrid] == igrid) {
-          this_copies.push_back(copy);
-          ++copy;
-        }
-      }
-      if (this_copies.size() > 0) {
-        const unsigned long cost =
-            initial_cost_vector[igrid] / (this_copies.size() + 1);
-        costs.set_computational_cost(igrid, cost);
-        for (unsigned int i = 0; i < this_copies.size(); ++i) {
-          costs.set_computational_cost(this_copies[i], cost);
-        }
-      } else {
-        costs.set_computational_cost(igrid, initial_cost_vector[igrid]);
-      }
-    }
-
-    // redistribute the subgrids among the threads to balance the computational
-    // costs (based on this iteration)
-    costs.redistribute(ngbs);
-
-// now do the communication: some subgrids might move between processes
-// ...
-#else // DO_REBALANCING
     costs.clear_costs();
+
+#ifdef SINGLE_ITERATION
+    // stop here to see how we did for 1 iteration
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    output_neutral_fractions(costs, gridvec, tot_num_subgrid);
+
+    return MPI_Finalize();
 #endif
 
   } // main loop
 
+  // make sure the timelines are synchronized before stopping the Monte Carlo
+  // loop timer
+  MPI_Barrier(MPI_COMM_WORLD);
   iteration_timer.stop();
 
   ///////////////////

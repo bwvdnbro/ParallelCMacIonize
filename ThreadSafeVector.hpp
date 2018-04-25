@@ -48,6 +48,12 @@ private:
   /*! @brief Atomic locks for the vector elements. */
   Atomic< bool > *_locks;
 
+#ifdef THREADSAFEVECTOR_STATS
+  /*! @brief Maximum number of elements taken simultaneously at any given point
+   * in time. */
+  Atomic< size_t > _max_number_taken;
+#endif
+
 public:
   /**
    * @brief Constructor.
@@ -85,6 +91,10 @@ public:
     // clear the elements
     delete[] _vector;
     _vector = new _datatype_[_size];
+
+#ifdef THREADSAFEVECTOR_STATS
+    _max_number_taken.set(0);
+#endif
   }
 
   /**
@@ -127,7 +137,12 @@ public:
     while (!_locks[index].lock()) {
       index = _current_index.post_increment() % _size;
     }
+#ifdef THREADSAFEVECTOR_STATS
+    const size_t number_taken = _number_taken.pre_increment();
+    _max_number_taken.max(number_taken);
+#else
     _number_taken.pre_increment();
+#endif
     return index;
   }
 
@@ -146,7 +161,12 @@ public:
       while (!_locks[index].lock()) {
         index = _current_index.post_increment() % _size;
       }
+#ifdef THREADSAFEVECTOR_STATS
+      const size_t number_taken = _number_taken.pre_increment();
+      _max_number_taken.max(number_taken);
+#else
       _number_taken.pre_increment();
+#endif
       return index;
     } else {
       return _size;
@@ -186,6 +206,31 @@ public:
    * @return Maximum number of elements that can be stored in the vector.
    */
   inline size_t max_size() const { return _size; }
+
+/**
+ * @brief Get the maximum number of elements that was taken in this vector at
+ * any given time.
+ *
+ * @return Maximum number of elements that was taken.
+ */
+#ifdef THREADSAFEVECTOR_STATS
+  inline size_t get_max_number_taken() const {
+    return _max_number_taken.value();
+  }
+#else
+#error                                                                         \
+    "This function should only be used when THREADSAFEVECTOR_STATS is defined!"
+#endif
+
+/**
+ * @brief Reset the counter for the maximum number of elements that was taken.
+ */
+#ifdef THREADSAFEVECTOR_STATS
+  inline void reset_max_number_taken() { _max_number_taken.set(0); }
+#else
+#error                                                                         \
+    "This function should only be used when THREADSAFEVECTOR_STATS is defined!"
+#endif
 };
 
 #endif // THREADSAFEVECTOR_HPP

@@ -118,6 +118,26 @@ public:
     }
     return index_out;
   }
+
+#ifdef THREADSAFEVECTOR_STATS
+  /**
+   * @brief Get the maximum number of elements in the memory space at any given
+   * time.
+   *
+   * @return Maximum number of elements in the memory space.
+   */
+  inline size_t get_max_number_elements() const {
+    return _memory_space.get_max_number_taken();
+  }
+
+  /**
+   * @brief Reset the counter for the maximum number of elements in the memory
+   * space.
+   */
+  inline void reset_max_number_elements() {
+    _memory_space.reset_max_number_taken();
+  }
+#endif
 };
 
 #endif // MEMORYSPACE_HPP

@@ -51,6 +51,11 @@ private:
   /*! @brief Lock that protects the queue. */
   Lock _queue_lock;
 
+#ifdef QUEUE_STATS
+  /*! @brief Maximum size of the queue at any given time. */
+  size_t _max_queue_size;
+#endif
+
 public:
   /**
    * @brief Constructor.
@@ -59,6 +64,9 @@ public:
    */
   inline Queue(const size_t size) : _current_queue_size(0), _size(size) {
     _queue = new size_t[size];
+#ifdef QUEUE_STATS
+    _max_queue_size = 0;
+#endif
   }
 
   /**
@@ -76,6 +84,9 @@ public:
     myassert(_current_queue_size < _size, "Too many tasks in queue!");
     _queue[_current_queue_size] = task;
     ++_current_queue_size;
+#ifdef QUEUE_STATS
+    _max_queue_size = std::max(_max_queue_size, _current_queue_size);
+#endif
     _queue_lock.unlock();
   }
 
@@ -166,6 +177,26 @@ public:
    * @return Current size of the queue.
    */
   inline size_t size() const { return _current_queue_size; }
+
+/**
+ * @brief Get the maximum size of the queue.
+ *
+ * @return Maximum size of the queue.
+ */
+#ifdef QUEUE_STATS
+  inline size_t get_max_queue_size() const { return _max_queue_size; }
+#else
+#error "This function should only be used when QUEUE_STATS is defined!"
+#endif
+
+/**
+ * @brief Reset the maximum size of the queue counter.
+ */
+#ifdef QUEUE_STATS
+  inline void reset_max_queue_size() { _max_queue_size = 0; }
+#else
+#error "This function should only be used when QUEUE_STATS is defined!"
+#endif
 };
 
 #endif // QUEUE_HPP

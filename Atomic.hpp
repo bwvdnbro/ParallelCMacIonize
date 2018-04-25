@@ -193,6 +193,30 @@ public:
     return __sync_add_and_fetch(&_value, increment);
 #endif
   }
+
+  /**
+   * @brief Atomically update the variable with the maximum of its current value
+   * and the given value.
+   *
+   * @param value Potential new maximum for the variable.
+   */
+  inline void max(const _type_ value) {
+#if defined(CPP_ATOMIC)
+    _type_ old_value = _value.load();
+    _type_ new_value = std::max(value, old_value);
+    while (!_value.compare_exchange_strong(old_value, new_value)) {
+      old_value = _value.load();
+      new_value = std::max(value, old_value);
+    }
+#elif defined(GCC_ATOMIC)
+    _type_ old_value = _value;
+    _type_ new_value = std::max(value, old_value);
+    while (!__sync_bool_compare_and_swap(&_value, old_value, new_value)) {
+      old_value = _value;
+      new_value = std::max(value, old_value);
+    }
+#endif
+  }
 };
 
 #endif // ATOMIC_HPP
