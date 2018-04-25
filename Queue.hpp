@@ -82,16 +82,17 @@ public:
   /**
    * @brief Get a task from the queue.
    *
+   * This version locks the queue.
+   *
    * @param tasks Task space.
    * @return Task, or NO_TASK if no task is available.
    */
   inline size_t get_task(ThreadSafeVector< Task > &tasks) {
 
-    // lock the queue while we are getting a task
-    _queue_lock.lock();
-
     // initialize an empty task
     size_t task = NO_TASK;
+
+    _queue_lock.lock();
 
     // now try to find a task whose dependency can be locked
     size_t index = _current_queue_size;
@@ -112,6 +113,48 @@ public:
 
     // we're done: unlock the queue
     _queue_lock.unlock();
+
+    // return the task
+    return task;
+  }
+
+  /**
+   * @brief Try to get a task from the queue.
+   *
+   * This version tries to lock the queue and bails out if another thread is
+   * accessing it.
+   *
+   * @param tasks Task space.
+   * @return Task, or NO_TASK if no task is available.
+   */
+  inline size_t try_get_task(ThreadSafeVector< Task > &tasks) {
+
+    // initialize an empty task
+    size_t task = NO_TASK;
+
+    // lock the queue while we are getting a task
+    if (_queue_lock.try_lock()) {
+
+      // now try to find a task whose dependency can be locked
+      size_t index = _current_queue_size;
+      while (index > 0 && !tasks[_queue[index - 1]].lock_dependency()) {
+        --index;
+      }
+      if (index > 0) {
+        // we found a task and locked it
+        --index;
+        --_current_queue_size;
+        task = _queue[index];
+
+        // shuffle all tasks to close the gap created by removing the task
+        for (; index < _current_queue_size; ++index) {
+          _queue[index] = _queue[index + 1];
+        }
+      }
+
+      // we're done: unlock the queue
+      _queue_lock.unlock();
+    }
 
     // return the task
     return task;

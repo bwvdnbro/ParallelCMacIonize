@@ -1267,10 +1267,6 @@ inline void execute_photon_reemit_task(
     std::vector< DensitySubGrid * > &gridvec, unsigned int &num_tasks_to_add,
     unsigned int *tasks_to_add, int *queues_to_add) {
 
-  // variables used to determine the cost of the task
-  unsigned long task_start, task_end;
-  cpucycle_tick(task_start);
-
   // log the start of the task
   task.start(thread_id);
 
@@ -1310,10 +1306,6 @@ inline void execute_photon_reemit_task(
 
   // log the end time of the task
   task.stop();
-
-  // update the cost computation for this subgrid
-  cpucycle_tick(task_end);
-  costs.add_computational_cost(task.get_subgrid(), task_end - task_start);
 }
 
 /**
@@ -1769,6 +1761,47 @@ inline void check_for_incoming_communications(
       cmac_error("Unknown tag: %i!", tag);
     }
   }
+}
+
+/**
+ * @brief Steal a task from another queue.
+ *
+ * @param thread_id Id of the active thread.
+ * @param num_threads Total number of threads.
+ * @param new_queues Thread queues.
+ * @param tasks Task space.
+ * @param gridvec Grid.
+ * @return Index of an available task, or NO_TASK if no tasks are available.
+ */
+inline unsigned int steal_task(const int thread_id, const int num_threads,
+                               std::vector< Queue * > &new_queues,
+                               ThreadSafeVector< Task > &tasks,
+                               std::vector< DensitySubGrid * > &gridvec) {
+
+  // sort the queues by size
+  std::vector< unsigned int > queue_sizes(new_queues.size(), 0);
+  for (unsigned int i = 0; i < new_queues.size(); ++i) {
+    queue_sizes[i] = new_queues[i]->size();
+  }
+  std::vector< size_t > sorti = Utilities::argsort(queue_sizes);
+
+  // now try to steal from the largest queue first
+  unsigned int current_index = NO_TASK;
+  unsigned int i = 0;
+  while (current_index == NO_TASK && i < queue_sizes.size() &&
+         queue_sizes[sorti[queue_sizes.size() - i - 1]] > 0) {
+    current_index =
+        new_queues[sorti[queue_sizes.size() - i - 1]]->try_get_task(tasks);
+    ++i;
+  }
+  if (current_index != NO_TASK) {
+    // stealing means transferring ownership...
+    if (tasks[current_index].get_type() == TASKTYPE_PHOTON_TRAVERSAL) {
+      gridvec[tasks[current_index].get_subgrid()]->set_owning_thread(thread_id);
+    }
+  }
+
+  return current_index;
 }
 
 /**
@@ -2513,20 +2546,8 @@ int main(int argc, char **argv) {
           current_index = general_queue.get_task(tasks);
           // still no task: try to steal one
           if (current_index == NO_TASK) {
-            for (int ithread = 0; ithread < num_threads; ++ithread) {
-              if (ithread != thread_id) {
-                current_index = new_queues[ithread]->get_task(tasks);
-                if (current_index != NO_TASK) {
-                  // stealing means transferring ownership...
-                  if (tasks[current_index].get_type() ==
-                      TASKTYPE_PHOTON_TRAVERSAL) {
-                    gridvec[tasks[current_index].get_subgrid()]
-                        ->set_owning_thread(thread_id);
-                  }
-                  break;
-                }
-              }
-            }
+            current_index =
+                steal_task(thread_id, num_threads, new_queues, tasks, gridvec);
           }
         }
 
@@ -2541,20 +2562,8 @@ int main(int argc, char **argv) {
             current_index = general_queue.get_task(tasks);
             // still no task: try to steal one
             if (current_index == NO_TASK) {
-              for (int ithread = 0; ithread < num_threads; ++ithread) {
-                if (ithread != thread_id) {
-                  current_index = new_queues[ithread]->get_task(tasks);
-                  if (current_index != NO_TASK) {
-                    // stealing means transferring ownership...
-                    if (tasks[current_index].get_type() ==
-                        TASKTYPE_PHOTON_TRAVERSAL) {
-                      gridvec[tasks[current_index].get_subgrid()]
-                          ->set_owning_thread(thread_id);
-                    }
-                    break;
-                  }
-                }
-              }
+              current_index = steal_task(thread_id, num_threads, new_queues,
+                                         tasks, gridvec);
             }
           }
         }
@@ -2611,20 +2620,8 @@ int main(int argc, char **argv) {
             current_index = general_queue.get_task(tasks);
             // still no task: try to steal one
             if (current_index == NO_TASK) {
-              for (int ithread = 0; ithread < num_threads; ++ithread) {
-                if (ithread != thread_id) {
-                  current_index = new_queues[ithread]->get_task(tasks);
-                  if (current_index != NO_TASK) {
-                    // stealing means transferring ownership...
-                    if (tasks[current_index].get_type() ==
-                        TASKTYPE_PHOTON_TRAVERSAL) {
-                      gridvec[tasks[current_index].get_subgrid()]
-                          ->set_owning_thread(thread_id);
-                    }
-                    break;
-                  }
-                }
-              }
+              current_index = steal_task(thread_id, num_threads, new_queues,
+                                         tasks, gridvec);
             }
           }
 

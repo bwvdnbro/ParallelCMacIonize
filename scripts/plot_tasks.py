@@ -106,6 +106,8 @@ fig, ax = pl.subplots(1, 1, sharex = True)
 
 ax.set_xlim(ttot_min - 0.05 * (ttot_max - ttot_min),
             ttot_max + 0.05 * (ttot_max - ttot_min))
+ax.axvline(x = ttot_min, linestyle = "--", color = "k", linewidth = 0.8)
+ax.axvline(x = ttot_max, linestyle = "--", color = "k", linewidth = 0.8)
 
 # first plot the MPI communications (if requested)
 if args.messagefile:
