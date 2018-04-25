@@ -2555,11 +2555,11 @@ int main(int argc, char **argv) {
         // source tasks we just created
         unsigned int current_index = new_queues[thread_id]->get_task(tasks);
         if (current_index == NO_TASK) {
-          current_index = general_queue.get_task(tasks);
-          // still no task: try to steal one
+          current_index =
+              steal_task(thread_id, num_threads, new_queues, tasks, gridvec);
+          // still no task: take one from the general queue
           if (current_index == NO_TASK) {
-            current_index =
-                steal_task(thread_id, num_threads, new_queues, tasks, gridvec);
+            current_index = general_queue.get_task(tasks);
           }
         }
 
@@ -2571,11 +2571,11 @@ int main(int argc, char **argv) {
                           costs, num_empty, num_active_buffers);
           current_index = new_queues[thread_id]->get_task(tasks);
           if (current_index == NO_TASK) {
-            current_index = general_queue.get_task(tasks);
-            // still no task: try to steal one
+            current_index =
+                steal_task(thread_id, num_threads, new_queues, tasks, gridvec);
+            // still no task: take one from the general queue
             if (current_index == NO_TASK) {
-              current_index = steal_task(thread_id, num_threads, new_queues,
-                                         tasks, gridvec);
+              current_index = general_queue.get_task(tasks);
             }
           }
         }
@@ -2629,11 +2629,11 @@ int main(int argc, char **argv) {
           // We finished a task: try to get a new task from the local queue
           current_index = new_queues[thread_id]->get_task(tasks);
           if (current_index == NO_TASK) {
-            current_index = general_queue.get_task(tasks);
-            // still no task: try to steal one
+            current_index =
+                steal_task(thread_id, num_threads, new_queues, tasks, gridvec);
+            // still no task: take one from the general queue
             if (current_index == NO_TASK) {
-              current_index = steal_task(thread_id, num_threads, new_queues,
-                                         tasks, gridvec);
+              current_index = general_queue.get_task(tasks);
             }
           }
 
