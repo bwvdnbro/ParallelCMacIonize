@@ -82,6 +82,9 @@
 /*! @brief Enable this to set up less output buffers. */
 //#define LESS_DIRECTIONS
 
+/*! @brief Enable this to output an ASCII file with the result. */
+//#define OUTPUT_ASCII_RESULT
+
 #ifdef TASK_OUTPUT
 // activate task output in Task.hpp
 #define TASK_PLOT
@@ -397,7 +400,8 @@ output_neutral_fractions(const CostVector &costs,
                          const std::vector< DensitySubGrid * > &gridvec,
                          const unsigned int tot_num_subgrid) {
 
-  //  - ASCII output (for the VisIt plot script)
+#ifdef OUTPUT_ASCII_RESULT
+  // ASCII output (for the VisIt plot script)
   for (int irank = 0; irank < MPI_size; ++irank) {
     // only the active process writes
     if (irank == MPI_rank) {
@@ -424,33 +428,41 @@ output_neutral_fractions(const CostVector &costs,
     // only one process at a time is allowed to write
     MPI_Barrier(MPI_COMM_WORLD);
   }
+#endif
 
-  //  - binary output (for the Python plot script)
-  for (int irank = 0; irank < MPI_size; ++irank) {
-    // only the active process writes
-    if (irank == MPI_rank) {
-      // the file mode depends on the rank
-      std::ios_base::openmode mode;
-      if (irank == 0) {
-        // rank 0 creates (or overwrites) the file
-        mode = std::ofstream::trunc;
-      } else {
-        // all other ranks append to it
-        mode = std::ofstream::app;
-      }
-      // now open the file
-      std::ofstream ofile("neutral_fractions.dat", mode);
+  // binary output
+  // we use a memory-mapped file, which allows us
+  //  - to write simultaneously using multiple threads
+  //  - to write simultaneously using multiple processes
+  // we can do this because we know the size of the file beforehand, and we can
+  // assign a unique location in the file to each subgrid
 
-      // write the neutral fractions
-      for (unsigned int igrid = 0; igrid < tot_num_subgrid; ++igrid) {
-        // only the owning process writes
-        if (costs.get_process(igrid) == MPI_rank) {
-          gridvec[igrid]->output_intensities(ofile);
-        }
+  // find the size (in bytes) of a single subgrid
+  // we loop over the subgrids until we find one that is present on this process
+  size_t blocksize;
+  for (unsigned int igrid = 0; igrid < tot_num_subgrid; ++igrid) {
+    if (costs.get_process(igrid) == MPI_rank) {
+      blocksize = gridvec[igrid]->get_output_size();
+      break;
+    }
+  }
+
+  // now memory-map the file
+  // the file is shared by all processes
+  MemoryMap file("neutral_fractions.dat", tot_num_subgrid * blocksize);
+  // write the subgrids using multiple threads
+  Atomic< unsigned int > igrid(0);
+#pragma omp parallel default(shared)
+  {
+    while (igrid.value() < tot_num_subgrid) {
+      const unsigned int this_igrid = igrid.post_increment();
+      // only write local subgrids
+      if (this_igrid < tot_num_subgrid &&
+          costs.get_process(this_igrid) == MPI_rank) {
+        const size_t offset = this_igrid * blocksize;
+        gridvec[this_igrid]->output_intensities(offset, file);
       }
     }
-    // only one process at a time is allowed to write
-    MPI_Barrier(MPI_COMM_WORLD);
   }
 }
 

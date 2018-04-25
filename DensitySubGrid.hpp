@@ -32,6 +32,7 @@
 #include "Atomic.hpp"
 #include "Error.hpp"
 #include "Lock.hpp"
+#include "MemoryMap.hpp"
 #include "Photon.hpp"
 #include "TravelDirections.hpp"
 
@@ -1035,6 +1036,49 @@ public:
         }
       }
     }
+  }
+
+  /**
+   * @brief Write the neutral fractions to the given memory-mapped file.
+   *
+   * @param offset Offset within the file (in bytes).
+   * @param file Memory-mapped file to write to.
+   */
+  inline void output_intensities(const size_t offset, MemoryMap &file) {
+    size_t cell_offset = 0;
+    for (int ix = 0; ix < _number_of_cells[0]; ++ix) {
+      // not const since we cast it to a char* below
+      double pos_x = _anchor[0] + (ix + 0.5) * _cell_size[0];
+      for (int iy = 0; iy < _number_of_cells[1]; ++iy) {
+        double pos_y = _anchor[1] + (iy + 0.5) * _cell_size[1];
+        for (int iz = 0; iz < _number_of_cells[2]; ++iz) {
+          double pos_z = _anchor[2] + (iz + 0.5) * _cell_size[2];
+          const int three_index[3] = {ix, iy, iz};
+          const int index = get_one_index(three_index);
+
+          file.write(offset + cell_offset, pos_x);
+          cell_offset += sizeof(double);
+          file.write(offset + cell_offset, pos_y);
+          cell_offset += sizeof(double);
+          file.write(offset + cell_offset, pos_z);
+          cell_offset += sizeof(double);
+          file.write(offset + cell_offset, _neutral_fraction[index]);
+          cell_offset += sizeof(double);
+          file.write(offset + cell_offset, _number_density[index]);
+          cell_offset += sizeof(double);
+        }
+      }
+    }
+  }
+
+  /**
+   * @brief Get the size (in bytes) of the output array for this subgrid.
+   *
+   * @return Size (in bytes) that will be output by output_intensities().
+   */
+  inline size_t get_output_size() const {
+    return _number_of_cells[0] * _number_of_cells[1] * _number_of_cells[2] * 5 *
+           sizeof(double);
   }
 
   /**
