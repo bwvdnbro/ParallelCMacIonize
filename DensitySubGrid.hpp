@@ -87,6 +87,9 @@ private:
   /*! @brief Indices of the active buffers. */
   unsigned int _active_buffers[TRAVELDIRECTION_NUMBER];
 
+  /*! @brief Communication cost per edge. */
+  unsigned int _communication_cost[TRAVELDIRECTION_NUMBER];
+
   /*! @brief Computational cost of this subgrid. */
   unsigned long _computational_cost;
 
@@ -453,6 +456,11 @@ public:
         _owning_thread(0), _largest_buffer_index(TRAVELDIRECTION_NUMBER),
         _largest_buffer_size(0) {
 
+    // initialize edge communication costs
+    for (int i = 0; i < TRAVELDIRECTION_NUMBER; ++i) {
+      _communication_cost[i] = 0;
+    }
+
     // allocate memory for data arrays
     const int tot_ncell = _number_of_cells[3] * ncell[0];
     _number_density = new double[tot_ncell];
@@ -488,6 +496,11 @@ public:
             original._number_of_cells[2], original._number_of_cells[3]},
         _owning_thread(original._owning_thread),
         _largest_buffer_index(TRAVELDIRECTION_NUMBER), _largest_buffer_size(0) {
+
+    // initialize edge communication costs
+    for (int i = 0; i < TRAVELDIRECTION_NUMBER; ++i) {
+      _communication_cost[i] = 0;
+    }
 
     const int tot_ncell = _number_of_cells[3] * _number_of_cells[0];
     _number_density = new double[tot_ncell];
@@ -551,6 +564,36 @@ public:
     myassert(output_direction >= 0 && output_direction < TRAVELDIRECTION_NUMBER,
              "output_direction: " << output_direction);
     _ngbs[output_direction] = ngb;
+  }
+
+  /**
+   * @brief Add the given communication cost to the given edge.
+   *
+   * @param direction Neighbour direction.
+   * @param cost Cost to add.
+   */
+  inline void add_communication_cost(const int direction,
+                                     const unsigned int cost) {
+    _communication_cost[direction] += cost;
+  }
+
+  /**
+   * @brief Get the communication cost for the given edge.
+   *
+   * @param direction Neighbour direction.
+   * @return Communication cost.
+   */
+  inline unsigned int get_communication_cost(const int direction) const {
+    return _communication_cost[direction];
+  }
+
+  /**
+   * @brief Reset the communication costs for all edges.
+   */
+  inline void reset_communication_costs() {
+    for (int i = 0; i < TRAVELDIRECTION_NUMBER; ++i) {
+      _communication_cost[i] = 0;
+    }
   }
 
   /**
@@ -717,6 +760,11 @@ public:
    * @param copy Subgrid copy from which to read.
    */
   inline void update_intensities(const DensitySubGrid &copy) {
+
+    for (int i = 0; i < TRAVELDIRECTION_NUMBER; ++i) {
+      _communication_cost[i] += copy._communication_cost[i];
+    }
+
     const int tot_ncell = _number_of_cells[3] * _number_of_cells[0];
     for (int i = 0; i < tot_ncell; ++i) {
       _intensity_integral[i] += copy._intensity_integral[i];

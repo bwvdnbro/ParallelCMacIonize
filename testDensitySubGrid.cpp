@@ -327,6 +327,67 @@ inline void output_costs(const unsigned int iloop, const unsigned int ngrid,
 }
 
 /**
+ * @brief Write files with communication cost information for an iteration.
+ *
+ * @param iloop Iteration number (added to file names).
+ * @oaran costs CostVector.
+ * @param gridvec Subgrids.
+ * @param tot_num_subgrid Total number of original subgrids.
+ */
+inline void
+output_communication_costs(const unsigned int iloop, const CostVector &costs,
+                           const std::vector< DensitySubGrid * > &gridvec,
+                           const unsigned int tot_num_subgrid) {
+
+  // first compose the file name
+  std::stringstream filename;
+  filename << "communication_costs_";
+  filename.fill('0');
+  filename.width(2);
+  filename << iloop;
+  filename << ".txt";
+
+  // now output
+  // each process outputs its own costs in turn, process 0 is responsible for
+  // creating the file and the other processes append to it
+  // note that in principle each process holds all cost information. However,
+  // the actual costs will only be up to date on the local process that holds
+  // the subgrid.
+  for (int irank = 0; irank < MPI_size; ++irank) {
+    if (irank == MPI_rank) {
+      // the file mode depends on the rank
+      std::ios_base::openmode mode;
+      if (irank == 0) {
+        // rank 0 creates (or overwrites) the file
+        mode = std::ofstream::trunc;
+      } else {
+        // all other ranks append to it
+        mode = std::ofstream::app;
+      }
+      // now open the file
+      std::ofstream ofile(filename.str(), mode);
+
+      // rank 0 writes the file header
+      if (irank == 0) {
+        ofile << "# subgrid\tdirection\tcommunication cost\n";
+      }
+
+      // output the communication cost information
+      for (unsigned int i = 0; i < tot_num_subgrid; ++i) {
+        // only output local information
+        if (costs.get_process(i) == MPI_rank) {
+          for (int j = 0; j < TRAVELDIRECTION_NUMBER; ++j) {
+            ofile << i << "\t" << j << "\t"
+                  << gridvec[i]->get_communication_cost(j) << "\n";
+          }
+        }
+      }
+    }
+    MPI_Barrier(MPI_COMM_WORLD);
+  }
+}
+
+/**
  * @brief Write file with communication information for an iteration.
  *
  * @param iloop Iteration number (added to file names).
@@ -1204,6 +1265,12 @@ inline void execute_photon_traversal_task(
   myassert(costs.get_process(igrid) == MPI_rank,
            "This process should not be working on this subgrid!");
 
+  const int input_direction = buffer.get_direction();
+  if (input_direction > 0) {
+    // photons enter the subgrid through an edge: log the communication cost
+    this_grid.add_communication_cost(input_direction, buffer.size());
+  }
+
   // prepare output buffers: make sure they are empty and that buffers
   // corresponding to directions outside the simulation box are
   // disabled
@@ -1239,6 +1306,11 @@ inline void execute_photon_traversal_task(
 
     // only process enabled, non-empty output buffers
     if (local_buffer_flags[i] && local_buffers[i].size() > 0) {
+
+      // photons leave the subgrid through an edge: log the communication cost
+      if (i > 0) {
+        this_grid.add_communication_cost(i, local_buffers[i].size());
+      }
 
       // photon packets that are still present in an output buffer
       // are not done yet
@@ -2248,6 +2320,23 @@ int main(int argc, char **argv) {
 
   std::fill(initial_cost_vector.begin(), initial_cost_vector.end(), 1);
 
+  // edge costs
+  std::vector< std::vector< unsigned int > > initial_edge_costs(
+      tot_num_subgrid, std::vector< unsigned int >(TRAVELDIRECTION_NUMBER, 0));
+  std::ifstream ifile("communication_costs_00.txt");
+  std::string line;
+  // skip the first line
+  std::getline(ifile, line);
+  // now parse the data
+  while (std::getline(ifile, line)) {
+    std::istringstream linestream(line);
+    unsigned int igrid, direction, communication_cost;
+    linestream >> igrid >> direction >> communication_cost;
+    initial_edge_costs[igrid][direction] = communication_cost;
+  }
+  //  std::fill(initial_edge_costs.begin(), initial_edge_costs.end(),
+  //  std::vector<unsigned int>(TRAVELDIRECTION_NUMBER, 1));
+
   logmessage("Done.", 0);
 
   /////////////////////////////
@@ -2359,6 +2448,7 @@ int main(int argc, char **argv) {
   // set up the graph for the distributed memory domain decomposition
   // figure out the source costs
   std::vector< std::vector< unsigned int > > ngbs(gridvec.size());
+  std::vector< std::vector< unsigned int > > edge_costs(gridvec.size());
   std::vector< unsigned int > source_cost(gridvec.size(), 0);
   // only rank 0 does this for the moment
   if (MPI_rank == 0) {
@@ -2371,9 +2461,22 @@ int main(int argc, char **argv) {
           (igrid >= tot_num_subgrid &&
            originals[igrid - tot_num_subgrid] == central_index);
 
+      // figure out what the edge communication costs are
+      unsigned int edge_cost_field = igrid;
+      if (igrid >= tot_num_subgrid) {
+        edge_cost_field = originals[igrid - tot_num_subgrid];
+      }
+      unsigned int edge_cost_factor = 1;
+      unsigned int copy = copies[edge_cost_field];
+      if (copy < 0xffffffff) {
+        while (copy < gridvec.size() &&
+               originals[copy - tot_num_subgrid] == igrid) {
+          ++edge_cost_factor;
+          ++copy;
+        }
+      }
+
       DensitySubGrid &subgrid = *gridvec[igrid];
-      // only include the face neighbours, as they are the only ones with a
-      // significant communication load
       for (int ingb = 1; ingb < TRAVELDIRECTION_NUMBER; ++ingb) {
         unsigned int ngb = subgrid.get_neighbour(ingb);
         if (ngb != NEIGHBOUR_OUTSIDE) {
@@ -2385,6 +2488,8 @@ int main(int argc, char **argv) {
           if (index == ngbs[igrid].size()) {
             // not found: add it
             ngbs[igrid].push_back(ngb);
+            edge_costs[igrid].push_back(
+                initial_edge_costs[edge_cost_field][ingb] / edge_cost_factor);
           }
           // now do the same for ngb and igrid (to cover the case where they are
           // not mutual neighbours because of copies)
@@ -2395,6 +2500,8 @@ int main(int argc, char **argv) {
           if (index == ngbs[ngb].size()) {
             // not found: add it
             ngbs[ngb].push_back(igrid);
+            edge_costs[ngb].push_back(
+                initial_edge_costs[edge_cost_field][ingb] / edge_cost_factor);
           }
         }
       }
@@ -2414,6 +2521,8 @@ int main(int argc, char **argv) {
   for (unsigned int i = 0; i < ngbsize; ++i) {
     ngbs[i].resize(ngbsizes[i], 0);
     MPI_Bcast(&ngbs[i][0], ngbsizes[i], MPI_UNSIGNED, 0, MPI_COMM_WORLD);
+    edge_costs[i].resize(ngbsizes[i], 0);
+    MPI_Bcast(&edge_costs[i][0], ngbsizes[i], MPI_UNSIGNED, 0, MPI_COMM_WORLD);
   }
   unsigned int source_cost_size = source_cost.size();
   MPI_Bcast(&source_cost_size, 1, MPI_UNSIGNED, 0, MPI_COMM_WORLD);
@@ -2426,7 +2535,7 @@ int main(int argc, char **argv) {
   }
 
   // now do the actual domain decomposition
-  costs.redistribute(ngbs);
+  costs.redistribute(ngbs, edge_costs);
 
   // now it is time to move the subgrids to the process where they belong
   // rank 0 sends, all other ranks receive
@@ -2977,6 +3086,7 @@ int main(int argc, char **argv) {
     // output useful information about this iteration (if enabled)
     logmessage("Writing task and cost information", 0);
     output_tasks(iloop, tasks, iteration_start, iteration_end);
+    output_communication_costs(iloop, costs, gridvec, tot_num_subgrid);
     output_messages(iloop, message_log, message_log_size);
     output_costs(iloop, tot_num_subgrid, costs, copies, originals);
     output_queues(iloop, new_queues, general_queue);
@@ -2992,6 +3102,12 @@ int main(int argc, char **argv) {
     tasks.clear();
 
     costs.clear_costs();
+
+    for (unsigned int i = 0; i < gridvec.size(); ++i) {
+      if (gridvec[i] != nullptr) {
+        gridvec[i]->reset_communication_costs();
+      }
+    }
 
 #ifdef SINGLE_ITERATION
     // stop here to see how we did for 1 iteration

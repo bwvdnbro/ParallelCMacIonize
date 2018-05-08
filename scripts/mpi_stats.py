@@ -17,7 +17,7 @@
 ################################################################################
 
 ##
-# @file plot_tasks.py
+# @file mpi_stats.py
 #
 # @brief Script to output statistics about the MPI send and receive tasks.
 #

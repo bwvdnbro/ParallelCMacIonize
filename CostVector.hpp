@@ -272,14 +272,17 @@ public:
   }
 
   /**
-   * @brief Redistribute the elements such that the computational cost for each
-   * thread is as close as possible to the average.
+   * @brief Compute a domain decomposition of the subgrids so that the edge cut
+   * for the given graph is minimized, and so that the computational cost,
+   * source cost and memory load for the domains is balanced.
    *
    * @param ngbs Neighbour graph that stores the communication neighbours for
    * each subgrid (and copy) in the list on the local processor.
+   * @param edge_costs Edge costs for the edges in the graph.
    */
   inline void
-  redistribute(const std::vector< std::vector< unsigned int > > &ngbs) {
+  redistribute(const std::vector< std::vector< unsigned int > > &ngbs,
+               const std::vector< std::vector< unsigned int > > &edge_costs) {
 
     /// first step: MPI distribution
 
@@ -335,10 +338,7 @@ public:
 
         for (unsigned int ingb = 0; ingb < ngbs[igrid].size(); ++ingb) {
           adjncy[xadj[igrid] + ingb] = ngbs[igrid][ingb];
-          // all edges have the same weight for now (we should base this on the
-          //  communication during the previous step, but we're not entirely
-          //  clear on how to store this correctly)
-          adjwgt[xadj[igrid] + ingb] = 1;
+          adjwgt[xadj[igrid] + ingb] = edge_costs[igrid][ingb];
         }
       }
       myassert(xadj[nvert] == 2 * nedge, "Wrong number of edges!");
