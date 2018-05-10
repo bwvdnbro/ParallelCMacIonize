@@ -1346,6 +1346,16 @@ inline void execute_photon_traversal_task(
       // for that direction (which might cause on overflow)
       const unsigned int ngb = this_grid.get_neighbour(i);
       unsigned int new_index = this_grid.get_active_buffer(i);
+
+      if (new_index == NEIGHBOUR_OUTSIDE) {
+        // buffer was not created yet: create it now
+        new_index = new_buffers.get_free_buffer();
+        PhotonBuffer &buffer = new_buffers[new_index];
+        buffer.set_subgrid_index(ngb);
+        buffer.set_direction(TravelDirections::output_to_input_direction(i));
+        this_grid.set_active_buffer(i, new_index);
+      }
+
       if (new_buffers[new_index].size() == 0) {
         // we are adding photons to an empty buffer
         num_empty.pre_decrement();
@@ -1432,7 +1442,8 @@ inline void execute_photon_traversal_task(
     // nothing was added can still be non-empty...
     if (local_buffer_flags[i]) {
       unsigned int new_index = this_grid.get_active_buffer(i);
-      if (new_buffers[new_index].size() > largest_size) {
+      if (new_index != NEIGHBOUR_OUTSIDE &&
+          new_buffers[new_index].size() > largest_size) {
         largest_index = i;
         largest_size = new_buffers[new_index].size();
       }
@@ -1793,7 +1804,8 @@ inline void activate_buffer(unsigned int &current_index, const int thread_id,
             unsigned int new_largest_size = 0;
             for (unsigned char ibuffer = 0; ibuffer < TRAVELDIRECTION_NUMBER;
                  ++ibuffer) {
-              if (gridvec[igrid]->get_neighbour(ibuffer) != NEIGHBOUR_OUTSIDE &&
+              if (gridvec[igrid]->get_active_buffer(ibuffer) !=
+                      NEIGHBOUR_OUTSIDE &&
                   new_buffers[gridvec[igrid]->get_active_buffer(ibuffer)]
                           .size() > new_largest_size) {
                 new_largest_index = ibuffer;
@@ -2592,23 +2604,6 @@ int main(int argc, char **argv) {
 
   // Just for now: wait until the communication is finished before proceeding.
   MPI_Barrier(MPI_COMM_WORLD);
-
-  // set up the initial photon buffers for each subgrid
-  for (unsigned int igrid = 0; igrid < gridvec.size(); ++igrid) {
-    if (costs.get_process(igrid) == MPI_rank) {
-      DensitySubGrid &this_grid = *gridvec[igrid];
-      for (int i = 0; i < TRAVELDIRECTION_NUMBER; ++i) {
-        const unsigned int ngb_index = this_grid.get_neighbour(i);
-        if (ngb_index != NEIGHBOUR_OUTSIDE) {
-          const unsigned int active_buffer = new_buffers.get_free_buffer();
-          PhotonBuffer &buffer = new_buffers[active_buffer];
-          buffer.set_subgrid_index(ngb_index);
-          buffer.set_direction(TravelDirections::output_to_input_direction(i));
-          this_grid.set_active_buffer(i, active_buffer);
-        }
-      }
-    }
-  }
 
   ////////////////////////////////////////////////
 

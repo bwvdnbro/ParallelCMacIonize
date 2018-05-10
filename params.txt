@@ -28,7 +28,7 @@ num_subgrid: [8, 8, 8]
 queue_size_per_thread: 20
 # number of photon buffers that can be stored simultaneously
 # the code will crash if more photon buffers are needed at any given moment
-memoryspace_size: 12000
+memoryspace_size: 2000
 # total number of tasks that can be performed by all threads together during
 # a single iteration of the algorithm
 # the code will crash if the total number of tasks exceeds this number
