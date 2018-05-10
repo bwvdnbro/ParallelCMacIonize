@@ -2151,6 +2151,7 @@ int main(int argc, char **argv) {
   // about the neighbouring subgrids
   std::vector< DensitySubGrid * > gridvec(tot_num_subgrid, nullptr);
 
+  Atomic< size_t > grid_memory(0);
   // the actual grid is only constructed on rank 0
   if (MPI_rank == 0) {
 
@@ -2182,6 +2183,7 @@ int main(int argc, char **argv) {
                                     subbox_side[1],
                                     subbox_side[2]};
           gridvec[index] = new DensitySubGrid(subbox, subbox_ncell);
+          grid_memory.pre_add(gridvec[index]->get_memory_size());
           DensitySubGrid &this_grid = *gridvec[index];
           this_grid.set_owning_thread(thread_id);
           // set up neighbouring information. We first make sure all
@@ -3148,6 +3150,10 @@ int main(int argc, char **argv) {
   logmessage(
       "Maximum memory usage: " << Utilities::human_readable_bytes(max_memory),
       0);
+
+  logmessage("Basic grid size: "
+                 << Utilities::human_readable_bytes(grid_memory.value()),
+             0);
 
   //////////////////////////////////
 

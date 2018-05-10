@@ -82,10 +82,12 @@ def plot_file(name):
   # get system information
   nthread = int(data[:,1].max()) + 1
   nproc = int(data[:,0].max()) + 1
+  num_tasks = []
   # loop over the processes
   for iproc in range(nproc):
     # filter out data per process
     process = data[(data[:,0] == iproc) & (data[:,4] != -1)]
+    num_tasks.append([iproc, len(process)])
     # loop over the threads
     for i in range(nthread):
       # filter out data per thread
@@ -98,21 +100,26 @@ def plot_file(name):
       pl.broken_barh(bar, (iproc * nthread + i-0.4, 0.8), facecolors = colors,
                      edgecolor = "none")
   # return information required for the global layout of the task plot
-  return nproc, nthread, task_flags
+  return nproc, nthread, task_flags, np.array(num_tasks)
 
 # variables to store global task plot information in
 nthread = 0
 nproc = 0
 task_flags = np.zeros(len(task_colors), dtype = bool)
+alldata = []
 # loop over the task files in the current working directory
-for name in sorted(glob.glob("tasks_??.txt")):
+files = sorted(glob.glob("tasks_??.txt"))
+for name in files:
   # plot the file
-  nproc_this, nthread_this, this_task_flags = plot_file(name)
+  nproc_this, nthread_this, this_task_flags, num_tasks = plot_file(name)
   # update the global information
   nthread = max(nthread, nthread_this)
   nproc = max(nproc, nproc_this)
   for i in range(len(task_flags)):
     task_flags[i] = task_flags[i] or this_task_flags[i]
+  alldata.append(num_tasks)
+
+alldata = np.array(alldata, dtype = float)
 
 # add dummy tasks for the legend
 for i in range(len(task_colors)):
@@ -154,3 +161,20 @@ pl.xlabel("Simulation time (s)")
 # finalize and save plot
 pl.tight_layout()
 pl.savefig("full_timeline.png")
+pl.close()
+
+# plot task stats
+alldata[:,:,0] = alldata[:,:,0] / (nproc + 1)
+steps = np.arange(len(files))
+
+# plot the contributions for the different processes
+for i in range(nproc):
+  pl.bar(alldata[:,i,0] + steps, alldata[:,i,1], 1. / (nproc + 1))
+
+# plot layout
+pl.xticks([])
+pl.ylabel("Number of tasks")
+
+# save the plot
+pl.tight_layout()
+pl.savefig("task_stats.png")

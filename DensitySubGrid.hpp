@@ -65,11 +65,18 @@
 #define subgrid_cell_lock_unlock(cell)
 #endif
 
-/*! @brief Size of the DensitySubGrid variables whose size is known at compile
- *  time. */
+/*! @brief Size of the DensitySubGrid variables that need to be communicated
+ *  over MPI, and whose size is known at compile time. */
 #define DENSITYSUBGRID_FIXED_MPI_SIZE                                          \
   (sizeof(unsigned long) + 9 * sizeof(double) + 4 * sizeof(int) +              \
    TRAVELDIRECTION_NUMBER * sizeof(unsigned int))
+
+/*! @brief Size of all DensitySubGrid variables whose size is known at compile
+ *  time. */
+#define DENSITYSUBGRID_FIXED_SIZE                                              \
+  ((3 * TRAVELDIRECTION_NUMBER + 1) * sizeof(unsigned int) +                   \
+   sizeof(unsigned long) + 9 * sizeof(double) + 5 * sizeof(int) +              \
+   sizeof(Lock) + sizeof(unsigned char))
 
 /*! @brief Number of variables stored in each cell of the DensitySubGrid
  *  (excluding potential lock variables). */
@@ -655,6 +662,17 @@ public:
    */
   inline int get_MPI_size() const {
     return DENSITYSUBGRID_FIXED_MPI_SIZE +
+           DENSITYSUBGRID_NUMBER_OF_CELL_VARIABLES * _number_of_cells[0] *
+               _number_of_cells[3] * sizeof(double);
+  }
+
+  /**
+   * @brief Get the size of a DensitySubGrid when it is stored in memory.
+   *
+   * @return Size of a DensitySubGrid that is stored in memory (in bytes).
+   */
+  inline size_t get_memory_size() const {
+    return DENSITYSUBGRID_FIXED_SIZE +
            DENSITYSUBGRID_NUMBER_OF_CELL_VARIABLES * _number_of_cells[0] *
                _number_of_cells[3] * sizeof(double);
   }
