@@ -17,15 +17,10 @@
 ################################################################################
 
 ##
-# @file plot_memoryspace.py
+# @file plot_mpibuffer.py
 #
-# @brief Script to plot an overview of the photon buffer load per iteration for
+# @brief Script to plot an overview of the MPI buffer load per iteration for
 # the different processes.
-#
-# Optionally, the script can compute the number of buffers that are present by
-# default (if the number of subgrids is passed on as command line argument) and
-# subtract this from the plot. This only gives sensible results for non-MPI
-# runs.
 #
 # @author Bert Vandenbroucke (bv7@st-andrews.ac.uk)
 ##
@@ -36,41 +31,9 @@ import matplotlib
 matplotlib.use("Agg")
 import pylab as pl
 import glob
-import argparse
-
-# parse the command line arguments
-argparser = argparse.ArgumentParser(description = 
-  "Plot the number of actively used photon buffers per iteration.")
-
-argparser.add_argument("-x", "--nbx", action = "store", type = int, default = 0)
-argparser.add_argument("-y", "--nby", action = "store", type = int, default = 0)
-argparser.add_argument("-z", "--nbz", action = "store", type = int, default = 0)
-
-args = argparser.parse_args()
-
-nbx = args.nbx
-nby = args.nby
-nbz = args.nbz
-
-# if requested: compute the default number of buffers
-numsubgrid = nbx * nby * nbz
-minnum = 0
-if numsubgrid > 0:
-  for ix in range(nbx):
-    for iy in range(nby):
-      for iz in range(nbz):
-        for ox in range(-1, 2):
-          for oy in range(-1, 2):
-            for oz in range(-1, 2):
-              cx = ix + ox
-              cy = iy + oy
-              cz = iz + oz
-              if cx >= 0 and cx < nbx and cy >= 0 and cy < nby and cz >= 0 \
-                 and cz < nbz:
-                minnum += 1
 
 # get a list of all files that are present
-files = sorted(glob.glob("memoryspace_??.txt"))
+files = sorted(glob.glob("mpibuffer_??.txt"))
 # collect the data
 alldata = []
 for file in files:
@@ -90,12 +53,12 @@ steps = np.arange(len(files))
 
 # plot the contributions for the different processes
 for i in range(nproc - 1):
-  pl.bar(alldata[:,i,0] + steps, alldata[:,i,1] - minnum, 1. / nproc)
+  pl.bar(alldata[:,i,0] + steps, alldata[:,i,1], 1. / nproc)
 
 # plot layout
 pl.xticks([])
-pl.ylabel("Number of used photon buffers")
+pl.ylabel("Number of used MPI buffer elements")
 
 # save the plot
 pl.tight_layout()
-pl.savefig("memoryspace_stats.png")
+pl.savefig("mpibuffer_stats.png")

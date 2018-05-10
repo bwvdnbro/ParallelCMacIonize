@@ -52,6 +52,14 @@ private:
   /*! @brief Index of the last request that was used. */
   size_t _last_index;
 
+  /*! @brief Number of elements that is currently in use. */
+  size_t _number_in_use;
+
+#ifdef MPIBUFFER_STATS
+  /*! @brief Maximum number of elements taken at any given point. */
+  size_t _max_number_in_use;
+#endif
+
 public:
   /**
    * @brief Constructor.
@@ -62,7 +70,8 @@ public:
   inline MPIBuffer(const size_t buffer_size, const size_t element_size)
       : _buffer(nullptr), _buffer_size(buffer_size),
         _element_size(element_size), _requests(nullptr),
-        _requests_size(buffer_size / element_size), _last_index(0) {
+        _requests_size(buffer_size / element_size), _last_index(0),
+        _number_in_use(0) {
 
     if (_buffer_size > 0) {
       _buffer = new char[_buffer_size];
@@ -74,6 +83,10 @@ public:
         _requests[i] = MPI_REQUEST_NULL;
       }
     }
+
+#ifdef MPIBUFFER_STATS
+    _max_number_in_use = 0;
+#endif
   }
 
   /**
@@ -117,6 +130,8 @@ public:
       myassert(_requests[i] == MPI_REQUEST_NULL,
                "Not all communications were finished!");
     }
+
+    _number_in_use = 0;
   }
 
   /**
@@ -125,14 +140,20 @@ public:
    * @return Index of a free spot in the MPI buffer.
    */
   inline size_t get_free_element() {
-    size_t request_index = _last_index;
-    while (_requests[request_index] != MPI_REQUEST_NULL) {
-      request_index = (request_index + 1) % _requests_size;
-      myassert(request_index != _last_index,
-               "Unable to obtain a free MPI request!");
+
+    myassert(_number_in_use < _requests_size, "No more free MPI requests!");
+
+    _last_index = (_last_index + 1) % _requests_size;
+    while (_requests[_last_index] != MPI_REQUEST_NULL) {
+      _last_index = (_last_index + 1) % _requests_size;
     }
-    _last_index = request_index;
-    return request_index;
+    ++_number_in_use;
+
+#ifdef MPIBUFFER_STATS
+    _max_number_in_use = std::max(_max_number_in_use, _number_in_use);
+#endif
+
+    return _last_index;
   }
 
   /**
@@ -165,16 +186,42 @@ public:
     // we cannot test flag, since flag will also be true if the array only
     // contains MPI_REQUEST_NULL values
     if (index != MPI_UNDEFINED) {
-      // release the request, this will automatically release the
-      // corresponding space in the buffer
-      _requests[index] = MPI_REQUEST_NULL;
+      myassert(_number_in_use > 0, "Negative request counter!");
+      --_number_in_use;
     }
   }
 
   /**
    * @brief Reset the buffer.
    */
-  inline void reset() { _last_index = 0; }
+  inline void reset() {
+    _last_index = 0;
+    _number_in_use = 0;
+
+#ifdef MPIBUFFER_STATS
+    _max_number_in_use = 0;
+#endif
+  }
+
+/**
+ * @brief Get the maximum number of elements that was in use at any given time.
+ *
+ * @return Maximum number of elements that was in use.
+ */
+#ifdef MPIBUFFER_STATS
+  inline size_t get_max_number_in_use() const { return _max_number_in_use; }
+#else
+#error "This function should only be used when MPIBUFFER_STATS is defined!"
+#endif
+
+/**
+ * @brief Reset the counter for the maximum number of elements that was in use.
+ */
+#ifdef MPIBUFFER_STATS
+  inline void reset_max_number_in_use() { _max_number_in_use = 0; }
+#else
+#error "This function should only be used when MPIBUFFER_STATS is defined!"
+#endif
 };
 
 #endif // MPIBUFFER_HPP

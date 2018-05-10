@@ -72,13 +72,16 @@
 
 /*! @brief Enable this to use old edge cost data during the domain
  *  decomposition. */
-#define READ_EDGE_COSTS
+//#define READ_EDGE_COSTS
 
 /*! @brief Enable this to output queue statistics. */
 #define QUEUE_OUTPUT
 
 /*! @brief Enable this to output memory space statistics. */
 #define MEMORYSPACE_OUTPUT
+
+/*! @brief Enable this to output MPI communication buffer statistics. */
+#define MPIBUFFER_OUTPUT
 
 #ifdef TASK_OUTPUT
 // activate task output in Task.hpp
@@ -92,6 +95,10 @@
 
 #ifdef MEMORYSPACE_OUTPUT
 #define THREADSAFEVECTOR_STATS
+#endif
+
+#ifdef MPIBUFFER_OUTPUT
+#define MPIBUFFER_STATS
 #endif
 
 // global variables, as we need them in the log macro
@@ -353,11 +360,6 @@ output_communication_costs(const unsigned int iloop, const CostVector &costs,
   filename << ".txt";
 
   // now output
-  // each process outputs its own costs in turn, process 0 is responsible for
-  // creating the file and the other processes append to it
-  // note that in principle each process holds all cost information. However,
-  // the actual costs will only be up to date on the local process that holds
-  // the subgrid.
   for (int irank = 0; irank < MPI_size; ++irank) {
     if (irank == MPI_rank) {
       // the file mode depends on the rank
@@ -412,11 +414,6 @@ inline void output_messages(const unsigned int iloop,
   filename << ".txt";
 
   // now output
-  // each process outputs its own costs in turn, process 0 is responsible for
-  // creating the file and the other processes append to it
-  // note that in principle each process holds all cost information. However,
-  // the actual costs will only be up to date on the local process that holds
-  // the subgrid.
   for (int irank = 0; irank < MPI_size; ++irank) {
     if (irank == MPI_rank) {
       // the file mode depends on the rank
@@ -471,11 +468,6 @@ inline void output_queues(const unsigned int iloop,
   filename << ".txt";
 
   // now output
-  // each process outputs its own costs in turn, process 0 is responsible for
-  // creating the file and the other processes append to it
-  // note that in principle each process holds all cost information. However,
-  // the actual costs will only be up to date on the local process that holds
-  // the subgrid.
   for (int irank = 0; irank < MPI_size; ++irank) {
     if (irank == MPI_rank) {
       // the file mode depends on the rank
@@ -531,11 +523,6 @@ inline void output_memoryspace(const unsigned int iloop,
   filename << ".txt";
 
   // now output
-  // each process outputs its own costs in turn, process 0 is responsible for
-  // creating the file and the other processes append to it
-  // note that in principle each process holds all cost information. However,
-  // the actual costs will only be up to date on the local process that holds
-  // the subgrid.
   for (int irank = 0; irank < MPI_size; ++irank) {
     if (irank == MPI_rank) {
       // the file mode depends on the rank
@@ -555,10 +542,54 @@ inline void output_memoryspace(const unsigned int iloop,
         ofile << "# rank\tsize\n";
       }
 
-      // start with the general queue (-1)
       ofile << MPI_rank << "\t" << memory_space.get_max_number_elements()
             << "\n";
       memory_space.reset_max_number_elements();
+    }
+    MPI_Barrier(MPI_COMM_WORLD);
+  }
+#endif
+}
+
+/**
+ * @brief Write file with MPI communication buffer size information for an
+ * iteration.
+ *
+ * @param iloop Iteration number (added to file names).
+ * @param MPI_buffer MPI communication buffer.
+ */
+inline void output_mpibuffer(const unsigned int iloop, MPIBuffer &MPI_buffer) {
+#ifdef MPIBUFFER_OUTPUT
+  // first compose the file name
+  std::stringstream filename;
+  filename << "mpibuffer_";
+  filename.fill('0');
+  filename.width(2);
+  filename << iloop;
+  filename << ".txt";
+
+  // now output
+  for (int irank = 0; irank < MPI_size; ++irank) {
+    if (irank == MPI_rank) {
+      // the file mode depends on the rank
+      std::ios_base::openmode mode;
+      if (irank == 0) {
+        // rank 0 creates (or overwrites) the file
+        mode = std::ofstream::trunc;
+      } else {
+        // all other ranks append to it
+        mode = std::ofstream::app;
+      }
+      // now open the file
+      std::ofstream ofile(filename.str(), mode);
+
+      // rank 0 writes the file header
+      if (irank == 0) {
+        ofile << "# rank\tsize\n";
+      }
+
+      ofile << MPI_rank << "\t" << MPI_buffer.get_max_number_in_use() << "\n";
+      MPI_buffer.reset_max_number_in_use();
     }
     MPI_Barrier(MPI_COMM_WORLD);
   }
@@ -3053,6 +3084,9 @@ int main(int argc, char **argv) {
     output_costs(iloop, tot_num_subgrid, costs, copies, originals);
     output_queues(iloop, new_queues, general_queue);
     output_memoryspace(iloop, new_buffers);
+    if (MPI_size > 1) {
+      output_mpibuffer(iloop, new_MPI_buffer);
+    }
 
     // reset the MPI buffer
     new_MPI_buffer.reset();
