@@ -679,11 +679,9 @@ output_neutral_fractions(const CostVector &costs,
  *
  * @param random_generator Random number generator to use.
  * @param direction Random direction (output).
- * @param inverse_direction Inverse random direction (output).
  */
 inline static void get_random_direction(RandomGenerator &random_generator,
-                                        double *direction,
-                                        double *inverse_direction) {
+                                        double *direction) {
 
   // draw two pseudo random numbers
   const double cost = 2. * random_generator.get_uniform_random_double() - 1.;
@@ -698,11 +696,6 @@ inline static void get_random_direction(RandomGenerator &random_generator,
   direction[0] = sint * cosp;
   direction[1] = sint * sinp;
   direction[2] = cost;
-
-  // ...and its inverse
-  inverse_direction[0] = 1. / direction[0];
-  inverse_direction[1] = 1. / direction[1];
-  inverse_direction[2] = 1. / direction[2];
 }
 
 /**
@@ -732,8 +725,7 @@ inline static void fill_buffer(PhotonBuffer &buffer,
     photon.set_position(0., 0., 0.);
 
     // initial direction: isotropic distribution
-    get_random_direction(random_generator, photon.get_direction(),
-                         photon.get_inverse_direction());
+    get_random_direction(random_generator, photon.get_direction());
 
     // we currently assume equal weight for all photons
     photon.set_weight(1.);
@@ -844,8 +836,7 @@ inline static void do_reemission(PhotonBuffer &buffer,
     if (random_generator.get_uniform_random_double() < reemission_probability) {
       // give the photon a new random isotropic direction
       Photon &photon = buffer[i];
-      get_random_direction(random_generator, photon.get_direction(),
-                           photon.get_inverse_direction());
+      get_random_direction(random_generator, photon.get_direction());
       // reset the current optical depth (always zero) and target
       photon.set_current_optical_depth(0.);
       photon.set_target_optical_depth(

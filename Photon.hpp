@@ -27,7 +27,7 @@
 #define PHOTON_HPP
 
 /*! @brief Size of the MPI buffer necessary to store a single Photon. */
-#define PHOTON_MPI_SIZE (13 * sizeof(double))
+#define PHOTON_MPI_SIZE (10 * sizeof(double))
 
 #include <mpi.h>
 
@@ -43,10 +43,6 @@ private:
 
   /*! @brief Propagation direction of the photon packet. */
   double _direction[3];
-
-  /*! @brief Inverse of the propagation direction (used to avoid expensive
-   *  divisions in the photon packet traversal algorithm). */
-  double _inverse_direction[3];
 
   /*! @brief Current optical depth of the photon packet. */
   double _current_optical_depth;
@@ -75,8 +71,6 @@ public:
              &buffer_position, MPI_COMM_WORLD);
     MPI_Pack(_direction, 3, MPI_DOUBLE, buffer, PHOTON_MPI_SIZE,
              &buffer_position, MPI_COMM_WORLD);
-    MPI_Pack(_inverse_direction, 3, MPI_DOUBLE, buffer, PHOTON_MPI_SIZE,
-             &buffer_position, MPI_COMM_WORLD);
     MPI_Pack(&_current_optical_depth, 1, MPI_DOUBLE, buffer, PHOTON_MPI_SIZE,
              &buffer_position, MPI_COMM_WORLD);
     MPI_Pack(&_target_optical_depth, 1, MPI_DOUBLE, buffer, PHOTON_MPI_SIZE,
@@ -99,8 +93,6 @@ public:
     MPI_Unpack(buffer, PHOTON_MPI_SIZE, &buffer_position, _position, 3,
                MPI_DOUBLE, MPI_COMM_WORLD);
     MPI_Unpack(buffer, PHOTON_MPI_SIZE, &buffer_position, _direction, 3,
-               MPI_DOUBLE, MPI_COMM_WORLD);
-    MPI_Unpack(buffer, PHOTON_MPI_SIZE, &buffer_position, _inverse_direction, 3,
                MPI_DOUBLE, MPI_COMM_WORLD);
     MPI_Unpack(buffer, PHOTON_MPI_SIZE, &buffer_position,
                &_current_optical_depth, 1, MPI_DOUBLE, MPI_COMM_WORLD);
@@ -125,12 +117,6 @@ public:
     myassert(_direction[0] == other._direction[0], "Directions do not match!");
     myassert(_direction[1] == other._direction[1], "Directions do not match!");
     myassert(_direction[2] == other._direction[2], "Directions do not match!");
-    myassert(_inverse_direction[0] == other._inverse_direction[0],
-             "Inverse directions do not match!");
-    myassert(_inverse_direction[1] == other._inverse_direction[1],
-             "Inverse directions do not match!");
-    myassert(_inverse_direction[2] == other._inverse_direction[2],
-             "Inverse directions do not match!");
     myassert(_current_optical_depth == other._current_optical_depth,
              "Current optical depths do not match!");
     myassert(_target_optical_depth == other._target_optical_depth,
@@ -166,36 +152,6 @@ public:
     _direction[0] = x;
     _direction[1] = y;
     _direction[2] = z;
-  }
-
-  /**
-   * @brief Get a constant pointer to the inverse direction array.
-   *
-   * @return Constant pointer to the inverse direction array.
-   */
-  inline const double *get_inverse_direction() const {
-    return _inverse_direction;
-  }
-
-  /**
-   * @brief Get a writable pointer to the inverse direction array.
-   *
-   * @return Writable pointer to the inverse direction array.
-   */
-  inline double *get_inverse_direction() { return _inverse_direction; }
-
-  /**
-   * @brief Set the inverse direction vector directly.
-   *
-   * @param x x component.
-   * @param y y component.
-   * @param z z component.
-   */
-  inline void set_inverse_direction(const double x, const double y,
-                                    const double z) {
-    _inverse_direction[0] = x;
-    _inverse_direction[1] = y;
-    _inverse_direction[2] = z;
   }
 
   /**

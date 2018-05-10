@@ -873,7 +873,8 @@ public:
                            << direction[2]
                            << ", input_direction: " << input_direction);
 
-    const double *inverse_direction = photon.get_inverse_direction();
+    const double inverse_direction[3] = {1. / direction[0], 1. / direction[1],
+                                         1. / direction[2]};
     // NOTE: position is relative w.r.t. _anchor!!!
     double position[3] = {photon.get_position()[0] - _anchor[0],
                           photon.get_position()[1] - _anchor[1],

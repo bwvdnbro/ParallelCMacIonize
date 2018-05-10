@@ -85,9 +85,6 @@ int main(int argc, char **argv) {
     photon.set_direction(random_generator.get_uniform_random_double(),
                          random_generator.get_uniform_random_double(),
                          random_generator.get_uniform_random_double());
-    photon.set_inverse_direction(random_generator.get_uniform_random_double(),
-                                 random_generator.get_uniform_random_double(),
-                                 random_generator.get_uniform_random_double());
     photon.set_weight(random_generator.get_uniform_random_double());
     photon.set_current_optical_depth(
         random_generator.get_uniform_random_double());
