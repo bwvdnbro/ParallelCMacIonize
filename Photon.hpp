@@ -27,7 +27,7 @@
 #define PHOTON_HPP
 
 /*! @brief Size of the MPI buffer necessary to store a single Photon. */
-#define PHOTON_MPI_SIZE (10 * sizeof(double))
+#define PHOTON_MPI_SIZE (9 * sizeof(double))
 
 #include <mpi.h>
 
@@ -43,9 +43,6 @@ private:
 
   /*! @brief Propagation direction of the photon packet. */
   double _direction[3];
-
-  /*! @brief Current optical depth of the photon packet. */
-  double _current_optical_depth;
 
   /*! @brief Target optical depth for the photon packet. */
   double _target_optical_depth;
@@ -71,8 +68,6 @@ public:
              &buffer_position, MPI_COMM_WORLD);
     MPI_Pack(_direction, 3, MPI_DOUBLE, buffer, PHOTON_MPI_SIZE,
              &buffer_position, MPI_COMM_WORLD);
-    MPI_Pack(&_current_optical_depth, 1, MPI_DOUBLE, buffer, PHOTON_MPI_SIZE,
-             &buffer_position, MPI_COMM_WORLD);
     MPI_Pack(&_target_optical_depth, 1, MPI_DOUBLE, buffer, PHOTON_MPI_SIZE,
              &buffer_position, MPI_COMM_WORLD);
     MPI_Pack(&_photoionization_cross_section, 1, MPI_DOUBLE, buffer,
@@ -95,8 +90,6 @@ public:
     MPI_Unpack(buffer, PHOTON_MPI_SIZE, &buffer_position, _direction, 3,
                MPI_DOUBLE, MPI_COMM_WORLD);
     MPI_Unpack(buffer, PHOTON_MPI_SIZE, &buffer_position,
-               &_current_optical_depth, 1, MPI_DOUBLE, MPI_COMM_WORLD);
-    MPI_Unpack(buffer, PHOTON_MPI_SIZE, &buffer_position,
                &_target_optical_depth, 1, MPI_DOUBLE, MPI_COMM_WORLD);
     MPI_Unpack(buffer, PHOTON_MPI_SIZE, &buffer_position,
                &_photoionization_cross_section, 1, MPI_DOUBLE, MPI_COMM_WORLD);
@@ -117,8 +110,6 @@ public:
     myassert(_direction[0] == other._direction[0], "Directions do not match!");
     myassert(_direction[1] == other._direction[1], "Directions do not match!");
     myassert(_direction[2] == other._direction[2], "Directions do not match!");
-    myassert(_current_optical_depth == other._current_optical_depth,
-             "Current optical depths do not match!");
     myassert(_target_optical_depth == other._target_optical_depth,
              "Target optical depths do not match!");
     myassert(_photoionization_cross_section ==
@@ -172,25 +163,6 @@ public:
     _position[0] = x;
     _position[1] = y;
     _position[2] = z;
-  }
-
-  /**
-   * @brief Get the current accumulated optical depth for the photon packet.
-   *
-   * @return Current accumulated optical depth.
-   */
-  inline double get_current_optical_depth() const {
-    return _current_optical_depth;
-  }
-
-  /**
-   * @brief Update the current accumulated optical depth for the photon packet.
-   *
-   * @param current_optical_depth Current accumulated optical depth for the
-   * photon packet.
-   */
-  inline void set_current_optical_depth(const double current_optical_depth) {
-    _current_optical_depth = current_optical_depth;
   }
 
   /**

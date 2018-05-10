@@ -86,8 +86,6 @@ int main(int argc, char **argv) {
                          random_generator.get_uniform_random_double(),
                          random_generator.get_uniform_random_double());
     photon.set_weight(random_generator.get_uniform_random_double());
-    photon.set_current_optical_depth(
-        random_generator.get_uniform_random_double());
     photon.set_target_optical_depth(
         random_generator.get_uniform_random_double());
     photon.set_photoionization_cross_section(

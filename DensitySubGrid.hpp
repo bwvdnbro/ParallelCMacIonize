@@ -879,7 +879,7 @@ public:
     double position[3] = {photon.get_position()[0] - _anchor[0],
                           photon.get_position()[1] - _anchor[1],
                           photon.get_position()[2] - _anchor[2]};
-    double tau_done = photon.get_current_optical_depth();
+    double tau_done = 0.;
     const double tau_target = photon.get_target_optical_depth();
 
     myassert(tau_done < tau_target, "tau_done: " << tau_done
@@ -986,7 +986,7 @@ public:
       active_cell = get_one_index(three_index);
     }
     // update photon quantities
-    photon.set_current_optical_depth(tau_done);
+    photon.set_target_optical_depth(tau_target - tau_done);
     photon.set_position(position[0] + _anchor[0], position[1] + _anchor[1],
                         position[2] + _anchor[2]);
     // get the outgoing direction

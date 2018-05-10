@@ -730,8 +730,7 @@ inline static void fill_buffer(PhotonBuffer &buffer,
     // we currently assume equal weight for all photons
     photon.set_weight(1.);
 
-    // current optical depth (always zero) and target (exponential distribution)
-    photon.set_current_optical_depth(0.);
+    // target optical depth (exponential distribution)
     photon.set_target_optical_depth(
         -std::log(random_generator.get_uniform_random_double()));
 
@@ -837,8 +836,7 @@ inline static void do_reemission(PhotonBuffer &buffer,
       // give the photon a new random isotropic direction
       Photon &photon = buffer[i];
       get_random_direction(random_generator, photon.get_direction());
-      // reset the current optical depth (always zero) and target
-      photon.set_current_optical_depth(0.);
+      // reset the target optical depth
       photon.set_target_optical_depth(
           -std::log(random_generator.get_uniform_random_double()));
       // NOTE: we can never overwrite a photon that should be preserved (we
