@@ -70,6 +70,10 @@
 /*! @brief Enable this to output an ASCII file with the result. */
 //#define OUTPUT_ASCII_RESULT
 
+/*! @brief Enable this to use old edge cost data during the domain
+ *  decomposition. */
+#define READ_EDGE_COSTS
+
 /*! @brief Enable this to output queue statistics. */
 #define QUEUE_OUTPUT
 
@@ -98,6 +102,7 @@ int MPI_rank, MPI_size;
 #include "CostVector.hpp"
 #include "DensitySubGrid.hpp"
 #include "Log.hpp"
+#include "MPIBuffer.hpp"
 #include "MPIMessage.hpp"
 #include "MemorySpace.hpp"
 #include "PhotonBuffer.hpp"
@@ -1512,18 +1517,14 @@ inline void execute_photon_reemit_task(
  * @param costs CostVector that contains information about the load balancing
  * and domain decomposition.
  * @param MPI_lock Lock to guarantee thread-safe access to the MPI library.
- * @param MPI_last_request Index of the last MPI request that was used.
- * @param MPI_buffer_requests List of MPI requests that can be used.
- * @param MPI_buffer MPI communication buffer.
+ * @param new_MPI_buffer MPI communication buffer.
  * @param message_log MPI message log.
  * @param message_log_size Size of the MPI message log.
  * @param num_active_buffers Number of active photon buffers on this process.
  */
 inline void execute_send_task(Task &task, const int thread_id,
                               MemorySpace &new_buffers, CostVector &costs,
-                              Lock &MPI_lock, unsigned int &MPI_last_request,
-                              std::vector< MPI_Request > &MPI_buffer_requests,
-                              char *MPI_buffer,
+                              Lock &MPI_lock, MPIBuffer &new_MPI_buffer,
                               std::vector< MPIMessage > &message_log,
                               size_t &message_log_size,
                               Atomic< unsigned int > &num_active_buffers) {
@@ -1535,30 +1536,28 @@ inline void execute_send_task(Task &task, const int thread_id,
   const unsigned int current_buffer_index = task.get_buffer();
   PhotonBuffer &buffer = new_buffers[current_buffer_index];
 
-  // pack it
-  // first: get a free MPI_Request
+  // lock the MPI environment
   MPI_lock.lock();
-  unsigned int request_index = MPI_last_request;
-  while (MPI_buffer_requests[request_index] != MPI_REQUEST_NULL) {
-    request_index = (request_index + 1) % MPI_buffer_requests.size();
-    myassert(request_index != MPI_last_request,
-             "Unable to obtain a free MPI request!");
-  }
-  MPI_last_request = request_index;
-  MPI_Request &request = MPI_buffer_requests[request_index];
+
+  // get a free MPI_Request
+  unsigned int request_index = new_MPI_buffer.get_free_element();
+  MPI_Request &request = new_MPI_buffer.get_request(request_index);
+
   // now use the request index to find the right spot in the buffer
-  buffer.pack(&MPI_buffer[request_index * PHOTONBUFFER_MPI_SIZE]);
+  char *buffer_element = new_MPI_buffer.get_element(request_index);
+  // and pack the buffer
+  buffer.pack(buffer_element);
 
   // send the message (non-blocking)
   const int sendto = costs.get_process(buffer.get_subgrid_index());
-  MPI_Isend(&MPI_buffer[request_index * PHOTONBUFFER_MPI_SIZE],
-            PHOTONBUFFER_MPI_SIZE, MPI_PACKED, sendto,
+  MPI_Isend(buffer_element, PHOTONBUFFER_MPI_SIZE, MPI_PACKED, sendto,
             MPIMESSAGETAG_PHOTONBUFFER, MPI_COMM_WORLD, &request);
 
   // log the send event
   log_send(message_log, message_log_size, sendto, thread_id,
            MPIMESSAGETAG_PHOTONBUFFER);
 
+  // unlock the MPI environment
   MPI_lock.unlock();
 
   // remove the buffer from this process (the data are stored in the MPI buffer)
@@ -1597,9 +1596,7 @@ inline void execute_send_task(Task &task, const int thread_id,
  * @param num_photon_done Number of photon packets that has been completely
  * finished.
  * @param MPI_lock Lock to guarantee thread-safe access to the MPI library.
- * @param MPI_last_request Index of the last MPI request that was used.
- * @param MPI_buffer_requests List of MPI requests that can be used.
- * @param MPI_buffer MPI communication buffer.
+ * @param new_MPI_buffer MPI communication buffer.
  * @param message_log MPI message log.
  * @param message_log_size Size of the MPI message log.
  * @param num_empty Number of empty buffers on this process.
@@ -1618,10 +1615,8 @@ inline void execute_task(
     const std::vector< int > &central_queue, PhotonBuffer *local_buffers,
     bool *local_buffer_flags, const double reemission_probability,
     CostVector &costs, Atomic< unsigned int > &num_photon_done, Lock &MPI_lock,
-    unsigned int &MPI_last_request,
-    std::vector< MPI_Request > &MPI_buffer_requests, char *MPI_buffer,
-    std::vector< MPIMessage > &message_log, size_t &message_log_size,
-    Atomic< unsigned int > &num_empty,
+    MPIBuffer &new_MPI_buffer, std::vector< MPIMessage > &message_log,
+    size_t &message_log_size, Atomic< unsigned int > &num_empty,
     Atomic< unsigned int > &num_active_buffers, unsigned int &num_tasks_to_add,
     unsigned int *tasks_to_add, int *queues_to_add) {
 
@@ -1667,8 +1662,8 @@ inline void execute_task(
     /// send a buffer to another process
 
     execute_send_task(task, thread_id, new_buffers, costs, MPI_lock,
-                      MPI_last_request, MPI_buffer_requests, MPI_buffer,
-                      message_log, message_log_size, num_active_buffers);
+                      new_MPI_buffer, message_log, message_log_size,
+                      num_active_buffers);
     break;
 
   default:
@@ -1802,27 +1797,6 @@ inline void activate_buffer(unsigned int &current_index, const int thread_id,
         }
       }
     }
-  }
-}
-
-/**
- * @brief Check if a non-blocking send finished and release the associated
- * memory if this happened.
- *
- * @param MPI_buffer_requests MPI requests for open non-blocking sends.
- */
-inline void
-check_for_finished_sends(std::vector< MPI_Request > &MPI_buffer_requests) {
-  // check if any of the non-blocking sends finished
-  int index, flag;
-  MPI_Testany(MPI_buffer_requests.size(), &MPI_buffer_requests[0], &index,
-              &flag, MPI_STATUS_IGNORE);
-  // we cannot test flag, since flag will also be true if the array only
-  // contains MPI_REQUEST_NULL values
-  if (index != MPI_UNDEFINED) {
-    // release the request, this will automatically release the
-    // corresponding space in the buffer
-    MPI_buffer_requests[index] = MPI_REQUEST_NULL;
   }
 }
 
@@ -2106,24 +2080,15 @@ int main(int argc, char **argv) {
   // Set up MPI communication buffer
   //////////////////////////////////
 
-  char *MPI_buffer = nullptr;
-  // we use a single, locked request buffer to handle memory management for
-  // non-blocking communication.
-  // We do this because any communication requires locking anyway, and because
-  // it gives us a more elegant way to regularly check for finished sends.
-  std::vector< MPI_Request > MPI_buffer_requests;
   Lock MPI_lock;
-  unsigned int MPI_last_request = 0;
-  if (MPI_size > 1) {
-    MPI_buffer = new char[MPI_buffer_size];
-    const unsigned int num_photonbuffers =
-        MPI_buffer_size / PHOTONBUFFER_MPI_SIZE;
-    MPI_buffer_requests.resize(num_photonbuffers, MPI_REQUEST_NULL);
-
+  if (MPI_size == 1) {
+    MPI_buffer_size = 0;
+  } else {
     logmessage(
         "MPI_buffer_size: " << Utilities::human_readable_bytes(MPI_buffer_size),
         0);
   }
+  MPIBuffer new_MPI_buffer(MPI_buffer_size, PHOTONBUFFER_MPI_SIZE);
 
   // set up the message log buffer
   // we don't need to use a thread safe vector, as only one thread is allowed
@@ -2323,6 +2288,7 @@ int main(int argc, char **argv) {
   // edge costs
   std::vector< std::vector< unsigned int > > initial_edge_costs(
       tot_num_subgrid, std::vector< unsigned int >(TRAVELDIRECTION_NUMBER, 0));
+#ifdef READ_EDGE_COSTS
   std::ifstream ifile("communication_costs_00.txt");
   std::string line;
   // skip the first line
@@ -2334,8 +2300,10 @@ int main(int argc, char **argv) {
     linestream >> igrid >> direction >> communication_cost;
     initial_edge_costs[igrid][direction] = communication_cost;
   }
-  //  std::fill(initial_edge_costs.begin(), initial_edge_costs.end(),
-  //  std::vector<unsigned int>(TRAVELDIRECTION_NUMBER, 1));
+#else
+  std::fill(initial_edge_costs.begin(), initial_edge_costs.end(),
+            std::vector< unsigned int >(TRAVELDIRECTION_NUMBER, 1));
+#endif
 
   logmessage("Done.", 0);
 
@@ -2546,18 +2514,19 @@ int main(int argc, char **argv) {
       for (unsigned int igrid = 0; igrid < gridvec.size(); ++igrid) {
         if (costs.get_process(igrid) == irank) {
           int position = 0;
-          myassert(buffer_position + rank_size <= MPI_buffer_size,
+          myassert(buffer_position + rank_size <= new_MPI_buffer.size(),
                    "MPI buffer overflow!");
           // length 4 since buffer contains 8-bit chars and we are adding a
           // 32-bit integer
           MPI_Pack(&igrid, 1, MPI_UNSIGNED,
-                   &MPI_buffer[buffer_position + rank_size], 4, &position,
+                   new_MPI_buffer[buffer_position + rank_size], 4, &position,
                    MPI_COMM_WORLD);
           rank_size += 4;
-          myassert(buffer_position + rank_size <= MPI_buffer_size,
+          myassert(buffer_position + rank_size <= new_MPI_buffer.size(),
                    "MPI buffer overflow!");
-          gridvec[igrid]->pack(&MPI_buffer[buffer_position + rank_size],
-                               MPI_buffer_size - buffer_position - rank_size);
+          gridvec[igrid]->pack(new_MPI_buffer[buffer_position + rank_size],
+                               new_MPI_buffer.size() - buffer_position -
+                                   rank_size);
           rank_size += gridvec[igrid]->get_MPI_size();
 
           // delete the original subgrid
@@ -2568,7 +2537,7 @@ int main(int argc, char **argv) {
       // we could also just use MPI_Probe to figure out the size of the incoming
       // message
       MPI_Send(&rank_size, 1, MPI_UNSIGNED, irank, 0, MPI_COMM_WORLD);
-      MPI_Send(&MPI_buffer[buffer_position], rank_size, MPI_PACKED, irank, 1,
+      MPI_Send(new_MPI_buffer[buffer_position], rank_size, MPI_PACKED, irank, 1,
                MPI_COMM_WORLD);
       buffer_position += rank_size;
     }
@@ -2577,21 +2546,23 @@ int main(int argc, char **argv) {
     unsigned int rank_size;
     MPI_Recv(&rank_size, 1, MPI_UNSIGNED, 0, 0, MPI_COMM_WORLD,
              MPI_STATUS_IGNORE);
-    MPI_Recv(MPI_buffer, rank_size, MPI_PACKED, 0, 1, MPI_COMM_WORLD,
+    MPI_Recv(new_MPI_buffer[0], rank_size, MPI_PACKED, 0, 1, MPI_COMM_WORLD,
              MPI_STATUS_IGNORE);
     unsigned int buffer_position = 0;
     while (rank_size > 0) {
       unsigned int igrid;
       int position = 0;
-      myassert(buffer_position <= MPI_buffer_size, "MPI buffer overflow!");
-      MPI_Unpack(&MPI_buffer[buffer_position], 4, &position, &igrid, 1,
+      myassert(buffer_position <= new_MPI_buffer.size(),
+               "MPI buffer overflow!");
+      MPI_Unpack(new_MPI_buffer[buffer_position], 4, &position, &igrid, 1,
                  MPI_UNSIGNED, MPI_COMM_WORLD);
       buffer_position += 4;
       rank_size -= 4;
       gridvec[igrid] = new DensitySubGrid(box, ncell_dummy);
-      myassert(buffer_position <= MPI_buffer_size, "MPI buffer overflow!");
-      gridvec[igrid]->unpack(&MPI_buffer[buffer_position],
-                             MPI_buffer_size - buffer_position);
+      myassert(buffer_position <= new_MPI_buffer.size(),
+               "MPI buffer overflow!");
+      gridvec[igrid]->unpack(new_MPI_buffer[buffer_position],
+                             new_MPI_buffer.size() - buffer_position);
       buffer_position += gridvec[igrid]->get_MPI_size();
       rank_size -= gridvec[igrid]->get_MPI_size();
     }
@@ -2757,7 +2728,7 @@ int main(int argc, char **argv) {
         // we only allow one thread at a time to use the MPI library
         if (MPI_size > 1 && MPI_lock.try_lock()) {
 
-          check_for_finished_sends(MPI_buffer_requests);
+          new_MPI_buffer.check_finished_communications();
 
           check_for_incoming_communications(
               message_log, message_log_size, new_buffers, costs, tasks,
@@ -2806,15 +2777,14 @@ int main(int argc, char **argv) {
           unsigned int tasks_to_add[TRAVELDIRECTION_NUMBER];
           int queues_to_add[TRAVELDIRECTION_NUMBER];
 
-          execute_task(current_index, thread_id, num_photon_local, tasks,
-                       new_queues, general_queue, new_buffers,
-                       random_generator[thread_id], central_index, gridvec,
-                       central_queue, local_buffers, local_buffer_flags,
-                       reemission_probability, costs,
-                       num_photon_done_since_last, MPI_lock, MPI_last_request,
-                       MPI_buffer_requests, MPI_buffer, message_log,
-                       message_log_size, num_empty, num_active_buffers,
-                       num_tasks_to_add, tasks_to_add, queues_to_add);
+          execute_task(
+              current_index, thread_id, num_photon_local, tasks, new_queues,
+              general_queue, new_buffers, random_generator[thread_id],
+              central_index, gridvec, central_queue, local_buffers,
+              local_buffer_flags, reemission_probability, costs,
+              num_photon_done_since_last, MPI_lock, new_MPI_buffer, message_log,
+              message_log_size, num_empty, num_active_buffers, num_tasks_to_add,
+              tasks_to_add, queues_to_add);
 
           // add new tasks to their respective queues
           for (unsigned int itask = 0; itask < num_tasks_to_add; ++itask) {
@@ -2833,7 +2803,7 @@ int main(int argc, char **argv) {
           // we only allow one thread at a time to use the MPI library
           if (MPI_size > 1 && MPI_lock.try_lock()) {
 
-            check_for_finished_sends(MPI_buffer_requests);
+            new_MPI_buffer.check_finished_communications();
 
             check_for_incoming_communications(
                 message_log, message_log_size, new_buffers, costs, tasks,
@@ -2928,19 +2898,10 @@ int main(int argc, char **argv) {
     } // parallel region
 
     // make sure all requests are freed
-    MPI_Waitall(MPI_buffer_requests.size(), &MPI_buffer_requests[0],
-                MPI_STATUSES_IGNORE);
+    new_MPI_buffer.wait_for_communications();
 
     // wait for all processes to exit the main loop
     MPI_Barrier(MPI_COMM_WORLD);
-
-    // check that all requests finished (should be guaranteed by the MPI_Waitall
-    // call above)
-    for (unsigned int i = 0; i < MPI_buffer_requests.size(); ++i) {
-      myassert(MPI_buffer_requests[i] == MPI_REQUEST_NULL,
-               "Not all communications were finished, but the main loop "
-               "finished nonetheless!");
-    }
 
     // some useful log output to help us determine a good value for the queue
     // and task space sizes
@@ -2954,7 +2915,8 @@ int main(int argc, char **argv) {
     std::vector< MPI_Request > requests(originals.size(), MPI_REQUEST_NULL);
     unsigned int num_to_receive = 0;
     // we just assume this is big enough (for now)
-    const size_t buffer_part_size = MPI_buffer_size / (originals.size() + 1);
+    const size_t buffer_part_size =
+        new_MPI_buffer.size() / (originals.size() + 1);
     for (unsigned int i = 0; i < originals.size(); ++i) {
       const unsigned int original = originals[i];
       const unsigned int copy = tot_num_subgrid + i;
@@ -2969,10 +2931,10 @@ int main(int argc, char **argv) {
       } else {
         if (costs.get_process(copy) == MPI_rank) {
           // we need to send
-          gridvec[copy]->pack(&MPI_buffer[i * buffer_part_size],
+          gridvec[copy]->pack(new_MPI_buffer[i * buffer_part_size],
                               buffer_part_size);
           unsigned int sendsize = gridvec[copy]->get_MPI_size();
-          MPI_Isend(&MPI_buffer[i * buffer_part_size], sendsize, MPI_PACKED,
+          MPI_Isend(new_MPI_buffer[i * buffer_part_size], sendsize, MPI_PACKED,
                     costs.get_process(original), original, MPI_COMM_WORLD,
                     &requests[i]);
         } // else: no action required
@@ -2989,12 +2951,12 @@ int main(int argc, char **argv) {
       const int tag = status.MPI_TAG;
       int size;
       MPI_Get_count(&status, MPI_PACKED, &size);
-      MPI_Recv(&MPI_buffer[originals.size() * buffer_part_size], size,
+      MPI_Recv(new_MPI_buffer[originals.size() * buffer_part_size], size,
                MPI_PACKED, source, tag, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
 
       const int ncell_dummy[3] = {1, 1, 1};
       DensitySubGrid dummy(box, ncell_dummy);
-      dummy.unpack(&MPI_buffer[originals.size() * buffer_part_size], size);
+      dummy.unpack(new_MPI_buffer[originals.size() * buffer_part_size], size);
 
       // the tag tells us which original to update
       gridvec[tag]->update_intensities(dummy);
@@ -3044,10 +3006,10 @@ int main(int argc, char **argv) {
       } else {
         if (costs.get_process(original) == MPI_rank) {
           // we need to send
-          gridvec[original]->pack(&MPI_buffer[i * buffer_part_size],
+          gridvec[original]->pack(new_MPI_buffer[i * buffer_part_size],
                                   buffer_part_size);
           unsigned int sendsize = gridvec[original]->get_MPI_size();
-          MPI_Isend(&MPI_buffer[i * buffer_part_size], sendsize, MPI_PACKED,
+          MPI_Isend(new_MPI_buffer[i * buffer_part_size], sendsize, MPI_PACKED,
                     costs.get_process(copy), copy, MPI_COMM_WORLD,
                     &requests[i]);
         } // else: no action required
@@ -3063,12 +3025,12 @@ int main(int argc, char **argv) {
       const int tag = status.MPI_TAG;
       int size;
       MPI_Get_count(&status, MPI_PACKED, &size);
-      MPI_Recv(&MPI_buffer[originals.size() * buffer_part_size], size,
+      MPI_Recv(new_MPI_buffer[originals.size() * buffer_part_size], size,
                MPI_PACKED, source, tag, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
 
       const int ncell_dummy[3] = {1, 1, 1};
       DensitySubGrid dummy(box, ncell_dummy);
-      dummy.unpack(&MPI_buffer[originals.size() * buffer_part_size], size);
+      dummy.unpack(new_MPI_buffer[originals.size() * buffer_part_size], size);
 
       // the tag tells us which original to update
       gridvec[tag]->update_neutral_fractions(dummy);
@@ -3092,8 +3054,8 @@ int main(int argc, char **argv) {
     output_queues(iloop, new_queues, general_queue);
     output_memoryspace(iloop, new_buffers);
 
-    // reset the MPI request counter
-    MPI_last_request = 0;
+    // reset the MPI buffer
+    new_MPI_buffer.reset();
 
     // clear message log
     message_log_size = 0;
@@ -3168,9 +3130,6 @@ int main(int argc, char **argv) {
   for (int i = 0; i < num_threads; ++i) {
     delete new_queues[i];
   }
-
-  // MPI buffer
-  delete[] MPI_buffer;
 
   /////////////////////
 
