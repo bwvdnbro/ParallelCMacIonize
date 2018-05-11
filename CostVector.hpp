@@ -66,6 +66,15 @@ inline std::vector< size_t > argsort(const _datatype_ *v, const size_t size) {
   return indices;
 }
 
+/*! @brief Size of all CostVector variables whose size is known at compile
+ *  time. */
+#define COSTVECTOR_FIXED_SIZE sizeof(CostVector)
+
+/*! @brief Size per element of the variables whose size is unknown at compile
+ *  time. */
+#define COSTVECTOR_ELEMENT_SIZE                                                \
+  (2 * sizeof(unsigned int) + sizeof(unsigned long) + sizeof(int))
+
 /**
  * @brief Object that keeps track of computational costs and tries to balance
  * them.
@@ -128,6 +137,15 @@ public:
     delete[] _photon_cost;
     delete[] _source_cost;
     delete[] _process_list;
+  }
+
+  /**
+   * @brief Get the size in memory of the cost vector.
+   *
+   * @return Size in memory of the cost vector (in bytes).
+   */
+  inline size_t get_memory_size() const {
+    return COSTVECTOR_FIXED_SIZE + _size * COSTVECTOR_ELEMENT_SIZE;
   }
 
   /**

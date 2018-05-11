@@ -32,11 +32,11 @@ memoryspace_size: 2000
 # total number of tasks that can be performed by all threads together during
 # a single iteration of the algorithm
 # the code will crash if the total number of tasks exceeds this number
-number_of_tasks: 25000
-# size of the MPI communication buffer (in bytes)
+number_of_tasks: 50000
+# size of the MPI communication buffer (in number of photon buffers)
 # the code will crash if a larger buffer is needed at any given point during the
 # simulation
-MPI_buffer_size: 1000000000
+MPI_buffer_size: 1000
 # inverse fraction of the work load per thread that can be taken by a single
 # subgrid. If the work load for a subgrid exceeds this limit, the subgrid will
 # be split across multiple copies that can be processed independently
@@ -45,4 +45,4 @@ MPI_buffer_size: 1000000000
 # note that larger values will require more memory to run
 copy_factor: 10
 # size of the general queue that is shared by all threads
-general_queue_size: 2000
+general_queue_size: 10000

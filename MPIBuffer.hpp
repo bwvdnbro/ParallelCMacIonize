@@ -64,14 +64,13 @@ public:
   /**
    * @brief Constructor.
    *
-   * @param buffer_size Size of the memory buffer (in bytes).
+   * @param size Number of elements that will be stored in the buffer.
    * @param element_size Size of a single element in the buffer (in bytes).
    */
-  inline MPIBuffer(const size_t buffer_size, const size_t element_size)
-      : _buffer(nullptr), _buffer_size(buffer_size),
-        _element_size(element_size), _requests(nullptr),
-        _requests_size(buffer_size / element_size), _last_index(0),
-        _number_in_use(0) {
+  inline MPIBuffer(const size_t size, const size_t element_size)
+      : _buffer(nullptr), _buffer_size(size * element_size),
+        _element_size(element_size), _requests(nullptr), _requests_size(size),
+        _last_index(0), _number_in_use(0) {
 
     if (_buffer_size > 0) {
       _buffer = new char[_buffer_size];
@@ -201,6 +200,16 @@ public:
 #ifdef MPIBUFFER_STATS
     _max_number_in_use = 0;
 #endif
+  }
+
+  /**
+   * @brief Get the size in memory of the MPI buffer.
+   *
+   * @return Size in memory of the MPI buffer (in bytes).
+   */
+  inline size_t get_memory_size() const {
+    return sizeof(MPIBuffer) + _buffer_size +
+           _requests_size * sizeof(MPI_Request);
   }
 
 /**

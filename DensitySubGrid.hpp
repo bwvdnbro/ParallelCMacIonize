@@ -73,14 +73,11 @@
 
 /*! @brief Size of all DensitySubGrid variables whose size is known at compile
  *  time. */
-#define DENSITYSUBGRID_FIXED_SIZE                                              \
-  ((3 * TRAVELDIRECTION_NUMBER + 1) * sizeof(unsigned int) +                   \
-   sizeof(unsigned long) + 9 * sizeof(double) + 5 * sizeof(int) +              \
-   sizeof(Lock) + sizeof(unsigned char))
+#define DENSITYSUBGRID_FIXED_SIZE sizeof(DensitySubGrid)
 
 /*! @brief Number of variables stored in each cell of the DensitySubGrid
  *  (excluding potential lock variables). */
-#define DENSITYSUBGRID_NUMBER_OF_CELL_VARIABLES 3
+#define DENSITYSUBGRID_ELEMENT_SIZE 3 * sizeof(double)
 
 /**
  * @brief Small fraction of a density grid that acts as an individual density
@@ -662,8 +659,8 @@ public:
    */
   inline int get_MPI_size() const {
     return DENSITYSUBGRID_FIXED_MPI_SIZE +
-           DENSITYSUBGRID_NUMBER_OF_CELL_VARIABLES * _number_of_cells[0] *
-               _number_of_cells[3] * sizeof(double);
+           DENSITYSUBGRID_ELEMENT_SIZE * _number_of_cells[0] *
+               _number_of_cells[3];
   }
 
   /**
@@ -673,8 +670,8 @@ public:
    */
   inline size_t get_memory_size() const {
     return DENSITYSUBGRID_FIXED_SIZE +
-           DENSITYSUBGRID_NUMBER_OF_CELL_VARIABLES * _number_of_cells[0] *
-               _number_of_cells[3] * sizeof(double);
+           DENSITYSUBGRID_ELEMENT_SIZE * _number_of_cells[0] *
+               _number_of_cells[3];
   }
 
   /**

@@ -84,4 +84,4 @@ ax.set_xlabel("number of communications")
 
 # finalize and save plot
 pl.tight_layout()
-pl.savefig("messages_00.png")
+pl.savefig("{0}.png".format(args.name[:-4]))

@@ -37,7 +37,7 @@
 #include <mpi.h>
 
 /*! @brief Number of photons that can be stored in a single buffer. */
-#define PHOTONBUFFER_SIZE 500u
+#define PHOTONBUFFER_SIZE 200u
 
 /*! @brief Size of the MPI buffer necessary to store a PhotonBuffer. */
 #define PHOTONBUFFER_MPI_SIZE                                                  \

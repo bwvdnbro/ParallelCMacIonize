@@ -34,6 +34,13 @@
 
 #define NO_TASK 0xffffffff
 
+/*! @brief Size of the Queue variables whose size is known at compile time. */
+#define QUEUE_FIXED_SIZE sizeof(Queue)
+
+/*! @brief Size per element of the variables whose size is unknown at compile
+ *  time. */
+#define QUEUE_ELEMENT_SIZE sizeof(size_t)
+
 /**
  * @brief Task queue.
  */
@@ -177,6 +184,15 @@ public:
    * @return Current size of the queue.
    */
   inline size_t size() const { return _current_queue_size; }
+
+  /**
+   * @brief Get the size in memory of the queue.
+   *
+   * @return Size in memory of the queue (in bytes).
+   */
+  inline size_t get_memory_size() const {
+    return QUEUE_FIXED_SIZE + _size * QUEUE_ELEMENT_SIZE;
+  }
 
 /**
  * @brief Get the maximum size of the queue.

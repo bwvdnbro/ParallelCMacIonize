@@ -28,6 +28,14 @@
 
 #include "Atomic.hpp"
 
+/*! @brief Total size of the variables whose size is known at compile time. */
+#define THREADSAFEVECTOR_FIXED_SIZE sizeof(ThreadSafeVector< _datatype_ >)
+
+/*! @brief Size per element of the variables whose size is unknown at compile
+ *  time. */
+#define THREADSAFEVECTOR_ELEMENT_SIZE                                          \
+  (sizeof(_datatype_) + sizeof(Atomic< bool >))
+
 /**
  * @brief Thread safe fixed size vector.
  */
@@ -206,6 +214,15 @@ public:
    * @return Maximum number of elements that can be stored in the vector.
    */
   inline size_t max_size() const { return _size; }
+
+  /**
+   * @brief Get the size in memory of the vector.
+   *
+   * @return Size in memory of the vector (in bytes).
+   */
+  inline size_t get_memory_size() const {
+    return THREADSAFEVECTOR_FIXED_SIZE + _size * THREADSAFEVECTOR_ELEMENT_SIZE;
+  }
 
 /**
  * @brief Get the maximum number of elements that was taken in this vector at

@@ -83,6 +83,9 @@
 /*! @brief Enable this to output MPI communication buffer statistics. */
 #define MPIBUFFER_OUTPUT
 
+/*! @brief Enable this to track memory usage manually. */
+#define MEMORY_TRACKING
+
 #ifdef TASK_OUTPUT
 // activate task output in Task.hpp
 #define TASK_PLOT
@@ -100,6 +103,108 @@
 #ifdef MPIBUFFER_OUTPUT
 #define MPIBUFFER_STATS
 #endif
+
+////////////////////////////////////////////////////////////////////////////////
+
+#ifdef MEMORY_TRACKING
+// global memory tracking variables
+unsigned long current_memory_size, max_memory_size;
+
+/**
+ * @brief Update the maximum memory load variable.
+ */
+#define memory_tracking_update()                                               \
+  max_memory_size = std::max(max_memory_size, current_memory_size);
+#endif
+
+/**
+ * @brief Initialize the memory tracking variables.
+ */
+#ifdef MEMORY_TRACKING
+#define memory_tracking_init()                                                 \
+  current_memory_size = 0;                                                     \
+  max_memory_size = 0;
+#else
+#define memory_tracking_init()
+#endif
+
+/**
+ * @brief Log the use of the given variable in memory.
+ *
+ * @param variable Variable name or type to log.
+ */
+#ifdef MEMORY_TRACKING
+#define memory_tracking_log_variable(variable)                                 \
+  current_memory_size += sizeof(variable);                                     \
+  memory_tracking_update();
+#else
+#define memory_tracking_log_variable(variable)
+#endif
+
+/**
+ * @brief Unlog the use of the given variable in memory.
+ *
+ * @param variable Variable name or type to unlog.
+ */
+#ifdef MEMORY_TRACKING
+#define memory_tracking_unlog_variable(variable)                               \
+  current_memory_size -= sizeof(variable);
+#else
+#define memory_tracking_unlog_variable(variable)
+#endif
+
+/**
+ * @brief Log the use of the given memory size in memory.
+ *
+ * @param size Size in memory to log (in bytes).
+ */
+#ifdef MEMORY_TRACKING
+#define memory_tracking_log_size(size)                                         \
+  current_memory_size += size;                                                 \
+  memory_tracking_update();
+#else
+#define memory_tracking_log_size(size)
+#endif
+
+/**
+ * @brief Unlog the use of the given memory size in memory.
+ *
+ * @param size Size in memory to unlog (in bytes).
+ */
+#ifdef MEMORY_TRACKING
+#define memory_tracking_unlog_size(size) current_memory_size -= size;
+#else
+#define memory_tracking_unlog_size(size)
+#endif
+
+/**
+ * @brief Print information about the memory usage.
+ */
+#ifdef MEMORY_TRACKING
+#define memory_tracking_report()                                               \
+  output_memory_size("Maximum memory usage", max_memory_size);
+#else
+#define memory_tracking_report()
+#endif
+
+/**
+ * @brief Output the total memory size accross all processes (assuming the size
+ * for each process is stored in the given variable).
+ *
+ * @param label Label to prepend to the output message.
+ * @param variable Size in memory for a single process.
+ */
+#define output_memory_size(label, variable)                                    \
+  {                                                                            \
+    unsigned long local_size = variable;                                       \
+    unsigned long global_size;                                                 \
+    MPI_Reduce(&local_size, &global_size, 1, MPI_UNSIGNED_LONG, MPI_SUM, 0,    \
+               MPI_COMM_WORLD);                                                \
+    logmessage(label << ": " << Utilities::human_readable_bytes(global_size),  \
+               0);                                                             \
+  }
+
+////////////////////////////////////////////////////////////////////////////////
 
 // global variables, as we need them in the log macro
 int MPI_rank, MPI_size;
@@ -658,6 +763,9 @@ output_neutral_fractions(const CostVector &costs,
   // now memory-map the file
   // the file is shared by all processes
   MemoryMap file("neutral_fractions.dat", tot_num_subgrid * blocksize);
+
+  memory_tracking_log_size(file.get_memory_size());
+
   // write the subgrids using multiple threads
   Atomic< unsigned int > igrid(0);
 #pragma omp parallel default(shared)
@@ -672,6 +780,8 @@ output_neutral_fractions(const CostVector &costs,
       }
     }
   }
+
+  memory_tracking_unlog_size(file.get_memory_size());
 }
 
 /**
@@ -913,10 +1023,6 @@ inline void create_copies(std::vector< DensitySubGrid * > &gridvec,
     for (unsigned int j = 1; j < number_of_copies; ++j) {
       const unsigned int copy = copies[i] + j - 1;
       gridvec[copy]->set_neighbour(0, copy);
-      const unsigned int active_buffer = new_buffers.get_free_buffer();
-      new_buffers[active_buffer].set_subgrid_index(copy);
-      new_buffers[active_buffer].set_direction(TRAVELDIRECTION_INSIDE);
-      gridvec[copy]->set_active_buffer(0, active_buffer);
     }
     // now do the actual neighbours
     for (int j = 1; j < TRAVELDIRECTION_NUMBER; ++j) {
@@ -931,11 +1037,6 @@ inline void create_copies(std::vector< DensitySubGrid * > &gridvec,
             const unsigned int copy = copies[i] + k - 1;
             const unsigned int ngb_copy = copies[original_ngb] + k - 1;
             gridvec[copy]->set_neighbour(j, ngb_copy);
-            const unsigned int active_buffer = new_buffers.get_free_buffer();
-            new_buffers[active_buffer].set_subgrid_index(ngb_copy);
-            new_buffers[active_buffer].set_direction(
-                TravelDirections::output_to_input_direction(j));
-            gridvec[copy]->set_active_buffer(j, active_buffer);
           }
         } else {
           // not the same: there are 2 options
@@ -953,11 +1054,6 @@ inline void create_copies(std::vector< DensitySubGrid * > &gridvec,
                   (ngb_index > 0) ? copies[original_ngb] + ngb_index - 1
                                   : original_ngb;
               gridvec[copy]->set_neighbour(j, ngb_copy);
-              const unsigned int active_buffer = new_buffers.get_free_buffer();
-              new_buffers[active_buffer].set_subgrid_index(ngb_copy);
-              new_buffers[active_buffer].set_direction(
-                  TravelDirections::output_to_input_direction(j));
-              gridvec[copy]->set_active_buffer(j, active_buffer);
             }
           } else {
             // we have more neighbour copies: pick a subset
@@ -969,11 +1065,6 @@ inline void create_copies(std::vector< DensitySubGrid * > &gridvec,
               const unsigned int ngb_copy =
                   copies[original_ngb] + (k - 1) * number_of_own_copies;
               gridvec[copy]->set_neighbour(j, ngb_copy);
-              const unsigned int active_buffer = new_buffers.get_free_buffer();
-              new_buffers[active_buffer].set_subgrid_index(ngb_copy);
-              new_buffers[active_buffer].set_direction(
-                  TravelDirections::output_to_input_direction(j));
-              gridvec[copy]->set_active_buffer(j, active_buffer);
             }
           }
         }
@@ -2022,6 +2113,8 @@ int main(int argc, char **argv) {
   /// Initialization
   //////////////////////////////////////////////////////////////////////////////
 
+  memory_tracking_init();
+
   //////////////////////
   // MPI initialization
   /////////////////////
@@ -2091,20 +2184,30 @@ int main(int argc, char **argv) {
   std::vector< Queue * > new_queues(num_threads, nullptr);
   for (int i = 0; i < num_threads; ++i) {
     new_queues[i] = new Queue(queue_size_per_thread);
+
+    memory_tracking_log_size(new_queues[i]->get_memory_size());
   }
 
   Queue general_queue(general_queue_size);
 
+  memory_tracking_log_size(general_queue.get_memory_size());
+
   // set up the task space used to store tasks
   ThreadSafeVector< Task > tasks(number_of_tasks);
 
+  memory_tracking_log_size(tasks.get_memory_size());
+
   // set up the memory space used to store photon packet buffers
   MemorySpace new_buffers(memoryspace_size);
+
+  memory_tracking_log_size(new_buffers.get_memory_size());
 
   // set up the cost vector used to load balance
   const unsigned int tot_num_subgrid =
       num_subgrid[0] * num_subgrid[1] * num_subgrid[2];
   CostVector costs(tot_num_subgrid, num_threads, MPI_size);
+
+  memory_tracking_log_size(costs.get_memory_size());
 
   ///////////////////////////////
 
@@ -2115,12 +2218,10 @@ int main(int argc, char **argv) {
   Lock MPI_lock;
   if (MPI_size == 1) {
     MPI_buffer_size = 0;
-  } else {
-    logmessage(
-        "MPI_buffer_size: " << Utilities::human_readable_bytes(MPI_buffer_size),
-        0);
   }
   MPIBuffer new_MPI_buffer(MPI_buffer_size, PHOTONBUFFER_MPI_SIZE);
+
+  memory_tracking_log_size(new_MPI_buffer.get_memory_size());
 
   // set up the message log buffer
   // we don't need to use a thread safe vector, as only one thread is allowed
@@ -2231,6 +2332,8 @@ int main(int argc, char **argv) {
     } // end parallel region
 
   } // if(MPI_rank == 0)
+
+  memory_tracking_log_size(grid_memory.value());
 
   //////////////////
 
@@ -2604,6 +2707,21 @@ int main(int argc, char **argv) {
 
   // Just for now: wait until the communication is finished before proceeding.
   MPI_Barrier(MPI_COMM_WORLD);
+
+  // now compute the actual grid size
+  size_t grid_memory_size = 0;
+  for (unsigned int i = 0; i < gridvec.size(); ++i) {
+    if (costs.get_process(i) == MPI_rank) {
+      grid_memory_size += gridvec[i]->get_memory_size();
+
+      // initialize the photon buffers
+      for (int ingb = 0; ingb < TRAVELDIRECTION_NUMBER; ++ingb) {
+        gridvec[i]->set_active_buffer(ingb, NEIGHBOUR_OUTSIDE);
+      }
+    }
+  }
+  memory_tracking_unlog_size(grid_memory.value());
+  memory_tracking_log_size(grid_memory_size);
 
   ////////////////////////////////////////////////
 
@@ -3135,9 +3253,24 @@ int main(int argc, char **argv) {
       "Maximum memory usage: " << Utilities::human_readable_bytes(max_memory),
       0);
 
+  memory_tracking_report();
+
   logmessage("Basic grid size: "
                  << Utilities::human_readable_bytes(grid_memory.value()),
              0);
+  output_memory_size("Actual grid size", grid_memory_size);
+
+  output_memory_size("Memory space size", new_buffers.get_memory_size());
+  output_memory_size("Task space size", tasks.get_memory_size());
+  output_memory_size("Cost vector size", costs.get_memory_size());
+
+  size_t queue_memory_size = general_queue.get_memory_size();
+  for (int i = 0; i < num_threads; ++i) {
+    queue_memory_size += new_queues[i]->get_memory_size();
+  }
+  output_memory_size("Queue size", queue_memory_size);
+
+  output_memory_size("MPI buffer size", new_MPI_buffer.get_memory_size());
 
   //////////////////////////////////
 

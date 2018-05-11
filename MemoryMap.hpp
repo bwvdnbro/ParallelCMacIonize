@@ -226,6 +226,13 @@ public:
                                   << ")!");
     memcpy(_memory_buffer + position, &value, vsize);
   }
+
+  /**
+   * @brief Get the size in memory of the memory map.
+   *
+   * @return Size in memory of the memory map (in bytes).
+   */
+  inline size_t get_memory_size() const { return sizeof(MemoryMap) + _size; }
 };
 
 #endif // MEMORYMAP_HPP

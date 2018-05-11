@@ -119,6 +119,15 @@ public:
     return index_out;
   }
 
+  /**
+   * @brief Get the size of the memory space in memory.
+   *
+   * @return Size of the memory space in memory (in bytes).
+   */
+  inline size_t get_memory_size() const {
+    return _memory_space.get_memory_size();
+  }
+
 #ifdef THREADSAFEVECTOR_STATS
   /**
    * @brief Get the maximum number of elements in the memory space at any given
