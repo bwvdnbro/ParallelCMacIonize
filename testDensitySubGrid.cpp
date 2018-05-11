@@ -74,14 +74,17 @@
  *  decomposition. */
 //#define READ_EDGE_COSTS
 
+/*! @brief Enable this to output task statistics. */
+#define TASK_STATS
+
 /*! @brief Enable this to output queue statistics. */
-#define QUEUE_OUTPUT
+#define QUEUE_STATS
 
 /*! @brief Enable this to output memory space statistics. */
-#define MEMORYSPACE_OUTPUT
+#define MEMORYSPACE_STATS
 
 /*! @brief Enable this to output MPI communication buffer statistics. */
-#define MPIBUFFER_OUTPUT
+#define MPIBUFFER_STATS
 
 /*! @brief Enable this to track memory usage manually. */
 #define MEMORY_TRACKING
@@ -91,16 +94,16 @@
 #define TASK_PLOT
 #endif
 
-#ifdef QUEUE_OUTPUT
+#ifdef QUEUE_STATS
 // activate queue statistics in Queue.hpp
 #define QUEUE_STATS
 #endif
 
-#ifdef MEMORYSPACE_OUTPUT
+#if defined(MEMORYSPACE_STATS) || defined(TASK_STATS)
 #define THREADSAFEVECTOR_STATS
 #endif
 
-#ifdef MPIBUFFER_OUTPUT
+#ifdef MPIBUFFER_STATS
 #define MPIBUFFER_STATS
 #endif
 
@@ -305,61 +308,101 @@ int MPI_rank, MPI_size;
  * @param iteration_end End CPU cycle count of the iteration on this process.
  */
 inline void output_tasks(const unsigned int iloop,
-                         const ThreadSafeVector< Task > &tasks,
+                         ThreadSafeVector< Task > &tasks,
                          const unsigned long iteration_start,
                          const unsigned long iteration_end) {
-#ifdef TASK_OUTPUT
-  // compose the file name
-  std::stringstream filename;
-  filename << "tasks_";
-  filename.fill('0');
-  filename.width(2);
-  filename << iloop;
-  filename << ".txt";
+#ifdef TASK_STATS
+  {
+    // first compose the file name
+    std::stringstream filename;
+    filename << "task_stats_";
+    filename.fill('0');
+    filename.width(2);
+    filename << iloop;
+    filename << ".txt";
 
-  // now output
-  // each process outputs its own tasks in turn, process 0 is responsible for
-  // creating the file and the other processes append to it
-  for (int irank = 0; irank < MPI_size; ++irank) {
-    // only the active process writes
-    if (irank == MPI_rank) {
-      // the file mode depends on the rank
-      std::ios_base::openmode mode;
-      if (irank == 0) {
-        // rank 0 creates (or overwrites) the file
-        mode = std::ofstream::trunc;
-      } else {
-        // all other ranks append to it
-        mode = std::ofstream::app;
+    // now output
+    for (int irank = 0; irank < MPI_size; ++irank) {
+      if (irank == MPI_rank) {
+        // the file mode depends on the rank
+        std::ios_base::openmode mode;
+        if (irank == 0) {
+          // rank 0 creates (or overwrites) the file
+          mode = std::ofstream::trunc;
+        } else {
+          // all other ranks append to it
+          mode = std::ofstream::app;
+        }
+        // now open the file
+        std::ofstream ofile(filename.str(), mode);
+
+        // rank 0 writes the file header
+        if (irank == 0) {
+          ofile << "# rank\tsize\n";
+        }
+
+        ofile << MPI_rank << "\t" << tasks.get_max_number_taken() << "\n";
+        tasks.reset_max_number_taken();
       }
-      // now open the file
-      std::ofstream ofile(filename.str(), mode);
-
-      // rank 0 writes the header
-      if (irank == 0) {
-        ofile << "# rank\tthread\tstart\tstop\ttype\n";
-      }
-
-      // write the start and end CPU cycle count
-      // this is a dummy task executed by thread 0 (so that the min or max
-      // thread count is not affected), but with non-existing type -1
-      ofile << MPI_rank << "\t0\t" << iteration_start << "\t" << iteration_end
-            << "\t-1\n";
-
-      // write the task info
-      const size_t tsize = tasks.size();
-      for (size_t i = 0; i < tsize; ++i) {
-        const Task &task = tasks[i];
-        myassert(task.done(), "Task was never executed!");
-        int type, thread_id;
-        unsigned long start, end;
-        task.get_timing_information(type, thread_id, start, end);
-        ofile << MPI_rank << "\t" << thread_id << "\t" << start << "\t" << end
-              << "\t" << type << "\n";
-      }
+      MPI_Barrier(MPI_COMM_WORLD);
     }
-    // only one process at a time is allowed to write
-    MPI_Barrier(MPI_COMM_WORLD);
+  }
+#endif
+
+#ifdef TASK_OUTPUT
+  {
+    // compose the file name
+    std::stringstream filename;
+    filename << "tasks_";
+    filename.fill('0');
+    filename.width(2);
+    filename << iloop;
+    filename << ".txt";
+
+    // now output
+    // each process outputs its own tasks in turn, process 0 is responsible for
+    // creating the file and the other processes append to it
+    for (int irank = 0; irank < MPI_size; ++irank) {
+      // only the active process writes
+      if (irank == MPI_rank) {
+        // the file mode depends on the rank
+        std::ios_base::openmode mode;
+        if (irank == 0) {
+          // rank 0 creates (or overwrites) the file
+          mode = std::ofstream::trunc;
+        } else {
+          // all other ranks append to it
+          mode = std::ofstream::app;
+        }
+        // now open the file
+        std::ofstream ofile(filename.str(), mode);
+
+        // rank 0 writes the header
+        if (irank == 0) {
+          ofile << "# rank\tthread\tstart\tstop\ttype\n";
+        }
+
+        // write the start and end CPU cycle count
+        // this is a dummy task executed by thread 0 (so that the min or max
+        // thread count is not affected), but with non-existing type -1
+        ofile << MPI_rank << "\t0\t" << iteration_start << "\t" << iteration_end
+              << "\t-1\n";
+
+        // write the task info
+        const size_t tsize = tasks.size();
+        for (size_t i = 0; i < tsize; ++i) {
+          const Task &task = tasks[i];
+          myassert(task.done(), "Task was never executed!");
+          int type, thread_id;
+          unsigned long start, end;
+          task.get_timing_information(type, thread_id, start, end);
+          ofile << MPI_rank << "\t" << thread_id << "\t" << start << "\t" << end
+                << "\t" << type << "\n";
+        }
+      }
+      // only one process at a time is allowed to write
+      MPI_Barrier(MPI_COMM_WORLD);
+    }
   }
 #endif
 }
@@ -563,7 +606,7 @@ inline void output_messages(const unsigned int iloop,
 inline void output_queues(const unsigned int iloop,
                           std::vector< Queue * > &queues,
                           Queue &general_queue) {
-#ifdef QUEUE_OUTPUT
+#ifdef QUEUE_STATS
   // first compose the file name
   std::stringstream filename;
   filename << "queues_";
@@ -618,7 +661,7 @@ inline void output_queues(const unsigned int iloop,
  */
 inline void output_memoryspace(const unsigned int iloop,
                                MemorySpace &memory_space) {
-#ifdef MEMORYSPACE_OUTPUT
+#ifdef MEMORYSPACE_STATS
   // first compose the file name
   std::stringstream filename;
   filename << "memoryspace_";
@@ -664,7 +707,7 @@ inline void output_memoryspace(const unsigned int iloop,
  * @param MPI_buffer MPI communication buffer.
  */
 inline void output_mpibuffer(const unsigned int iloop, MPIBuffer &MPI_buffer) {
-#ifdef MPIBUFFER_OUTPUT
+#ifdef MPIBUFFER_STATS
   // first compose the file name
   std::stringstream filename;
   filename << "mpibuffer_";
@@ -2931,8 +2974,11 @@ int main(int argc, char **argv) {
             }
           }
 
-          // this would be the right place to delete the task (if we don't want
-          // to output it)
+// this would be the right place to delete the task (if we don't want
+// to output it)
+#ifndef TASK_OUTPUT
+          tasks.free_element(current_index);
+#endif
 
           // now do MPI related stuff
           // we only allow one thread at a time to use the MPI library
@@ -3037,10 +3083,6 @@ int main(int argc, char **argv) {
 
     // wait for all processes to exit the main loop
     MPI_Barrier(MPI_COMM_WORLD);
-
-    // some useful log output to help us determine a good value for the queue
-    // and task space sizes
-    logmessage("Total number of tasks: " << tasks.size(), 0);
 
     logmessage("Updating copies...", 0);
 

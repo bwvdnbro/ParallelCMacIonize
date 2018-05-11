@@ -1,15 +1,19 @@
 #! /bin/bash
 
+plot_system=
+plot_mpi=
+plot_timeline=
 plot_tasks=
 plot_costs=
-plot_mpi=
 
 while [ "$1" != "" ]
 do
   case $1 in
+    -s | --system ) plot_system=1;;
+    -m | --mpi ) plot_mpi=1;;
+    -f | --timeline ) plot_timeline=1;;
     -t | --tasks ) plot_tasks=1;;
     -c | --costs ) plot_costs=1;;
-    -m | --mpi ) plot_mpi=1;;
   esac
   shift
 done
@@ -19,16 +23,23 @@ echo "Plotting physical result..."
 python scripts/plot_neutral_fraction_profile.py
 echo "Done."
 
-# full task plot timeline
-echo "Plotting full run task plot..."
-python scripts/plot_full_timeline.py --labels
-echo "Done."
+# system stats
+if [ "$plot_system" = "1" ]
+then
+  echo "Plotting system statistics..."
+  python scripts/plot_memoryspace.py
+  python scripts/plot_queues.py
+  python scripts/plot_task_stats.py
+  echo "Done."
+fi
 
-# memory stats
-echo "Plotting memory statistics..."
-python scripts/plot_memoryspace.py
-python scripts/plot_queues.py
-echo "Done."
+# full task plot timeline
+if [ "$plot_timeline" = "1" ]
+then
+  echo "Plotting full run task plot..."
+  python scripts/plot_full_timeline.py --labels
+  echo "Done."
+fi
 
 # mpi stats
 if [ "$plot_mpi" = "1" ]

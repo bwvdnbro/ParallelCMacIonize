@@ -219,8 +219,6 @@ public:
  */
 #ifdef MPIBUFFER_STATS
   inline size_t get_max_number_in_use() const { return _max_number_in_use; }
-#else
-#error "This function should only be used when MPIBUFFER_STATS is defined!"
 #endif
 
 /**
@@ -228,8 +226,6 @@ public:
  */
 #ifdef MPIBUFFER_STATS
   inline void reset_max_number_in_use() { _max_number_in_use = 0; }
-#else
-#error "This function should only be used when MPIBUFFER_STATS is defined!"
 #endif
 };
 

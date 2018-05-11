@@ -234,9 +234,6 @@ public:
   inline size_t get_max_number_taken() const {
     return _max_number_taken.value();
   }
-#else
-#error                                                                         \
-    "This function should only be used when THREADSAFEVECTOR_STATS is defined!"
 #endif
 
 /**
@@ -244,9 +241,6 @@ public:
  */
 #ifdef THREADSAFEVECTOR_STATS
   inline void reset_max_number_taken() { _max_number_taken.set(0); }
-#else
-#error                                                                         \
-    "This function should only be used when THREADSAFEVECTOR_STATS is defined!"
 #endif
 };
 

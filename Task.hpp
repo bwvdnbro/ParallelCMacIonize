@@ -228,9 +228,6 @@ public:
     start = _start_time;
     end = _end_time;
   }
-#else
-#error                                                                         \
-    "Task::get_timing_information() is only available when TASK_PLOT is defined!"
 #endif
 };
 

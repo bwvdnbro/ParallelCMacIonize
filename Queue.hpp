@@ -201,8 +201,6 @@ public:
  */
 #ifdef QUEUE_STATS
   inline size_t get_max_queue_size() const { return _max_queue_size; }
-#else
-#error "This function should only be used when QUEUE_STATS is defined!"
 #endif
 
 /**
@@ -210,8 +208,6 @@ public:
  */
 #ifdef QUEUE_STATS
   inline void reset_max_queue_size() { _max_queue_size = 0; }
-#else
-#error "This function should only be used when QUEUE_STATS is defined!"
 #endif
 };
 
