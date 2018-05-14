@@ -106,6 +106,49 @@ public:
   }
 
   /**
+   * @brief Get a continuous block of elements with the given size at the start
+   * of the vector.
+   *
+   * This method is not meant to be thread safe.
+   *
+   * @param size Size of the block.
+   */
+  inline void get_free_elements(const size_t size) {
+
+    for (size_t i = 0; i < size; ++i) {
+      _locks[i].lock();
+    }
+    _current_index.set(size);
+    _number_taken.set(size);
+
+#ifdef THREADSAFEVECTOR_STATS
+    _max_number_taken.max(_number_taken.value());
+#endif
+  }
+
+  /**
+   * @brief Clear the contents of the vector from the given offset index
+   * onwards.
+   *
+   * This method is not meant to be thread safe. We assume all values before the
+   * given offset are in use.
+   *
+   * @param offset First index that should be cleared.
+   */
+  inline void clear_after(const size_t offset) {
+    for (size_t i = offset; i < _size; ++i) {
+      _locks[i].unlock();
+      _vector[i] = _datatype_();
+    }
+    _number_taken.set(offset);
+    _current_index.set(offset);
+
+#ifdef THREADSAFEVECTOR_STATS
+    _max_number_taken.set(offset);
+#endif
+  }
+
+  /**
    * @brief Access the element with the given index.
    *
    * @param index Index of an element.

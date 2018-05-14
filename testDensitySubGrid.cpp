@@ -2862,6 +2862,9 @@ int main(int argc, char **argv) {
     Atomic< unsigned int > num_active_buffers(0);
     // global control variable
     Atomic< unsigned int > num_photon_done_since_last(0);
+    // preallocate photon creation tasks for faster iteration start
+    tasks.get_free_elements(num_photon_local / PHOTONBUFFER_SIZE +
+                            (num_photon_local % PHOTONBUFFER_SIZE > 0));
 #pragma omp parallel default(shared)
     {
       // id of this specific thread
@@ -2886,7 +2889,7 @@ int main(int argc, char **argv) {
           }
 
           // create task
-          const size_t task_index = tasks.get_free_element();
+          const size_t task_index = num_photon_sourced_now / PHOTONBUFFER_SIZE;
           tasks[task_index].set_type(TASKTYPE_SOURCE_PHOTON);
           // store the number of photons in the _buffer field, which is not used
           // at the moment
