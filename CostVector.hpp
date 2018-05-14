@@ -356,7 +356,7 @@ public:
 
         for (unsigned int ingb = 0; ingb < ngbs[igrid].size(); ++ingb) {
           adjncy[xadj[igrid] + ingb] = ngbs[igrid][ingb];
-          adjwgt[xadj[igrid] + ingb] = edge_costs[igrid][ingb];
+          adjwgt[xadj[igrid] + ingb] = std::max(1u, edge_costs[igrid][ingb]);
         }
       }
       myassert(xadj[nvert] == 2 * nedge, "Wrong number of edges!");

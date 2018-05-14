@@ -213,6 +213,7 @@ unsigned long current_memory_size, max_memory_size;
 int MPI_rank, MPI_size;
 
 // Project includes
+#include "CoarseDensityGrid.hpp"
 #include "CommandLineParser.hpp"
 #include "CostVector.hpp"
 #include "DensitySubGrid.hpp"
@@ -2406,6 +2407,8 @@ int main(int argc, char **argv) {
   //  - a photon cost vector that is a more stable reference for the distributed
   //    memory decomposition
   std::vector< unsigned int > initial_photon_cost(tot_num_subgrid, 0);
+  std::vector< std::vector< unsigned int > > initial_edge_costs(
+      tot_num_subgrid, std::vector< unsigned int >(TRAVELDIRECTION_NUMBER, 0));
 
   logmessage(
       "Running low resolution simulation to get initial subgrid costs...", 0);
@@ -2413,22 +2416,21 @@ int main(int argc, char **argv) {
   // nodes
   // to obtain this, we run a low resolution Monte Carlo simulation on the
   // grid of subgrids (with each subgrid acting as a single cell)
-  DensitySubGrid coarse_grid(box, num_subgrid);
-  // the coarse grid has no neighbours
-  for (int i = 0; i < TRAVELDIRECTION_NUMBER; ++i) {
-    coarse_grid.set_neighbour(i, NEIGHBOUR_OUTSIDE);
-    coarse_grid.set_active_buffer(i, NEIGHBOUR_OUTSIDE);
-  }
+  CoarseDensityGrid coarse_grid(box, num_subgrid);
   // run 10 photon buffers
   RandomGenerator coarse_rg(42);
-  bool flags[TRAVELDIRECTION_NUMBER];
-  for (int i = 0; i < TRAVELDIRECTION_NUMBER; ++i) {
-    flags[i] = false;
-  }
   for (unsigned int i = 0; i < 10; ++i) {
     PhotonBuffer buffer;
     fill_buffer(buffer, PHOTONBUFFER_SIZE, coarse_rg, 0);
-    do_photon_traversal(buffer, coarse_grid, nullptr, flags);
+    // now loop over the buffer photons and traverse them one by one
+    for (unsigned int j = 0; j < buffer.size(); ++j) {
+
+      // active photon
+      Photon &photon = buffer[j];
+
+      // traverse the photon through the active subgrid
+      coarse_grid.interact(photon);
+    }
   }
 
   // get the maximal intensity
@@ -2459,15 +2461,17 @@ int main(int argc, char **argv) {
         // because again the weights are too large.
         const unsigned long cost = 0xffff * (intensity / maxintensity);
         initial_photon_cost[igrid] = cost;
+        for (int idir = 0; idir < TRAVELDIRECTION_NUMBER; ++idir) {
+          initial_edge_costs[igrid][idir] =
+              coarse_grid.get_edge_cost(igrid, idir);
+        }
       }
     }
   }
 
   std::fill(initial_cost_vector.begin(), initial_cost_vector.end(), 1);
 
-  // edge costs
-  std::vector< std::vector< unsigned int > > initial_edge_costs(
-      tot_num_subgrid, std::vector< unsigned int >(TRAVELDIRECTION_NUMBER, 0));
+// edge costs
 #ifdef READ_EDGE_COSTS
   std::ifstream ifile("communication_costs_00.txt");
   std::string line;
@@ -2480,9 +2484,6 @@ int main(int argc, char **argv) {
     linestream >> igrid >> direction >> communication_cost;
     initial_edge_costs[igrid][direction] = communication_cost;
   }
-#else
-  std::fill(initial_edge_costs.begin(), initial_edge_costs.end(),
-            std::vector< unsigned int >(TRAVELDIRECTION_NUMBER, 1));
 #endif
 
   logmessage("Done.", 0);
