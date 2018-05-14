@@ -98,6 +98,24 @@ public:
   }
 
   /**
+   * @brief Add all tasks in the given range to the queue.
+   *
+   * @param task_start First task to add.
+   * @param task_end Last task to add.
+   */
+  inline void add_tasks(const size_t task_start, const size_t task_end) {
+    _queue_lock.lock();
+    for (size_t task = task_start; task < task_end; ++task) {
+      _queue[_current_queue_size] = task;
+      ++_current_queue_size;
+    }
+#ifdef QUEUE_STATS
+    _max_queue_size = std::max(_max_queue_size, _current_queue_size);
+#endif
+    _queue_lock.unlock();
+  }
+
+  /**
    * @brief Get a task from the queue.
    *
    * This version locks the queue.

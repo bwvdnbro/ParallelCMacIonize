@@ -2862,9 +2862,19 @@ int main(int argc, char **argv) {
     Atomic< unsigned int > num_active_buffers(0);
     // global control variable
     Atomic< unsigned int > num_photon_done_since_last(0);
-    // preallocate photon creation tasks for faster iteration start
-    tasks.get_free_elements(num_photon_local / PHOTONBUFFER_SIZE +
-                            (num_photon_local % PHOTONBUFFER_SIZE > 0));
+    // preallocate photon creation tasks for a faster iteration start
+    const size_t num_photon_tasks = num_photon_local / PHOTONBUFFER_SIZE +
+                                    (num_photon_local % PHOTONBUFFER_SIZE > 0);
+    tasks.get_free_elements(num_photon_tasks);
+    for (size_t i = 0; i < num_photon_tasks; ++i) {
+      tasks[i].set_type(TASKTYPE_SOURCE_PHOTON);
+      tasks[i].set_buffer(PHOTONBUFFER_SIZE);
+    }
+    if (num_photon_local % PHOTONBUFFER_SIZE > 0) {
+      tasks[num_photon_tasks - 1].set_buffer(
+          PHOTONBUFFER_SIZE - (num_photon_local % PHOTONBUFFER_SIZE));
+    }
+    general_queue.add_tasks(0, num_photon_tasks);
 #pragma omp parallel default(shared)
     {
       // id of this specific thread
@@ -2876,27 +2886,6 @@ int main(int argc, char **argv) {
             TravelDirections::output_to_input_direction(i));
         local_buffers[i].reset();
         local_buffer_flags[i] = true;
-      }
-
-      // add source photon tasks to the general queue
-      while (num_photon_sourced.value() < num_photon_local) {
-        const unsigned int num_photon_sourced_now =
-            num_photon_sourced.post_add(PHOTONBUFFER_SIZE);
-        if (num_photon_sourced_now < num_photon_local) {
-          unsigned int num_photon_this_loop = PHOTONBUFFER_SIZE;
-          if (num_photon_sourced_now + PHOTONBUFFER_SIZE > num_photon_local) {
-            num_photon_this_loop += (num_photon_local - num_photon_sourced_now);
-          }
-
-          // create task
-          const size_t task_index = num_photon_sourced_now / PHOTONBUFFER_SIZE;
-          tasks[task_index].set_type(TASKTYPE_SOURCE_PHOTON);
-          // store the number of photons in the _buffer field, which is not used
-          // at the moment
-          tasks[task_index].set_buffer(num_photon_this_loop);
-          // source photon tasks have no dependencies
-          general_queue.add_task(task_index);
-        }
       }
 
       // this loop is repeated until all local photons have been propagated
