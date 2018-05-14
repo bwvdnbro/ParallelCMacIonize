@@ -2866,6 +2866,7 @@ int main(int argc, char **argv) {
     const size_t num_photon_tasks = num_photon_local / PHOTONBUFFER_SIZE +
                                     (num_photon_local % PHOTONBUFFER_SIZE > 0);
     tasks.get_free_elements(num_photon_tasks);
+#pragma omp parallel for
     for (size_t i = 0; i < num_photon_tasks; ++i) {
       tasks[i].set_type(TASKTYPE_SOURCE_PHOTON);
       tasks[i].set_buffer(PHOTONBUFFER_SIZE);

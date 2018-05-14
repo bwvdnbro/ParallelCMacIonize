@@ -105,10 +105,11 @@ public:
    */
   inline void add_tasks(const size_t task_start, const size_t task_end) {
     _queue_lock.lock();
-    for (size_t task = task_start; task < task_end; ++task) {
-      _queue[_current_queue_size] = task;
-      ++_current_queue_size;
+#pragma omp parallel for
+    for (size_t itask = 0; itask < (task_end - task_start); ++itask) {
+      _queue[_current_queue_size + itask] = task_start + itask;
     }
+    _current_queue_size += (task_end - task_start);
 #ifdef QUEUE_STATS
     _max_queue_size = std::max(_max_queue_size, _current_queue_size);
 #endif
