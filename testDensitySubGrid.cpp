@@ -606,7 +606,7 @@ inline void output_messages(const unsigned int iloop,
  */
 inline void output_queues(const unsigned int iloop,
                           std::vector< Queue * > &queues,
-                          std::vector< Queue * > &general_queue) {
+                          Queue &general_queue) {
 #ifdef QUEUE_STATS
   // first compose the file name
   std::stringstream filename;
@@ -636,17 +636,17 @@ inline void output_queues(const unsigned int iloop,
         ofile << "# rank\tqueue\tsize\n";
       }
 
+      // start with the general queue (-1)
+      ofile << MPI_rank << "\t-1\t" << general_queue.get_max_queue_size()
+            << "\n";
+      general_queue.reset_max_queue_size();
+
       // now do the other queues
       for (size_t i = 0; i < queues.size(); ++i) {
         Queue &queue = *queues[i];
         ofile << MPI_rank << "\t" << i << "\t" << queue.get_max_queue_size()
               << "\n";
         queue.reset_max_queue_size();
-
-        Queue &gqueue = *general_queue[i];
-        ofile << MPI_rank << "\t" << i << "\t" << gqueue.get_max_queue_size()
-              << "\n";
-        gqueue.reset_max_queue_size();
       }
     }
     MPI_Barrier(MPI_COMM_WORLD);
@@ -1382,6 +1382,7 @@ inline void execute_source_photon_task(
  * @param thread_id Thread that will execute the task.
  * @param tasks Task space to create new tasks in.
  * @param new_queues Task queues for individual threads.
+ * @param general_queue General queue shared by all threads.
  * @param new_buffers PhotonBuffer memory space.
  * @param gridvec List of all subgrids.
  * @param local_buffers Temporary buffers used in photon packet propagation
@@ -1401,11 +1402,11 @@ inline void execute_source_photon_task(
  */
 inline void execute_photon_traversal_task(
     Task &task, const int thread_id, ThreadSafeVector< Task > &tasks,
-    std::vector< Queue * > &new_queues, MemorySpace &new_buffers,
-    std::vector< DensitySubGrid * > &gridvec, PhotonBuffer *local_buffers,
-    bool *local_buffer_flags, const double reemission_probability,
-    CostVector &costs, Atomic< unsigned int > &num_photon_done,
-    Atomic< unsigned int > &num_empty,
+    std::vector< Queue * > &new_queues, Queue &general_queue,
+    MemorySpace &new_buffers, std::vector< DensitySubGrid * > &gridvec,
+    PhotonBuffer *local_buffers, bool *local_buffer_flags,
+    const double reemission_probability, CostVector &costs,
+    Atomic< unsigned int > &num_photon_done, Atomic< unsigned int > &num_empty,
     Atomic< unsigned int > &num_active_buffers, unsigned int &num_tasks_to_add,
     unsigned int *tasks_to_add, int *queues_to_add) {
 
@@ -1744,6 +1745,7 @@ inline void execute_send_task(Task &task, const int thread_id,
  * generated at the source on this process.
  * @param tasks Task space to create new tasks in.
  * @param new_queues Task queues for individual threads.
+ * @param general_queue General queue shared by all threads.
  * @param new_buffers PhotonBuffer memory space.
  * @param random_generator Random_generator for the active thread.
  * @param central_index List of subgrids that contain the source position.
@@ -1772,8 +1774,8 @@ inline void execute_send_task(Task &task, const int thread_id,
 inline void execute_task(
     const unsigned int task_index, const int thread_id,
     const unsigned int num_photon_local, ThreadSafeVector< Task > &tasks,
-    std::vector< Queue * > &new_queues, MemorySpace &new_buffers,
-    RandomGenerator &random_generator,
+    std::vector< Queue * > &new_queues, Queue &general_queue,
+    MemorySpace &new_buffers, RandomGenerator &random_generator,
     const std::vector< unsigned int > &central_index,
     std::vector< DensitySubGrid * > &gridvec,
     const std::vector< int > &central_queue, PhotonBuffer *local_buffers,
@@ -1805,10 +1807,10 @@ inline void execute_task(
     /// propagate photon packets from a buffer through a subgrid
 
     execute_photon_traversal_task(
-        task, thread_id, tasks, new_queues, new_buffers, gridvec, local_buffers,
-        local_buffer_flags, reemission_probability, costs, num_photon_done,
-        num_empty, num_active_buffers, num_tasks_to_add, tasks_to_add,
-        queues_to_add);
+        task, thread_id, tasks, new_queues, general_queue, new_buffers, gridvec,
+        local_buffers, local_buffer_flags, reemission_probability, costs,
+        num_photon_done, num_empty, num_active_buffers, num_tasks_to_add,
+        tasks_to_add, queues_to_add);
     break;
 
   case TASKTYPE_PHOTON_REEMIT:
@@ -1857,14 +1859,15 @@ inline void execute_task(
  * @param num_empty Number of empty buffers on this process.
  * @param num_active_buffers Number of active photon buffers on this process.
  */
-inline void
-activate_buffer(unsigned int &current_index, const int thread_id,
-                const int num_threads, ThreadSafeVector< Task > &tasks,
-                std::vector< Queue * > &new_queues,
-                std::vector< Queue * > &general_queue, MemorySpace &new_buffers,
-                std::vector< DensitySubGrid * > &gridvec, CostVector &costs,
-                Atomic< unsigned int > &num_empty,
-                Atomic< unsigned int > &num_active_buffers) {
+inline void activate_buffer(unsigned int &current_index, const int thread_id,
+                            const int num_threads,
+                            ThreadSafeVector< Task > &tasks,
+                            std::vector< Queue * > &new_queues,
+                            Queue &general_queue, MemorySpace &new_buffers,
+                            std::vector< DensitySubGrid * > &gridvec,
+                            CostVector &costs,
+                            Atomic< unsigned int > &num_empty,
+                            Atomic< unsigned int > &num_active_buffers) {
 
   // we first try to launch buffers that are nearly full, and then move on to
   // more empty buffers
@@ -1911,7 +1914,7 @@ activate_buffer(unsigned int &current_index, const int thread_id,
                   MPI_rank) {
                 new_task.set_type(TASKTYPE_SEND);
                 // a send task has no dependencies
-                general_queue[thread_id]->add_task(task_index);
+                general_queue.add_task(task_index);
               } else {
                 DensitySubGrid &subgrid =
                     *gridvec[new_buffers[non_full_index].get_subgrid_index()];
@@ -1928,7 +1931,7 @@ activate_buffer(unsigned int &current_index, const int thread_id,
             } else {
               new_task.set_type(TASKTYPE_PHOTON_REEMIT);
               // a reemit task has no dependencies
-              general_queue[thread_id]->add_task(task_index);
+              general_queue.add_task(task_index);
             }
 
             // set the new largest index
@@ -2223,16 +2226,15 @@ int main(int argc, char **argv) {
 
   // set up the queues used to queue tasks
   std::vector< Queue * > new_queues(num_threads, nullptr);
-  std::vector< Queue * > general_queue(num_threads, nullptr);
-  general_queue_size = (general_queue_size / num_threads) +
-                       (general_queue_size % num_threads > 0);
   for (int i = 0; i < num_threads; ++i) {
     new_queues[i] = new Queue(queue_size_per_thread);
-    general_queue[i] = new Queue(general_queue_size);
 
     memory_tracking_log_size(new_queues[i]->get_memory_size());
-    memory_tracking_log_size(general_queue[i]->get_memory_size());
   }
+
+  Queue general_queue(general_queue_size);
+
+  memory_tracking_log_size(general_queue.get_memory_size());
 
   // set up the task space used to store tasks
   ThreadSafeVector< Task > tasks(number_of_tasks);
@@ -2777,6 +2779,8 @@ int main(int argc, char **argv) {
   MPI_Barrier(MPI_COMM_WORLD);
   iteration_timer.start();
 
+  Timer MCtimer;
+
   // now for the main loop. This loop
   //  - shoots num_photon photons through the grid to get intensity estimates
   //  - computes the ionization equilibrium
@@ -2786,6 +2790,7 @@ int main(int argc, char **argv) {
     unsigned long iteration_start, iteration_end;
     MPI_Barrier(MPI_COMM_WORLD);
     cpucycle_tick(iteration_start);
+    MCtimer.start();
 
     // make a global list of all subgrids (on this process) that contain the
     // (single) photon source position, we will distribute the initial
@@ -2873,14 +2878,7 @@ int main(int argc, char **argv) {
       tasks[num_photon_tasks - 1].set_buffer(
           PHOTONBUFFER_SIZE - (num_photon_local % PHOTONBUFFER_SIZE));
     }
-    const size_t num_tasks_per_thread =
-        num_photon_tasks / num_threads + (num_photon_tasks % num_threads > 0);
-    for (int i = 0; i < num_threads; ++i) {
-      const size_t start_task = i * num_tasks_per_thread;
-      const size_t end_task =
-          std::min((i + 1) * num_tasks_per_thread, num_photon_tasks);
-      general_queue[i]->add_tasks(start_task, end_task);
-    }
+    general_queue.add_tasks(0, num_photon_tasks);
 #pragma omp parallel default(shared)
     {
       // id of this specific thread
@@ -2924,11 +2922,7 @@ int main(int argc, char **argv) {
               steal_task(thread_id, num_threads, new_queues, tasks, gridvec);
           // still no task: take one from the general queue
           if (current_index == NO_TASK) {
-            current_index = general_queue[thread_id]->get_task(tasks);
-            if (current_index == NO_TASK) {
-              current_index = steal_task(thread_id, num_threads, general_queue,
-                                         tasks, gridvec);
-            }
+            current_index = general_queue.get_task(tasks);
           }
         }
 
@@ -2944,11 +2938,7 @@ int main(int argc, char **argv) {
                 steal_task(thread_id, num_threads, new_queues, tasks, gridvec);
             // still no task: take one from the general queue
             if (current_index == NO_TASK) {
-              current_index = general_queue[thread_id]->get_task(tasks);
-              if (current_index == NO_TASK) {
-                current_index = steal_task(thread_id, num_threads,
-                                           general_queue, tasks, gridvec);
-              }
+              current_index = general_queue.get_task(tasks);
             }
           }
         }
@@ -2962,20 +2952,20 @@ int main(int argc, char **argv) {
           unsigned int tasks_to_add[TRAVELDIRECTION_NUMBER];
           int queues_to_add[TRAVELDIRECTION_NUMBER];
 
-          execute_task(current_index, thread_id, num_photon_local, tasks,
-                       new_queues, new_buffers, random_generator[thread_id],
-                       central_index, gridvec, central_queue, local_buffers,
-                       local_buffer_flags, reemission_probability, costs,
-                       num_photon_done_since_last, MPI_lock, new_MPI_buffer,
-                       message_log, message_log_size, num_empty,
-                       num_active_buffers, num_tasks_to_add, tasks_to_add,
-                       queues_to_add);
+          execute_task(
+              current_index, thread_id, num_photon_local, tasks, new_queues,
+              general_queue, new_buffers, random_generator[thread_id],
+              central_index, gridvec, central_queue, local_buffers,
+              local_buffer_flags, reemission_probability, costs,
+              num_photon_done_since_last, MPI_lock, new_MPI_buffer, message_log,
+              message_log_size, num_empty, num_active_buffers, num_tasks_to_add,
+              tasks_to_add, queues_to_add);
 
           // add new tasks to their respective queues
           for (unsigned int itask = 0; itask < num_tasks_to_add; ++itask) {
             if (queues_to_add[itask] < 0) {
               // general queue
-              general_queue[thread_id]->add_task(tasks_to_add[itask]);
+              general_queue.add_task(tasks_to_add[itask]);
             } else {
               new_queues[queues_to_add[itask]]->add_task(tasks_to_add[itask]);
             }
@@ -3008,11 +2998,7 @@ int main(int argc, char **argv) {
                 steal_task(thread_id, num_threads, new_queues, tasks, gridvec);
             // still no task: take one from the general queue
             if (current_index == NO_TASK) {
-              current_index = general_queue[thread_id]->get_task(tasks);
-              if (current_index == NO_TASK) {
-                current_index = steal_task(thread_id, num_threads,
-                                           general_queue, tasks, gridvec);
-              }
+              current_index = general_queue.get_task(tasks);
             }
           }
 
@@ -3232,6 +3218,7 @@ int main(int argc, char **argv) {
     // make sure the timelines are synchronized
     MPI_Barrier(MPI_COMM_WORLD);
     cpucycle_tick(iteration_end);
+    MCtimer.stop();
 
     // output useful information about this iteration (if enabled)
     logmessage("Writing task and cost information", 0);
@@ -3317,10 +3304,9 @@ int main(int argc, char **argv) {
   output_memory_size("Task space size", tasks.get_memory_size());
   output_memory_size("Cost vector size", costs.get_memory_size());
 
-  size_t queue_memory_size = 0;
+  size_t queue_memory_size = general_queue.get_memory_size();
   for (int i = 0; i < num_threads; ++i) {
     queue_memory_size += new_queues[i]->get_memory_size();
-    queue_memory_size += general_queue[i]->get_memory_size();
   }
   output_memory_size("Queue size", queue_memory_size);
 
@@ -3385,8 +3371,10 @@ int main(int argc, char **argv) {
   ///////////////
 
   // output timing results
-  logmessage(
-      "Total Monte Carlo loop time: " << iteration_timer.value() << " s.", 0);
+  logmessage("Total Monte Carlo time: " << MCtimer.value() << " s.", 0);
+  logmessage("Total photoionization loop time: " << iteration_timer.value()
+                                                 << " s.",
+             0);
   logmessage("Total program time: " << program_timer.value() << " s.", 0);
 
   ////////////////
