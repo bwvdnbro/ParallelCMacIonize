@@ -62,7 +62,7 @@ public:
   inline size_t get_free_buffer() {
     const size_t index = _memory_space.get_free_element_safe();
     myassert(index < _memory_space.max_size(),
-             "No more free element in memory space!");
+             "No more free elements in memory space!");
     return index;
   }
 
