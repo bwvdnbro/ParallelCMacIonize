@@ -91,8 +91,10 @@ private:
   /*! @brief Indices of the active buffers. */
   unsigned int _active_buffers[TRAVELDIRECTION_NUMBER];
 
+#ifdef DENSITYGRID_EDGECOST
   /*! @brief Communication cost per edge. */
   unsigned int _communication_cost[TRAVELDIRECTION_NUMBER];
+#endif
 
   /*! @brief Computational cost of this subgrid. */
   unsigned long _computational_cost;
@@ -460,10 +462,12 @@ public:
         _owning_thread(0), _largest_buffer_index(TRAVELDIRECTION_NUMBER),
         _largest_buffer_size(0) {
 
+#ifdef DENSITYGRID_EDGECOST
     // initialize edge communication costs
     for (int i = 0; i < TRAVELDIRECTION_NUMBER; ++i) {
       _communication_cost[i] = 0;
     }
+#endif
 
     // allocate memory for data arrays
     const int tot_ncell = _number_of_cells[3] * ncell[0];
@@ -501,10 +505,12 @@ public:
         _owning_thread(original._owning_thread),
         _largest_buffer_index(TRAVELDIRECTION_NUMBER), _largest_buffer_size(0) {
 
+#ifdef DENSITYGRID_EDGECOST
     // initialize edge communication costs
     for (int i = 0; i < TRAVELDIRECTION_NUMBER; ++i) {
       _communication_cost[i] = 0;
     }
+#endif
 
     const int tot_ncell = _number_of_cells[3] * _number_of_cells[0];
     _number_density = new double[tot_ncell];
@@ -570,6 +576,7 @@ public:
     _ngbs[output_direction] = ngb;
   }
 
+#ifdef DENSITYGRID_EDGECOST
   /**
    * @brief Add the given communication cost to the given edge.
    *
@@ -599,6 +606,7 @@ public:
       _communication_cost[i] = 0;
     }
   }
+#endif
 
   /**
    * @brief Get the active buffer for the given direction.
@@ -776,9 +784,11 @@ public:
    */
   inline void update_intensities(const DensitySubGrid &copy) {
 
+#ifdef DENSITYGRID_EDGECOST
     for (int i = 0; i < TRAVELDIRECTION_NUMBER; ++i) {
       _communication_cost[i] += copy._communication_cost[i];
     }
+#endif
 
     const int tot_ncell = _number_of_cells[3] * _number_of_cells[0];
     for (int i = 0; i < tot_ncell; ++i) {

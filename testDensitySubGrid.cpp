@@ -51,6 +51,10 @@
  *  the stderr. Comment to disable logging altogether. */
 #define LOG_OUTPUT 1
 
+/*! @brief Enable this to disable all run time assertions and output that could
+ *  slow down the algorithm. */
+#define MEANING_OF_HASTE
+
 /*! @brief Uncomment this to enable run time assertions. */
 #define DO_ASSERTS
 
@@ -86,8 +90,31 @@
 /*! @brief Enable this to output MPI communication buffer statistics. */
 #define MPIBUFFER_STATS
 
+/*! @brief Enable this to output edge communication cost statistics. */
+//#define EDGECOST_STATS
+
 /*! @brief Enable this to track memory usage manually. */
 #define MEMORY_TRACKING
+
+////////////////////////////////////////////////////////////////////////////////
+
+#ifdef MEANING_OF_HASTE
+#undef DO_ASSERTS
+#undef TASK_OUTPUT
+#undef COST_OUTPUT
+#undef MESSAGE_OUTPUT
+#undef OUTPUT_ASCII_RESULT
+#undef TASK_STATS
+#undef QUEUE_STATS
+#undef MEMORYSPACE_STATS
+#undef MPIBUFFER_STATS
+#undef EDGECOST_STATS
+#undef MEMORY_TRACKING
+#endif
+
+////////////////////////////////////////////////////////////////////////////////
+
+// defines required by included files
 
 #ifdef TASK_OUTPUT
 // activate task output in Task.hpp
@@ -105,6 +132,10 @@
 
 #ifdef MPIBUFFER_STATS
 #define MPIBUFFER_STATS
+#endif
+
+#ifdef EDGECOST_STATS
+#define DENSITYGRID_EDGECOST
 #endif
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -500,6 +531,7 @@ output_communication_costs(const unsigned int iloop, const CostVector &costs,
                            const std::vector< DensitySubGrid * > &gridvec,
                            const unsigned int tot_num_subgrid) {
 
+#ifdef EDGECOST_STATS
   // first compose the file name
   std::stringstream filename;
   filename << "communication_costs_";
@@ -541,6 +573,7 @@ output_communication_costs(const unsigned int iloop, const CostVector &costs,
     }
     MPI_Barrier(MPI_COMM_WORLD);
   }
+#endif
 }
 
 /**
@@ -1425,11 +1458,13 @@ inline void execute_photon_traversal_task(
   myassert(costs.get_process(igrid) == MPI_rank,
            "This process should not be working on this subgrid!");
 
+#ifdef EDGECOST_STATS
   const int input_direction = buffer.get_direction();
   if (input_direction > 0) {
     // photons enter the subgrid through an edge: log the communication cost
     this_grid.add_communication_cost(input_direction, buffer.size());
   }
+#endif
 
   // prepare output buffers: make sure they are empty and that buffers
   // corresponding to directions outside the simulation box are
@@ -1467,10 +1502,12 @@ inline void execute_photon_traversal_task(
     // only process enabled, non-empty output buffers
     if (local_buffer_flags[i] && local_buffers[i].size() > 0) {
 
+#ifdef EDGECOST_STATS
       // photons leave the subgrid through an edge: log the communication cost
       if (i > 0) {
         this_grid.add_communication_cost(i, local_buffers[i].size());
       }
+#endif
 
       // photon packets that are still present in an output buffer
       // are not done yet
@@ -3243,11 +3280,13 @@ int main(int argc, char **argv) {
 
     costs.clear_costs();
 
+#ifdef EDGECOST_STATS
     for (unsigned int i = 0; i < gridvec.size(); ++i) {
       if (gridvec[i] != nullptr) {
         gridvec[i]->reset_communication_costs();
       }
     }
+#endif
 
 #ifdef SINGLE_ITERATION
     // stop here to see how we did for 1 iteration
