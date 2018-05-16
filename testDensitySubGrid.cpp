@@ -1038,6 +1038,86 @@ inline static void do_reemission(PhotonBuffer &buffer,
 }
 
 /**
+ * @brief Impose restrictions on the given copy levels.
+ *
+ * We want to make sure the level differences between neighbouring subgrids are
+ * small enough. We do this in multiple stages:
+ *  - we first loop over all levels and find the maximum level
+ *  - we then loop over all subgrids. For subgrids that have their level equal
+ *    to the maximum, we check the level difference between that subgrid and its
+ *    direct neighbours. If the level difference is larger than 1, we increase
+ *    the level for that neighbour.
+ *  - we then lower the maximum level and repeat the procedure until the maximum
+ *    level is 1
+ *
+ * @param levels Cost-based copy level of each subgrid.
+ * @param num_subgrid Number of subgrids in each dimension.
+ */
+inline void copy_restrictions(std::vector< unsigned char > &levels,
+                              int num_subgrid[3]) {
+  unsigned char max_level = 0;
+  const size_t levelsize = levels.size();
+  for (size_t i = 0; i < levelsize; ++i) {
+    max_level = std::max(max_level, levels[i]);
+  }
+
+  while (max_level > 0) {
+    for (size_t i = 0; i < levelsize; ++i) {
+      if (levels[i] == max_level) {
+        const int ix = i / (num_subgrid[1] * num_subgrid[2]);
+        const int iy =
+            (i - ix * num_subgrid[1] * num_subgrid[2]) / num_subgrid[2];
+        const int iz =
+            i - ix * num_subgrid[1] * num_subgrid[2] - iy * num_subgrid[2];
+        if (ix > 0) {
+          const size_t ngbi = (ix - 1) * num_subgrid[1] * num_subgrid[2] +
+                              iy * num_subgrid[2] + iz;
+          if (levels[ngbi] < levels[i] - 1) {
+            levels[ngbi] = levels[i] - 1;
+          }
+        }
+        if (ix < num_subgrid[0] - 1) {
+          const size_t ngbi = (ix + 1) * num_subgrid[1] * num_subgrid[2] +
+                              iy * num_subgrid[2] + iz;
+          if (levels[ngbi] < levels[i] - 1) {
+            levels[ngbi] = levels[i] - 1;
+          }
+        }
+        if (iy > 0) {
+          const size_t ngbi = ix * num_subgrid[1] * num_subgrid[2] +
+                              (iy - 1) * num_subgrid[2] + iz;
+          if (levels[ngbi] < levels[i] - 1) {
+            levels[ngbi] = levels[i] - 1;
+          }
+        }
+        if (iy < num_subgrid[1] - 1) {
+          const size_t ngbi = ix * num_subgrid[1] * num_subgrid[2] +
+                              (iy + 1) * num_subgrid[2] + iz;
+          if (levels[ngbi] < levels[i] - 1) {
+            levels[ngbi] = levels[i] - 1;
+          }
+        }
+        if (iz > 0) {
+          const size_t ngbi = ix * num_subgrid[1] * num_subgrid[2] +
+                              iy * num_subgrid[2] + iz - 1;
+          if (levels[ngbi] < levels[i] - 1) {
+            levels[ngbi] = levels[i] - 1;
+          }
+        }
+        if (iz < num_subgrid[2] - 1) {
+          const size_t ngbi = ix * num_subgrid[1] * num_subgrid[2] +
+                              iy * num_subgrid[2] + iz + 1;
+          if (levels[ngbi] < levels[i] - 1) {
+            levels[ngbi] = levels[i] - 1;
+          }
+        }
+      }
+    }
+    --max_level;
+  }
+}
+
+/**
  * @brief Make copies of the subgrids according to the given level matrix.
  *
  * The level matrix is per subgrid number that tells us how many copies we need
@@ -2573,6 +2653,19 @@ int main(int argc, char **argv) {
           ++level;
         }
         levels[i] = level;
+      }
+    }
+
+    // impose copy restrictions
+    copy_restrictions(levels, num_subgrid);
+
+    // output the copy levels
+    {
+      std::ofstream ofile("copy_levels.txt");
+      ofile << "# subgrid\tlevel\n";
+      for (size_t i = 0; i < levels.size(); ++i) {
+        unsigned int level = levels[i];
+        ofile << i << "\t" << level << "\n";
       }
     }
 
