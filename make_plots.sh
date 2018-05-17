@@ -30,6 +30,7 @@ then
   python scripts/plot_memoryspace.py
   python scripts/plot_queues.py
   python scripts/plot_task_stats.py
+  python scripts/plot_levels.py
   echo "Done."
 fi
 

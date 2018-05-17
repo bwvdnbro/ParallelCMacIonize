@@ -53,7 +53,7 @@
 
 /*! @brief Enable this to disable all run time assertions and output that could
  *  slow down the algorithm. */
-#define MEANING_OF_HASTE
+//#define MEANING_OF_HASTE
 
 /*! @brief Uncomment this to enable run time assertions. */
 #define DO_ASSERTS
@@ -1299,18 +1299,17 @@ inline void parse_command_line(int argc, char **argv, int &num_threads_request,
  * @param memoryspace_size Variable to store the size of the memory space in.
  * @param number_of_tasks Variable to store the size of the task space in.
  * @param MPI_buffer_size Variable to store the size of the MPI buffer in.
- * @param copy_factor Variable to store the copy factor in.
+ * @param cost_copy_factor Variable to store the cost copy factor in.
+ * @param edge_copy_factor Variable to store the edge copy factor in.
  * @param general_queue_size General queue size.
  */
-inline void read_parameters(std::string paramfile_name, double box[6],
-                            double &reemission_probability, int ncell[3],
-                            int num_subgrid[3], unsigned int &num_photon,
-                            unsigned int &number_of_iterations,
-                            unsigned int &queue_size_per_thread,
-                            unsigned int &memoryspace_size,
-                            unsigned int &number_of_tasks,
-                            unsigned int &MPI_buffer_size, double &copy_factor,
-                            unsigned int &general_queue_size) {
+inline void read_parameters(
+    std::string paramfile_name, double box[6], double &reemission_probability,
+    int ncell[3], int num_subgrid[3], unsigned int &num_photon,
+    unsigned int &number_of_iterations, unsigned int &queue_size_per_thread,
+    unsigned int &memoryspace_size, unsigned int &number_of_tasks,
+    unsigned int &MPI_buffer_size, double &cost_copy_factor,
+    double &edge_copy_factor, unsigned int &general_queue_size) {
 
   std::ifstream paramfile(paramfile_name);
   if (!paramfile) {
@@ -1357,7 +1356,8 @@ inline void read_parameters(std::string paramfile_name, double box[6],
   memoryspace_size = parameters.get_value< unsigned int >("memoryspace_size");
   number_of_tasks = parameters.get_value< unsigned int >("number_of_tasks");
   MPI_buffer_size = parameters.get_value< unsigned int >("MPI_buffer_size");
-  copy_factor = parameters.get_value< double >("copy_factor");
+  cost_copy_factor = parameters.get_value< double >("cost_copy_factor");
+  edge_copy_factor = parameters.get_value< double >("edge_copy_factor");
 
   general_queue_size =
       parameters.get_value< unsigned int >("general_queue_size");
@@ -2328,12 +2328,13 @@ int main(int argc, char **argv) {
 
   unsigned int queue_size_per_thread, memoryspace_size, number_of_tasks,
       MPI_buffer_size, general_queue_size;
-  double copy_factor;
+  double cost_copy_factor, edge_copy_factor;
 
   read_parameters(paramfile_name, box, reemission_probability, ncell,
                   num_subgrid, num_photon, number_of_iterations,
                   queue_size_per_thread, memoryspace_size, number_of_tasks,
-                  MPI_buffer_size, copy_factor, general_queue_size);
+                  MPI_buffer_size, cost_copy_factor, edge_copy_factor,
+                  general_queue_size);
 
   //////////////////////////
 
@@ -2536,54 +2537,59 @@ int main(int argc, char **argv) {
   CoarseDensityGrid coarse_grid(box, num_subgrid);
   // run 10 photon buffers
   RandomGenerator coarse_rg(42);
-  for (unsigned int i = 0; i < 10; ++i) {
-    PhotonBuffer buffer;
-    fill_buffer(buffer, PHOTONBUFFER_SIZE, coarse_rg, 0);
-    // now loop over the buffer photons and traverse them one by one
-    for (unsigned int j = 0; j < buffer.size(); ++j) {
+  for (unsigned int iloop = 0; iloop < number_of_iterations; ++iloop) {
+    for (unsigned int i = 0; i < 10; ++i) {
+      PhotonBuffer buffer;
+      fill_buffer(buffer, PHOTONBUFFER_SIZE, coarse_rg, 0);
+      // now loop over the buffer photons and traverse them one by one
+      for (unsigned int j = 0; j < buffer.size(); ++j) {
 
-      // active photon
-      Photon &photon = buffer[j];
+        // active photon
+        Photon &photon = buffer[j];
 
-      // traverse the photon through the active subgrid
-      coarse_grid.interact(photon);
-    }
-  }
-
-  // get the maximal intensity
-  double maxintensity = 0.;
-  for (int ix = 0; ix < num_subgrid[0]; ++ix) {
-    for (int iy = 0; iy < num_subgrid[1]; ++iy) {
-      for (int iz = 0; iz < num_subgrid[2]; ++iz) {
-        maxintensity = std::max(maxintensity,
-                                coarse_grid.get_intensity_integral(ix, iy, iz));
+        // traverse the photon through the active subgrid
+        coarse_grid.interact(photon);
       }
     }
-  }
 
-  // now set the subgrid cost based on the intensity counters
-  for (int ix = 0; ix < num_subgrid[0]; ++ix) {
-    for (int iy = 0; iy < num_subgrid[1]; ++iy) {
-      for (int iz = 0; iz < num_subgrid[2]; ++iz) {
-        const unsigned int igrid =
-            ix * num_subgrid[1] * num_subgrid[2] + iy * num_subgrid[2] + iz;
-        const double intensity = coarse_grid.get_intensity_integral(ix, iy, iz);
-        // pro tip: although it is nowhere explicitly stated, it turns out
-        // that metis vertex weight values are only enforced properly if they
-        // are small enough. I suspect that under the hood Metis sums the
-        // weights for each partition, and if these sums cause overflows,
-        // weird partitions are produced. A maximum weight value of 0xffff
-        // seems to produce nice result.
-        // Similar problems were observed when CPU cycles were used as weight,
-        // because again the weights are too large.
-        const unsigned long cost = 0xffff * (intensity / maxintensity);
-        initial_photon_cost[igrid] = cost;
-        for (int idir = 0; idir < TRAVELDIRECTION_NUMBER; ++idir) {
-          initial_edge_costs[igrid][idir] =
-              coarse_grid.get_edge_cost(igrid, idir);
+    // get the maximal intensity
+    double maxintensity = 0.;
+    for (int ix = 0; ix < num_subgrid[0]; ++ix) {
+      for (int iy = 0; iy < num_subgrid[1]; ++iy) {
+        for (int iz = 0; iz < num_subgrid[2]; ++iz) {
+          maxintensity = std::max(
+              maxintensity, coarse_grid.get_intensity_integral(ix, iy, iz));
         }
       }
     }
+
+    // now set the subgrid cost based on the intensity counters
+    for (int ix = 0; ix < num_subgrid[0]; ++ix) {
+      for (int iy = 0; iy < num_subgrid[1]; ++iy) {
+        for (int iz = 0; iz < num_subgrid[2]; ++iz) {
+          const unsigned int igrid =
+              ix * num_subgrid[1] * num_subgrid[2] + iy * num_subgrid[2] + iz;
+          const double intensity =
+              coarse_grid.get_intensity_integral(ix, iy, iz);
+          // pro tip: although it is nowhere explicitly stated, it turns out
+          // that metis vertex weight values are only enforced properly if they
+          // are small enough. I suspect that under the hood Metis sums the
+          // weights for each partition, and if these sums cause overflows,
+          // weird partitions are produced. A maximum weight value of 0xffff
+          // seems to produce nice result.
+          // Similar problems were observed when CPU cycles were used as weight,
+          // because again the weights are too large.
+          const unsigned long cost = 0xffff * (intensity / maxintensity);
+          initial_photon_cost[igrid] += cost;
+          for (int idir = 0; idir < TRAVELDIRECTION_NUMBER; ++idir) {
+            initial_edge_costs[igrid][idir] +=
+                coarse_grid.get_edge_cost(igrid, idir);
+          }
+        }
+      }
+    }
+
+    coarse_grid.compute_neutral_fraction(10 * PHOTONBUFFER_SIZE);
   }
 
   std::fill(initial_cost_vector.begin(), initial_cost_vector.end(), 1);
@@ -2625,20 +2631,33 @@ int main(int argc, char **argv) {
   std::vector< unsigned char > levels(tot_num_subgrid, 0);
   if (MPI_rank == 0) {
 
-    // get the average cost per thread
+    // get the average cost per thread and average edge cost
     unsigned long avg_cost_per_thread = 0;
+    unsigned long avg_edge_cost = 0;
+    unsigned int num_edges = 0;
+    std::vector< unsigned int > expensive_edges(tot_num_subgrid, 0);
     for (unsigned int i = 0; i < tot_num_subgrid; ++i) {
       avg_cost_per_thread += initial_photon_cost[i];
+      for (int j = 0; j < TRAVELDIRECTION_NUMBER; ++j) {
+        avg_edge_cost += initial_edge_costs[i][j];
+        num_edges += (initial_edge_costs[i][j] > 0);
+        expensive_edges[i] =
+            std::max(expensive_edges[i], initial_edge_costs[i][j]);
+      }
     }
     avg_cost_per_thread /= (num_threads * MPI_size);
+    avg_edge_cost /= num_edges;
     // now set the levels accordingly
     for (unsigned int i = 0; i < tot_num_subgrid; ++i) {
-      if (copy_factor * initial_photon_cost[i] > avg_cost_per_thread ||
+      if (cost_copy_factor * initial_photon_cost[i] > avg_cost_per_thread ||
+          edge_copy_factor * expensive_edges[i] > avg_edge_cost ||
           i == central_index) {
         // note that this in principle should be 1 higher. However, we do not
         // count the original.
-        unsigned int number_of_copies =
-            copy_factor * initial_photon_cost[i] / avg_cost_per_thread;
+        unsigned int number_of_copies = std::max(
+            std::ceil((cost_copy_factor * initial_photon_cost[i]) /
+                      avg_cost_per_thread),
+            std::ceil((edge_copy_factor * expensive_edges[i]) / avg_edge_cost));
         // make sure the number of copies of the source subgrid is at least
         // equal to the number of cores
         if (i == central_index &&
