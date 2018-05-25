@@ -11,7 +11,7 @@ do
 done
 
 # flags that need to be present
-cflags="-std=c++11 -fopenmp"
+cflags="-std=c++11 -fopenmp -march=native"
 
 # Extra flags: choose one of the two below
 flags="-Wall -Werror -Wignored-qualifiers"
