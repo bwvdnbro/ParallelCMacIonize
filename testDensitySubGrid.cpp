@@ -829,7 +829,7 @@ output_neutral_fractions(const CostVector &costs,
 
   // find the size (in bytes) of a single subgrid
   // we loop over the subgrids until we find one that is present on this process
-  size_t blocksize;
+  size_t blocksize = 0;
   for (unsigned int igrid = 0; igrid < tot_num_subgrid; ++igrid) {
     if (costs.get_process(igrid) == MPI_rank) {
       blocksize = gridvec[igrid]->get_output_size();
