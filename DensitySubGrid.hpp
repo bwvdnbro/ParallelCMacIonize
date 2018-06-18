@@ -68,7 +68,7 @@
 /*! @brief Size of the DensitySubGrid variables that need to be communicated
  *  over MPI, and whose size is known at compile time. */
 #define DENSITYSUBGRID_FIXED_MPI_SIZE                                          \
-  (sizeof(unsigned long) + 9 * sizeof(double) + 4 * sizeof(int) +              \
+  (sizeof(unsigned long) + (9 + 2) * sizeof(double) + 4 * sizeof(int) +        \
    TRAVELDIRECTION_NUMBER * sizeof(unsigned int))
 
 /*! @brief Size of all DensitySubGrid variables whose size is known at compile
@@ -77,7 +77,7 @@
 
 /*! @brief Number of variables stored in each cell of the DensitySubGrid
  *  (excluding potential lock variables). */
-#define DENSITYSUBGRID_ELEMENT_SIZE 3 * sizeof(double)
+#define DENSITYSUBGRID_ELEMENT_SIZE (3 + 25) * sizeof(double)
 
 /**
  * @brief Small fraction of a density grid that acts as an individual density
@@ -105,6 +105,7 @@ private:
 
   /*! @brief Dimensions of a single cell of the subgrid (in m). */
   double _cell_size[3];
+
   /**
    * @brief Inverse dimensions of a single cell of the subgrid (in m^-1).
    *
@@ -138,6 +139,8 @@ private:
   /*! @brief Size of the largest active buffer. */
   unsigned int _largest_buffer_size;
 
+  /// PHOTOIONIZATION VARIABLES
+
   /*! @brief Number density for each cell (in m^-3). */
   double *_number_density;
 
@@ -146,6 +149,26 @@ private:
 
   /*! @brief Ionizing intensity estimate for each cell (in m^3). */
   double *_intensity_integral;
+
+  /// HYDRO VARIABLES
+
+  /*! @brief Volume of a single cell (in m^3). */
+  double _cell_volume;
+
+  /*! @brief Inverse volume of a single cell (in m^-3). */
+  double _inverse_cell_volume;
+
+  /*! @brief Conserved variables (mass - kg, momentum - kg m s^-1, energy -
+   *  kg m^2 s^-2). */
+  double *_conserved_variables;
+
+  /*! @brief Primitive variables (density - kg m^-3, velocity - m s^-1,
+   *  pressure - kg m^-1 s^-2). */
+  double *_primitive_variables;
+
+  /*! @brief Primitive variable gradients (density - kg m^-4, velocity - s^-1,
+   *  pressure - kg m^-2 s^-2). */
+  double *_primitive_variable_gradients;
 
   /*! @brief Cell locks (if active). */
   subgrid_cell_lock_variables();
@@ -460,7 +483,9 @@ public:
         _inv_cell_size{ncell[0] / box[3], ncell[1] / box[4], ncell[2] / box[5]},
         _number_of_cells{ncell[0], ncell[1], ncell[2], ncell[1] * ncell[2]},
         _owning_thread(0), _largest_buffer_index(TRAVELDIRECTION_NUMBER),
-        _largest_buffer_size(0) {
+        _largest_buffer_size(0),
+        _cell_volume(_cell_size[0] * _cell_size[1] * _cell_size[2]),
+        _inverse_cell_volume(1. / _cell_volume) {
 
 #ifdef DENSITYGRID_EDGECOST
     // initialize edge communication costs
@@ -485,6 +510,40 @@ public:
       _neutral_fraction[i] = 1.e-6;
       _intensity_integral[i] = 0.;
     }
+
+    _conserved_variables = new double[tot_ncell * 5];
+    _primitive_variables = new double[tot_ncell * 5];
+    _primitive_variable_gradients = new double[tot_ncell * 15];
+
+    for (int i = 0; i < tot_ncell; ++i) {
+      _conserved_variables[5 * i] = _cell_volume;
+      _conserved_variables[5 * i + 1] = 0.;
+      _conserved_variables[5 * i + 2] = 0.;
+      _conserved_variables[5 * i + 3] = 0.;
+      _conserved_variables[5 * i + 4] = 1.5 * _cell_volume;
+
+      _primitive_variables[5 * i] = 1.;
+      _primitive_variables[5 * i + 1] = 0.;
+      _primitive_variables[5 * i + 2] = 0.;
+      _primitive_variables[5 * i + 3] = 0.;
+      _primitive_variables[5 * i + 1] = 1.;
+
+      _primitive_variable_gradients[15 * i] = 0.;
+      _primitive_variable_gradients[15 * i + 1] = 0.;
+      _primitive_variable_gradients[15 * i + 2] = 0.;
+      _primitive_variable_gradients[15 * i + 3] = 0.;
+      _primitive_variable_gradients[15 * i + 4] = 0.;
+      _primitive_variable_gradients[15 * i + 5] = 0.;
+      _primitive_variable_gradients[15 * i + 6] = 0.;
+      _primitive_variable_gradients[15 * i + 7] = 0.;
+      _primitive_variable_gradients[15 * i + 8] = 0.;
+      _primitive_variable_gradients[15 * i + 9] = 0.;
+      _primitive_variable_gradients[15 * i + 10] = 0.;
+      _primitive_variable_gradients[15 * i + 11] = 0.;
+      _primitive_variable_gradients[15 * i + 12] = 0.;
+      _primitive_variable_gradients[15 * i + 13] = 0.;
+      _primitive_variable_gradients[15 * i + 14] = 0.;
+    }
   }
 
   /**
@@ -503,7 +562,9 @@ public:
             original._number_of_cells[0], original._number_of_cells[1],
             original._number_of_cells[2], original._number_of_cells[3]},
         _owning_thread(original._owning_thread),
-        _largest_buffer_index(TRAVELDIRECTION_NUMBER), _largest_buffer_size(0) {
+        _largest_buffer_index(TRAVELDIRECTION_NUMBER), _largest_buffer_size(0),
+        _cell_volume(original._cell_volume),
+        _inverse_cell_volume(original._inverse_cell_volume) {
 
 #ifdef DENSITYGRID_EDGECOST
     // initialize edge communication costs
@@ -525,6 +586,63 @@ public:
       _neutral_fraction[i] = original._neutral_fraction[i];
       _intensity_integral[i] = 0.;
     }
+
+    _conserved_variables = new double[tot_ncell * 5];
+    _primitive_variables = new double[tot_ncell * 5];
+    _primitive_variable_gradients = new double[tot_ncell * 15];
+
+    for (int i = 0; i < tot_ncell; ++i) {
+      _conserved_variables[5 * i] = original._conserved_variables[5 * i];
+      _conserved_variables[5 * i + 1] =
+          original._conserved_variables[5 * i + 1];
+      _conserved_variables[5 * i + 2] =
+          original._conserved_variables[5 * i + 2];
+      _conserved_variables[5 * i + 3] =
+          original._conserved_variables[5 * i + 3];
+      _conserved_variables[5 * i + 4] =
+          original._conserved_variables[5 * i + 4];
+
+      _primitive_variables[5 * i] = original._primitive_variables[5 * i];
+      _primitive_variables[5 * i + 1] =
+          original._primitive_variables[5 * i + 1];
+      _primitive_variables[5 * i + 2] =
+          original._primitive_variables[5 * i + 2];
+      _primitive_variables[5 * i + 3] =
+          original._primitive_variables[5 * i + 3];
+      _primitive_variables[5 * i + 1] =
+          original._primitive_variables[5 * i + 4];
+
+      _primitive_variable_gradients[15 * i] =
+          original._primitive_variable_gradients[15 * i];
+      _primitive_variable_gradients[15 * i + 1] =
+          original._primitive_variable_gradients[15 * i + 1];
+      _primitive_variable_gradients[15 * i + 2] =
+          original._primitive_variable_gradients[15 * i + 2];
+      _primitive_variable_gradients[15 * i + 3] =
+          original._primitive_variable_gradients[15 * i + 3];
+      _primitive_variable_gradients[15 * i + 4] =
+          original._primitive_variable_gradients[15 * i + 4];
+      _primitive_variable_gradients[15 * i + 5] =
+          original._primitive_variable_gradients[15 * i + 5];
+      _primitive_variable_gradients[15 * i + 6] =
+          original._primitive_variable_gradients[15 * i + 6];
+      _primitive_variable_gradients[15 * i + 7] =
+          original._primitive_variable_gradients[15 * i + 7];
+      _primitive_variable_gradients[15 * i + 8] =
+          original._primitive_variable_gradients[15 * i + 8];
+      _primitive_variable_gradients[15 * i + 9] =
+          original._primitive_variable_gradients[15 * i + 9];
+      _primitive_variable_gradients[15 * i + 10] =
+          original._primitive_variable_gradients[15 * i + 10];
+      _primitive_variable_gradients[15 * i + 11] =
+          original._primitive_variable_gradients[15 * i + 12];
+      _primitive_variable_gradients[15 * i + 12] =
+          original._primitive_variable_gradients[15 * i + 13];
+      _primitive_variable_gradients[15 * i + 13] =
+          original._primitive_variable_gradients[15 * i + 14];
+      _primitive_variable_gradients[15 * i + 14] =
+          original._primitive_variable_gradients[15 * i + 14];
+    }
   }
 
   /**
@@ -536,6 +654,9 @@ public:
     delete[] _neutral_fraction;
     delete[] _intensity_integral;
     subgrid_cell_lock_destroy();
+    delete[] _conserved_variables;
+    delete[] _primitive_variables;
+    delete[] _primitive_variable_gradients;
   }
 
   /**
@@ -713,6 +834,17 @@ public:
              &buffer_position, MPI_COMM_WORLD);
     MPI_Pack(_intensity_integral, tot_num_cells, MPI_DOUBLE, buffer,
              buffer_size, &buffer_position, MPI_COMM_WORLD);
+
+    MPI_Pack(&_cell_volume, 1, MPI_DOUBLE, buffer, buffer_size,
+             &buffer_position, MPI_COMM_WORLD);
+    MPI_Pack(&_inverse_cell_volume, 1, MPI_DOUBLE, buffer, buffer_size,
+             &buffer_position, MPI_COMM_WORLD);
+    MPI_Pack(_conserved_variables, 5 * tot_num_cells, MPI_DOUBLE, buffer,
+             buffer_size, &buffer_position, MPI_COMM_WORLD);
+    MPI_Pack(_primitive_variables, 5 * tot_num_cells, MPI_DOUBLE, buffer,
+             buffer_size, &buffer_position, MPI_COMM_WORLD);
+    MPI_Pack(_primitive_variable_gradients, 15 * tot_num_cells, MPI_DOUBLE,
+             buffer, buffer_size, &buffer_position, MPI_COMM_WORLD);
   }
 
   /**
@@ -755,6 +887,13 @@ public:
       _number_density = new double[tot_num_cells];
       _neutral_fraction = new double[tot_num_cells];
       _intensity_integral = new double[tot_num_cells];
+
+      delete[] _conserved_variables;
+      delete[] _primitive_variables;
+      delete[] _primitive_variable_gradients;
+      _conserved_variables = new double[5 * tot_num_cells];
+      _primitive_variables = new double[5 * tot_num_cells];
+      _primitive_variable_gradients = new double[15 * tot_num_cells];
     }
     MPI_Unpack(buffer, buffer_size, &buffer_position, _number_density,
                tot_num_cells, MPI_DOUBLE, MPI_COMM_WORLD);
@@ -762,6 +901,18 @@ public:
                tot_num_cells, MPI_DOUBLE, MPI_COMM_WORLD);
     MPI_Unpack(buffer, buffer_size, &buffer_position, _intensity_integral,
                tot_num_cells, MPI_DOUBLE, MPI_COMM_WORLD);
+
+    MPI_Unpack(buffer, buffer_size, &buffer_position, &_cell_volume, 1,
+               MPI_DOUBLE, MPI_COMM_WORLD);
+    MPI_Unpack(buffer, buffer_size, &buffer_position, &_inverse_cell_volume, 1,
+               MPI_DOUBLE, MPI_COMM_WORLD);
+    MPI_Unpack(buffer, buffer_size, &buffer_position, _conserved_variables,
+               5 * tot_num_cells, MPI_DOUBLE, MPI_COMM_WORLD);
+    MPI_Unpack(buffer, buffer_size, &buffer_position, _primitive_variables,
+               5 * tot_num_cells, MPI_DOUBLE, MPI_COMM_WORLD);
+    MPI_Unpack(buffer, buffer_size, &buffer_position,
+               _primitive_variable_gradients, 15 * tot_num_cells, MPI_DOUBLE,
+               MPI_COMM_WORLD);
   }
 
   /**
@@ -1243,6 +1394,20 @@ public:
                "Neutral fraction not the same!");
       myassert(_intensity_integral[i] == other._intensity_integral[i],
                "Intensity integral not the same!");
+
+      for (int j = 0; j < 5; ++j) {
+        myassert(_conserved_variables[5 * i + j] ==
+                     other._conserved_variables[5 * i + j],
+                 "Conserved variable not the same!");
+        myassert(_primitive_variables[5 * i + j] ==
+                     other._primitive_variables[5 * i + j],
+                 "Primitive variable not the same!");
+        for (int k = 0; k < 3; ++k) {
+          myassert(_primitive_variable_gradients[15 * i + 3 * j + k] ==
+                       other._primitive_variable_gradients[15 * i + 3 * j + k],
+                   "Primitive variable gradient not the same!");
+        }
+      }
     }
   }
 };

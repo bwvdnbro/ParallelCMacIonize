@@ -88,8 +88,8 @@ int main(int argc, char **argv) {
   // now communicate:
   //  - rank 0 sends the subgrid
   //  - rank 1 receives and checks if the subgrid is what it should be
-  char MPI_buffer[DENSITYSUBGRID_FIXED_MPI_SIZE + 180 * sizeof(double)];
-  const int buffer_size = DENSITYSUBGRID_FIXED_MPI_SIZE + 180 * sizeof(double);
+  const int buffer_size = test_grid.get_MPI_size();
+  char *MPI_buffer = new char[buffer_size];
   if (MPI_rank == 0) {
     // pack...
     test_grid.pack(MPI_buffer, buffer_size);
@@ -111,6 +111,8 @@ int main(int argc, char **argv) {
   } // other ranks do nothing
 
   MPI_Barrier(MPI_COMM_WORLD);
+
+  delete[] MPI_buffer;
 
   if (MPI_rank == 0) {
     logmessage("Test successful.", 0);
