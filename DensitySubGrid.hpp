@@ -31,6 +31,7 @@
 #include "Assert.hpp"
 #include "Atomic.hpp"
 #include "Error.hpp"
+#include "Hydro.hpp"
 #include "Lock.hpp"
 #include "MemoryMap.hpp"
 #include "Photon.hpp"
@@ -189,6 +190,20 @@ private:
   inline int get_one_index(const int *three_index) const {
     return three_index[0] * _number_of_cells[3] +
            three_index[1] * _number_of_cells[2] + three_index[2];
+  }
+
+  /**
+   * @brief Convert the given single index into 3 indices.
+   *
+   * @param one_index Single index of the cell.
+   * @param three_index 3 indices of that same cell.
+   */
+  inline void get_three_index(const int one_index, int *three_index) const {
+    three_index[0] = one_index / _number_of_cells[3];
+    three_index[1] = (one_index - three_index[0] * _number_of_cells[3]) /
+                     _number_of_cells[2];
+    three_index[2] = one_index - three_index[0] * _number_of_cells[3] -
+                     three_index[1] * _number_of_cells[2];
   }
 
   /**
@@ -1453,6 +1468,58 @@ public:
         }
       }
     }
+  }
+
+  /**
+   * @brief Initialize the conserved variables for the grid.
+   *
+   * @param hydro Hydro instance to use.
+   */
+  inline void initialize_conserved_variables(const Hydro &hydro) {
+
+    const int tot_num_cells = _number_of_cells[0] * _number_of_cells[3];
+    for (int i = 0; i < tot_num_cells; ++i) {
+      hydro.get_conserved_variables(
+          _primitive_variables[5 * i], &_primitive_variables[5 * i + 1],
+          _primitive_variables[5 * i + 4], _cell_volume,
+          _conserved_variables[5 * i], &_conserved_variables[5 * i + 1],
+          _conserved_variables[5 * i + 4]);
+    }
+  }
+
+  /**
+   * @brief Get the midpoint of the cell with the given index.
+   *
+   * @param index Index of a cell.
+   * @param midpoint Coordinates of the midpoint of that cell (in m).
+   */
+  inline void get_cell_midpoint(const unsigned int index, double midpoint[3]) {
+
+    int three_index[3];
+    get_three_index(index, three_index);
+    midpoint[0] = _anchor[0] + three_index[0] * _cell_size[0];
+    midpoint[1] = _anchor[1] + three_index[1] * _cell_size[1];
+    midpoint[2] = _anchor[2] + three_index[2] * _cell_size[2];
+  }
+
+  /**
+   * @brief Set the primitive variables for the cell with the given index.
+   *
+   * @param index Index of a cell.
+   * @param density Density (in kg m^-3).
+   * @param velocity Velocity (in m s^-1).
+   * @param pressure Pressure (in kg m^-1 s^-2).
+   */
+  inline void set_primitive_variables(const unsigned int index,
+                                      const double density,
+                                      const double velocity[3],
+                                      const double pressure) {
+
+    _primitive_variables[5 * index] = density;
+    _primitive_variables[5 * index + 1] = velocity[0];
+    _primitive_variables[5 * index + 2] = velocity[1];
+    _primitive_variables[5 * index + 3] = velocity[2];
+    _primitive_variables[5 * index + 4] = pressure;
   }
 };
 
