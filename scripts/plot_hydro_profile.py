@@ -1,0 +1,53 @@
+################################################################################
+# This file is part of CMacIonize
+# Copyright (C) 2017 Bert Vandenbroucke (bert.vandenbroucke@gmail.com)
+#
+# CMacIonize is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Affero General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# CMacIonize is distributed in the hope that it will be useful,
+# but WITOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+# GNU Affero General Public License for more details.
+#
+# You should have received a copy of the GNU Affero General Public License
+# along with CMacIonize. If not, see <http://www.gnu.org/licenses/>.
+################################################################################
+
+##
+# @file plot_neutral_fraction_profile.py
+#
+# @brief Script to plot the neutral fraction profile of the Stromgren test.
+#
+# @author Bert Vandenbroucke (bv7@st-andrews.ac.uk)
+##
+
+# import modules
+import numpy as np
+import matplotlib
+matplotlib.use("Agg")
+import pylab as pl
+import scipy.stats as stats
+
+## run parameters
+# number of cells in one coordinate dimension
+# should be synced with the values used in the unit test
+# we guess based on the file size
+ncell = 100
+
+# memory-map the binary output file to a numpy array
+data = np.memmap("hydro.dat", dtype = np.float64,
+                 shape = (ncell, 10), mode = 'r')
+pos = data[:, 0:3]
+rho = data[:, 5]
+
+# plot the means and scatter regions
+pl.plot(pos, rho, "k.")
+# set axis labels
+pl.xlabel("position (m))")
+pl.ylabel("density (kg m^-3)")
+# clean up margins and show the plot
+pl.tight_layout()
+pl.savefig("hydro.png")
