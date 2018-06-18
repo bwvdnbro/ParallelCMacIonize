@@ -77,7 +77,7 @@
 
 /*! @brief Number of variables stored in each cell of the DensitySubGrid
  *  (excluding potential lock variables). */
-#define DENSITYSUBGRID_ELEMENT_SIZE (3 + 25) * sizeof(double)
+#define DENSITYSUBGRID_ELEMENT_SIZE (3 + 30) * sizeof(double)
 
 /**
  * @brief Small fraction of a density grid that acts as an individual density
@@ -161,6 +161,10 @@ private:
   /*! @brief Conserved variables (mass - kg, momentum - kg m s^-1, energy -
    *  kg m^2 s^-2). */
   double *_conserved_variables;
+
+  /*! @brief Change in conserved variables (mass - kg s^-1, momentum - kg m
+   *  s^-2, energy - kg m^2 s^-3). */
+  double *_delta_conserved_variables;
 
   /*! @brief Primitive variables (density - kg m^-3, velocity - m s^-1,
    *  pressure - kg m^-1 s^-2). */
@@ -512,6 +516,7 @@ public:
     }
 
     _conserved_variables = new double[tot_ncell * 5];
+    _delta_conserved_variables = new double[tot_ncell * 5];
     _primitive_variables = new double[tot_ncell * 5];
     _primitive_variable_gradients = new double[tot_ncell * 15];
 
@@ -521,6 +526,12 @@ public:
       _conserved_variables[5 * i + 2] = 0.;
       _conserved_variables[5 * i + 3] = 0.;
       _conserved_variables[5 * i + 4] = 1.5 * _cell_volume;
+
+      _delta_conserved_variables[5 * i] = 0.;
+      _delta_conserved_variables[5 * i + 1] = 0.;
+      _delta_conserved_variables[5 * i + 2] = 0.;
+      _delta_conserved_variables[5 * i + 3] = 0.;
+      _delta_conserved_variables[5 * i + 4] = 0.;
 
       _primitive_variables[5 * i] = 1.;
       _primitive_variables[5 * i + 1] = 0.;
@@ -588,6 +599,7 @@ public:
     }
 
     _conserved_variables = new double[tot_ncell * 5];
+    _delta_conserved_variables = new double[tot_ncell * 5];
     _primitive_variables = new double[tot_ncell * 5];
     _primitive_variable_gradients = new double[tot_ncell * 15];
 
@@ -601,6 +613,17 @@ public:
           original._conserved_variables[5 * i + 3];
       _conserved_variables[5 * i + 4] =
           original._conserved_variables[5 * i + 4];
+
+      _delta_conserved_variables[5 * i] =
+          original._delta_conserved_variables[5 * i];
+      _delta_conserved_variables[5 * i + 1] =
+          original._delta_conserved_variables[5 * i + 1];
+      _delta_conserved_variables[5 * i + 2] =
+          original._delta_conserved_variables[5 * i + 2];
+      _delta_conserved_variables[5 * i + 3] =
+          original._delta_conserved_variables[5 * i + 3];
+      _delta_conserved_variables[5 * i + 4] =
+          original._delta_conserved_variables[5 * i + 4];
 
       _primitive_variables[5 * i] = original._primitive_variables[5 * i];
       _primitive_variables[5 * i + 1] =
@@ -655,6 +678,7 @@ public:
     delete[] _intensity_integral;
     subgrid_cell_lock_destroy();
     delete[] _conserved_variables;
+    delete[] _delta_conserved_variables;
     delete[] _primitive_variables;
     delete[] _primitive_variable_gradients;
   }
@@ -841,6 +865,8 @@ public:
              &buffer_position, MPI_COMM_WORLD);
     MPI_Pack(_conserved_variables, 5 * tot_num_cells, MPI_DOUBLE, buffer,
              buffer_size, &buffer_position, MPI_COMM_WORLD);
+    MPI_Pack(_delta_conserved_variables, 5 * tot_num_cells, MPI_DOUBLE, buffer,
+             buffer_size, &buffer_position, MPI_COMM_WORLD);
     MPI_Pack(_primitive_variables, 5 * tot_num_cells, MPI_DOUBLE, buffer,
              buffer_size, &buffer_position, MPI_COMM_WORLD);
     MPI_Pack(_primitive_variable_gradients, 15 * tot_num_cells, MPI_DOUBLE,
@@ -889,9 +915,11 @@ public:
       _intensity_integral = new double[tot_num_cells];
 
       delete[] _conserved_variables;
+      delete[] _delta_conserved_variables;
       delete[] _primitive_variables;
       delete[] _primitive_variable_gradients;
       _conserved_variables = new double[5 * tot_num_cells];
+      _delta_conserved_variables = new double[5 * tot_num_cells];
       _primitive_variables = new double[5 * tot_num_cells];
       _primitive_variable_gradients = new double[15 * tot_num_cells];
     }
@@ -908,6 +936,9 @@ public:
                MPI_DOUBLE, MPI_COMM_WORLD);
     MPI_Unpack(buffer, buffer_size, &buffer_position, _conserved_variables,
                5 * tot_num_cells, MPI_DOUBLE, MPI_COMM_WORLD);
+    MPI_Unpack(buffer, buffer_size, &buffer_position,
+               _delta_conserved_variables, 5 * tot_num_cells, MPI_DOUBLE,
+               MPI_COMM_WORLD);
     MPI_Unpack(buffer, buffer_size, &buffer_position, _primitive_variables,
                5 * tot_num_cells, MPI_DOUBLE, MPI_COMM_WORLD);
     MPI_Unpack(buffer, buffer_size, &buffer_position,
@@ -1291,6 +1322,16 @@ public:
           cell_offset += sizeof(double);
           file.write(offset + cell_offset, _number_density[index]);
           cell_offset += sizeof(double);
+          file.write(offset + cell_offset, _primitive_variables[5 * index]);
+          cell_offset += sizeof(double);
+          file.write(offset + cell_offset, _primitive_variables[5 * index + 1]);
+          cell_offset += sizeof(double);
+          file.write(offset + cell_offset, _primitive_variables[5 * index + 2]);
+          cell_offset += sizeof(double);
+          file.write(offset + cell_offset, _primitive_variables[5 * index + 3]);
+          cell_offset += sizeof(double);
+          file.write(offset + cell_offset, _primitive_variables[5 * index + 4]);
+          cell_offset += sizeof(double);
         }
       }
     }
@@ -1302,8 +1343,8 @@ public:
    * @return Size (in bytes) that will be output by output_intensities().
    */
   inline size_t get_output_size() const {
-    return _number_of_cells[0] * _number_of_cells[1] * _number_of_cells[2] * 5 *
-           sizeof(double);
+    return _number_of_cells[0] * _number_of_cells[1] * _number_of_cells[2] *
+           10 * sizeof(double);
   }
 
   /**
@@ -1399,6 +1440,9 @@ public:
         myassert(_conserved_variables[5 * i + j] ==
                      other._conserved_variables[5 * i + j],
                  "Conserved variable not the same!");
+        myassert(_delta_conserved_variables[5 * i + j] ==
+                     other._delta_conserved_variables[5 * i + j],
+                 "Conserved variable change not the same!");
         myassert(_primitive_variables[5 * i + j] ==
                      other._primitive_variables[5 * i + j],
                  "Primitive variable not the same!");

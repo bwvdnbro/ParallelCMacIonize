@@ -47,7 +47,7 @@ args = argparser.parse_args()
 # should be synced with the values used in the unit test
 # we guess based on the file size
 ncell = int(np.round((
-              os.path.getsize("neutral_fractions.dat") / (5 * 8))**(1./3.)))
+              os.path.getsize("neutral_fractions.dat") / (10 * 8))**(1./3.)))
 # number of bins to use to bin the results
 nbin = 100
 
@@ -66,7 +66,7 @@ Rs /= pc
 
 # memory-map the binary output file to a numpy array
 data = np.memmap("neutral_fractions.dat", dtype = np.float64,
-                 shape = (ncell**3, 5), mode = 'r')
+                 shape = (ncell**3, 10), mode = 'r')
 # compute the radii
 pos = data[:, 0:3]
 r = np.sqrt(pos[:, 0]**2 + pos[:, 1]**2 + pos[:, 2]**2)
