@@ -216,9 +216,9 @@ public:
                                       double dWR[15], double WRlim[10]) const {
 
     for (int j = 0; j < 5; ++j) {
-      const double dwdx = 0.5 * (WL[j] - WR[j]) * dxinv;
-      dWL[3 * j + i] -= dwdx;
-      dWR[3 * j + i] += dwdx;
+      const double dwdx = 0.5 * (WL[j] + WR[j]) * dxinv;
+      dWL[3 * j + i] += dwdx;
+      dWR[3 * j + i] -= dwdx;
       WLlim[2 * j] = std::min(WLlim[2 * j], WR[j]);
       WLlim[2 * j + 1] = std::max(WLlim[2 * j + 1], WR[j]);
       WRlim[2 * j] = std::min(WRlim[2 * j], WL[j]);

@@ -53,7 +53,7 @@ pos = data[:, 0:3]
 rho = data[:, 5]
 
 # plot the means and scatter regions
-pl.plot(pos[:,0], rho)
+pl.plot(pos[:,0], rho, ".")
 # set axis labels
 pl.xlabel("position (m))")
 pl.ylabel("density (kg m^-3)")
