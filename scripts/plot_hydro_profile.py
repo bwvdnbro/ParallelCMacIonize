@@ -30,12 +30,21 @@ import matplotlib
 matplotlib.use("Agg")
 import pylab as pl
 import scipy.stats as stats
+import argparse
+
+argparser = argparse.ArgumentParser("Plot a hydro snapshot.")
+
+argparser.add_argument("-x", "--ncell_x", action = "store", type = int)
+argparser.add_argument("-y", "--ncell_y", action = "store", type = int)
+argparser.add_argument("-z", "--ncell_z", action = "store", type = int)
+
+args = argparser.parse_args()
 
 ## run parameters
 # number of cells in one coordinate dimension
 # should be synced with the values used in the unit test
 # we guess based on the file size
-ncell = 1000
+ncell = args.ncell_x * args.ncell_y * args.ncell_z
 
 # memory-map the binary output file to a numpy array
 data = np.memmap("hydro.dat", dtype = np.float64,
@@ -44,7 +53,7 @@ pos = data[:, 0:3]
 rho = data[:, 5]
 
 # plot the means and scatter regions
-pl.plot(pos[:,0], rho, "k.")
+pl.plot(pos[:,0], rho)
 # set axis labels
 pl.xlabel("position (m))")
 pl.ylabel("density (kg m^-3)")

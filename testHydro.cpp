@@ -24,10 +24,16 @@
  * @author Bert Vandenbroucke (bv7@st-andrews.ac.uk)
  */
 
+/*! @brief Ascii output of the result. */
+//#define ASCII_OUTPUT
+
 #include "DensitySubGrid.hpp"
 #include "Hydro.hpp"
+#include "Timer.hpp"
 
+#ifdef ASCII_OUTPUT
 #include <fstream>
+#endif
 
 // global variables, as we need them in the log macro
 int MPI_rank, MPI_size;
@@ -42,7 +48,7 @@ int MPI_rank, MPI_size;
 int main(int argc, char **argv) {
 
   const double box[6] = {-0.5, -0.5, -0.5, 1., 1., 1.};
-  const int ncell[3] = {1000, 1, 1};
+  const int ncell[3] = {100, 1, 1};
   const unsigned int tot_ncell = ncell[0] * ncell[1] * ncell[2];
   DensitySubGrid test_grid(box, ncell);
 
@@ -66,11 +72,22 @@ int main(int argc, char **argv) {
     test_grid.set_primitive_variables(i, density, velocity, pressure);
   }
 
-  const double dt = 0.0001;
+  const double dt = 0.001;
   Hydro hydro;
 
   test_grid.initialize_conserved_variables(hydro);
-  for (unsigned int istep = 0; istep < 1000; ++istep) {
+  Timer hydro_timer;
+  hydro_timer.start();
+  for (unsigned int istep = 0; istep < 100; ++istep) {
+    // gradient calculations
+    test_grid.inner_gradient_sweep(hydro);
+    test_grid.outer_gradient_sweep(TRAVELDIRECTION_FACE_X_P, hydro, test_grid);
+    test_grid.outer_gradient_sweep(TRAVELDIRECTION_FACE_Y_P, hydro, test_grid);
+    test_grid.outer_gradient_sweep(TRAVELDIRECTION_FACE_Z_P, hydro, test_grid);
+
+    // slope limiting
+    test_grid.apply_slope_limiter(hydro);
+
     // flux exchanges
     test_grid.inner_flux_sweep(hydro);
     test_grid.outer_flux_sweep(TRAVELDIRECTION_FACE_X_P, hydro, test_grid);
@@ -83,9 +100,14 @@ int main(int argc, char **argv) {
     // primitive variable update
     test_grid.update_primitive_variables(hydro);
   }
+  hydro_timer.stop();
 
+  cmac_status("Total time: %g s", hydro_timer.value());
+
+#ifdef ASCII_OUTPUT
   std::ofstream ofile("hydro.txt");
   test_grid.print_intensities(ofile);
+#endif
   MemoryMap file("hydro.dat", test_grid.get_output_size());
   test_grid.output_intensities(0, file);
 

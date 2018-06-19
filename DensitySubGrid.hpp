@@ -78,7 +78,7 @@
 
 /*! @brief Number of variables stored in each cell of the DensitySubGrid
  *  (excluding potential lock variables). */
-#define DENSITYSUBGRID_ELEMENT_SIZE (3 + 30) * sizeof(double)
+#define DENSITYSUBGRID_ELEMENT_SIZE (3 + 40) * sizeof(double)
 
 /**
  * @brief Small fraction of a density grid that acts as an individual density
@@ -177,6 +177,10 @@ private:
   /*! @brief Primitive variable gradients (density - kg m^-4, velocity - s^-1,
    *  pressure - kg m^-2 s^-2). */
   double *_primitive_variable_gradients;
+
+  /*! @brief Minimum and maximum neighbouring values used by the slope limiter
+   *  (density - kg m^-3, velocity - m s^-1, pressure - kg m^-1 s^-2). */
+  double *_primitive_variable_limiters;
 
   /*! @brief Cell locks (if active). */
   subgrid_cell_lock_variables();
@@ -540,6 +544,7 @@ public:
     _delta_conserved_variables = new double[tot_ncell * 5];
     _primitive_variables = new double[tot_ncell * 5];
     _primitive_variable_gradients = new double[tot_ncell * 15];
+    _primitive_variable_limiters = new double[tot_ncell * 10];
 
     for (int i = 0; i < tot_ncell; ++i) {
       _conserved_variables[5 * i] = _cell_volume;
@@ -575,6 +580,17 @@ public:
       _primitive_variable_gradients[15 * i + 12] = 0.;
       _primitive_variable_gradients[15 * i + 13] = 0.;
       _primitive_variable_gradients[15 * i + 14] = 0.;
+
+      _primitive_variable_limiters[10 * i] = DBL_MAX;
+      _primitive_variable_limiters[10 * i + 1] = -DBL_MAX;
+      _primitive_variable_limiters[10 * i + 2] = DBL_MAX;
+      _primitive_variable_limiters[10 * i + 3] = -DBL_MAX;
+      _primitive_variable_limiters[10 * i + 4] = DBL_MAX;
+      _primitive_variable_limiters[10 * i + 5] = -DBL_MAX;
+      _primitive_variable_limiters[10 * i + 6] = DBL_MAX;
+      _primitive_variable_limiters[10 * i + 7] = -DBL_MAX;
+      _primitive_variable_limiters[10 * i + 8] = DBL_MAX;
+      _primitive_variable_limiters[10 * i + 9] = -DBL_MAX;
     }
   }
 
@@ -625,6 +641,7 @@ public:
     _delta_conserved_variables = new double[tot_ncell * 5];
     _primitive_variables = new double[tot_ncell * 5];
     _primitive_variable_gradients = new double[tot_ncell * 15];
+    _primitive_variable_limiters = new double[10 * tot_ncell];
 
     for (int i = 0; i < tot_ncell; ++i) {
       _conserved_variables[5 * i] = original._conserved_variables[5 * i];
@@ -688,6 +705,27 @@ public:
           original._primitive_variable_gradients[15 * i + 14];
       _primitive_variable_gradients[15 * i + 14] =
           original._primitive_variable_gradients[15 * i + 14];
+
+      _primitive_variable_limiters[10 * i] =
+          original._primitive_variable_limiters[10 * i];
+      _primitive_variable_limiters[10 * i + 1] =
+          original._primitive_variable_limiters[10 * i + 1];
+      _primitive_variable_limiters[10 * i + 2] =
+          original._primitive_variable_limiters[10 * i + 2];
+      _primitive_variable_limiters[10 * i + 3] =
+          original._primitive_variable_limiters[10 * i + 3];
+      _primitive_variable_limiters[10 * i + 4] =
+          original._primitive_variable_limiters[10 * i + 4];
+      _primitive_variable_limiters[10 * i + 5] =
+          original._primitive_variable_limiters[10 * i + 5];
+      _primitive_variable_limiters[10 * i + 6] =
+          original._primitive_variable_limiters[10 * i + 6];
+      _primitive_variable_limiters[10 * i + 7] =
+          original._primitive_variable_limiters[10 * i + 7];
+      _primitive_variable_limiters[10 * i + 8] =
+          original._primitive_variable_limiters[10 * i + 8];
+      _primitive_variable_limiters[10 * i + 9] =
+          original._primitive_variable_limiters[10 * i + 9];
     }
   }
 
@@ -704,6 +742,7 @@ public:
     delete[] _delta_conserved_variables;
     delete[] _primitive_variables;
     delete[] _primitive_variable_gradients;
+    delete[] _primitive_variable_limiters;
   }
 
   /**
@@ -896,6 +935,8 @@ public:
              buffer_size, &buffer_position, MPI_COMM_WORLD);
     MPI_Pack(_primitive_variable_gradients, 15 * tot_num_cells, MPI_DOUBLE,
              buffer, buffer_size, &buffer_position, MPI_COMM_WORLD);
+    MPI_Pack(_primitive_variable_limiters, 10 * tot_num_cells, MPI_DOUBLE,
+             buffer, buffer_size, &buffer_position, MPI_COMM_WORLD);
   }
 
   /**
@@ -943,10 +984,12 @@ public:
       delete[] _delta_conserved_variables;
       delete[] _primitive_variables;
       delete[] _primitive_variable_gradients;
+      delete[] _primitive_variable_limiters;
       _conserved_variables = new double[5 * tot_num_cells];
       _delta_conserved_variables = new double[5 * tot_num_cells];
       _primitive_variables = new double[5 * tot_num_cells];
       _primitive_variable_gradients = new double[15 * tot_num_cells];
+      _primitive_variable_limiters = new double[10 * tot_num_cells];
     }
     MPI_Unpack(buffer, buffer_size, &buffer_position, _number_density,
                tot_num_cells, MPI_DOUBLE, MPI_COMM_WORLD);
@@ -970,6 +1013,9 @@ public:
                5 * tot_num_cells, MPI_DOUBLE, MPI_COMM_WORLD);
     MPI_Unpack(buffer, buffer_size, &buffer_position,
                _primitive_variable_gradients, 15 * tot_num_cells, MPI_DOUBLE,
+               MPI_COMM_WORLD);
+    MPI_Unpack(buffer, buffer_size, &buffer_position,
+               _primitive_variable_limiters, 10 * tot_num_cells, MPI_DOUBLE,
                MPI_COMM_WORLD);
   }
 
@@ -1482,6 +1528,11 @@ public:
                        other._primitive_variable_gradients[15 * i + 3 * j + k],
                    "Primitive variable gradient not the same!");
         }
+        for (int k = 0; k < 2; ++k) {
+          myassert(_primitive_variable_limiters[10 * i + 2 * j + k] ==
+                       other._primitive_variable_limiters[10 * i + 2 * j + k],
+                   "Primitive variable limiters not the same!");
+        }
       }
     }
     myassert(_cell_volume == other._cell_volume, "Cell volumes not the same!");
@@ -1523,8 +1574,43 @@ public:
       for (int j = 0; j < 5; ++j) {
         _conserved_variables[5 * i + j] +=
             _delta_conserved_variables[5 * i + j] * time_step;
-        _delta_conserved_variables[5 * i + j] = 0.;
       }
+    }
+
+    // reset all hydro variables (except the conserved and primitive ones)
+    for (int i = 0; i < tot_num_cells; ++i) {
+      _delta_conserved_variables[5 * i] = 0.;
+      _delta_conserved_variables[5 * i + 1] = 0.;
+      _delta_conserved_variables[5 * i + 2] = 0.;
+      _delta_conserved_variables[5 * i + 3] = 0.;
+      _delta_conserved_variables[5 * i + 4] = 0.;
+
+      _primitive_variable_gradients[15 * i] = 0.;
+      _primitive_variable_gradients[15 * i + 1] = 0.;
+      _primitive_variable_gradients[15 * i + 2] = 0.;
+      _primitive_variable_gradients[15 * i + 3] = 0.;
+      _primitive_variable_gradients[15 * i + 4] = 0.;
+      _primitive_variable_gradients[15 * i + 5] = 0.;
+      _primitive_variable_gradients[15 * i + 6] = 0.;
+      _primitive_variable_gradients[15 * i + 7] = 0.;
+      _primitive_variable_gradients[15 * i + 8] = 0.;
+      _primitive_variable_gradients[15 * i + 9] = 0.;
+      _primitive_variable_gradients[15 * i + 10] = 0.;
+      _primitive_variable_gradients[15 * i + 11] = 0.;
+      _primitive_variable_gradients[15 * i + 12] = 0.;
+      _primitive_variable_gradients[15 * i + 13] = 0.;
+      _primitive_variable_gradients[15 * i + 14] = 0.;
+
+      _primitive_variable_limiters[10 * i] = DBL_MAX;
+      _primitive_variable_limiters[10 * i + 1] = -DBL_MAX;
+      _primitive_variable_limiters[10 * i + 2] = DBL_MAX;
+      _primitive_variable_limiters[10 * i + 3] = -DBL_MAX;
+      _primitive_variable_limiters[10 * i + 4] = DBL_MAX;
+      _primitive_variable_limiters[10 * i + 5] = -DBL_MAX;
+      _primitive_variable_limiters[10 * i + 6] = DBL_MAX;
+      _primitive_variable_limiters[10 * i + 7] = -DBL_MAX;
+      _primitive_variable_limiters[10 * i + 8] = DBL_MAX;
+      _primitive_variable_limiters[10 * i + 9] = -DBL_MAX;
     }
   }
 
@@ -1541,6 +1627,20 @@ public:
           _conserved_variables[5 * i + 4], _inverse_cell_volume,
           _primitive_variables[5 * i], &_primitive_variables[5 * i + 1],
           _primitive_variables[5 * i + 4]);
+    }
+  }
+
+  /**
+   * @brief Apply the slope limiter to all primitive variable gradients.
+   *
+   * @param hydro Hydro instance to use.
+   */
+  inline void apply_slope_limiter(const Hydro &hydro) {
+    const int tot_num_cells = _number_of_cells[0] * _number_of_cells[3];
+    for (int i = 0; i < tot_num_cells; ++i) {
+      hydro.apply_slope_limiter(
+          &_primitive_variables[5 * i], &_primitive_variable_gradients[15 * i],
+          &_primitive_variable_limiters[10 * i], _cell_size);
     }
   }
 
@@ -1587,6 +1687,9 @@ public:
    */
   inline void inner_flux_sweep(const Hydro &hydro) {
 
+    // the complicated loop structure below turns out to be the most efficient
+    // sweep algorithm
+    // doing 3 separate sweeps is noticeably slower
     for (int ix = 0; ix < _number_of_cells[0] - 1; ++ix) {
       for (int iy = 0; iy < _number_of_cells[1] - 1; ++iy) {
         for (int iz = 0; iz < _number_of_cells[2] - 1; ++iz) {
@@ -1750,7 +1853,7 @@ public:
   inline void outer_flux_sweep(const int direction, const Hydro &hydro,
                                DensitySubGrid &neighbour) {
     int i;
-    unsigned int index_left, index_right, row_increment, row_length,
+    unsigned int start_index_left, start_index_right, row_increment, row_length,
         column_increment, column_length;
     double dx, A;
     DensitySubGrid *left_grid, *right_grid;
@@ -1759,8 +1862,8 @@ public:
       i = 0;
       left_grid = this;
       right_grid = &neighbour;
-      index_left = (_number_of_cells[0] - 1) * _number_of_cells[3];
-      index_right = 0;
+      start_index_left = (_number_of_cells[0] - 1) * _number_of_cells[3];
+      start_index_right = 0;
       row_increment = 1;
       row_length = _number_of_cells[2];
       column_increment = _number_of_cells[2];
@@ -1772,8 +1875,8 @@ public:
       i = 0;
       left_grid = &neighbour;
       right_grid = this;
-      index_left = (_number_of_cells[0] - 1) * _number_of_cells[3];
-      index_right = 0;
+      start_index_left = (_number_of_cells[0] - 1) * _number_of_cells[3];
+      start_index_right = 0;
       row_increment = 1;
       row_length = _number_of_cells[2];
       column_increment = _number_of_cells[2];
@@ -1785,8 +1888,8 @@ public:
       i = 1;
       left_grid = this;
       right_grid = &neighbour;
-      index_left = (_number_of_cells[1] - 1) * _number_of_cells[2];
-      index_right = 0;
+      start_index_left = (_number_of_cells[1] - 1) * _number_of_cells[2];
+      start_index_right = 0;
       row_increment = 1;
       row_length = _number_of_cells[2];
       column_increment = _number_of_cells[3];
@@ -1798,8 +1901,8 @@ public:
       i = 1;
       left_grid = &neighbour;
       right_grid = this;
-      index_left = (_number_of_cells[1] - 1) * _number_of_cells[2];
-      index_right = 0;
+      start_index_left = (_number_of_cells[1] - 1) * _number_of_cells[2];
+      start_index_right = 0;
       row_increment = 1;
       row_length = _number_of_cells[2];
       column_increment = _number_of_cells[3];
@@ -1811,8 +1914,8 @@ public:
       i = 2;
       left_grid = this;
       right_grid = &neighbour;
-      index_left = _number_of_cells[2] - 1;
-      index_right = 0;
+      start_index_left = _number_of_cells[2] - 1;
+      start_index_right = 0;
       row_increment = _number_of_cells[2];
       row_length = _number_of_cells[1];
       column_increment = _number_of_cells[3];
@@ -1824,8 +1927,8 @@ public:
       i = 2;
       left_grid = &neighbour;
       right_grid = this;
-      index_left = _number_of_cells[2] - 1;
-      index_right = 0;
+      start_index_left = _number_of_cells[2] - 1;
+      start_index_right = 0;
       row_increment = _number_of_cells[2];
       row_length = _number_of_cells[1];
       column_increment = _number_of_cells[3];
@@ -1838,8 +1941,14 @@ public:
       break;
     }
 
+    // using the index computation below is (much) faster than setting the
+    // increment correctly and summing the indices manually
     for (unsigned int ic = 0; ic < column_length; ++ic) {
       for (unsigned int ir = 0; ir < row_length; ++ir) {
+        const unsigned int index_left =
+            start_index_left + ic * column_increment + ir * row_increment;
+        const unsigned int index_right =
+            start_index_right + ic * column_increment + ir * row_increment;
         hydro.do_flux_calculation(
             i, &left_grid->_primitive_variables[5 * index_left],
             &left_grid->_primitive_variable_gradients[15 * index_left],
@@ -1847,11 +1956,282 @@ public:
             &right_grid->_primitive_variable_gradients[15 * index_right], dx, A,
             &left_grid->_delta_conserved_variables[5 * index_left],
             &right_grid->_delta_conserved_variables[5 * index_right]);
-        index_left += row_increment;
-        index_right += row_increment;
       }
-      index_left += column_increment;
-      index_right += column_increment;
+    }
+  }
+
+  /**
+   * @brief Compute the hydrodynamical gradients for all interfaces inside the
+   * subgrid.
+   *
+   * @param hydro Hydro instance to use.
+   */
+  inline void inner_gradient_sweep(const Hydro &hydro) {
+
+    // the complicated loop structure below turns out to be the most efficient
+    // sweep algorithm
+    // doing 3 separate sweeps is noticeably slower
+    for (int ix = 0; ix < _number_of_cells[0] - 1; ++ix) {
+      for (int iy = 0; iy < _number_of_cells[1] - 1; ++iy) {
+        for (int iz = 0; iz < _number_of_cells[2] - 1; ++iz) {
+          const unsigned int index000 =
+              ix * _number_of_cells[3] + iy * _number_of_cells[2] + iz;
+          const unsigned int index001 =
+              ix * _number_of_cells[3] + iy * _number_of_cells[2] + iz + 1;
+          const unsigned int index010 =
+              ix * _number_of_cells[3] + (iy + 1) * _number_of_cells[2] + iz;
+          const unsigned int index100 =
+              (ix + 1) * _number_of_cells[3] + iy * _number_of_cells[2] + iz;
+          // x direction
+          hydro.do_gradient_calculation(
+              0, &_primitive_variables[5 * index000],
+              &_primitive_variables[5 * index100], _inv_cell_size[0],
+              &_primitive_variable_gradients[15 * index000],
+              &_primitive_variable_limiters[10 * index000],
+              &_primitive_variable_gradients[15 * index100],
+              &_primitive_variable_limiters[10 * index100]);
+          // y direction
+          hydro.do_gradient_calculation(
+              1, &_primitive_variables[5 * index000],
+              &_primitive_variables[5 * index010], _inv_cell_size[1],
+              &_primitive_variable_gradients[15 * index000],
+              &_primitive_variable_limiters[10 * index000],
+              &_primitive_variable_gradients[15 * index010],
+              &_primitive_variable_limiters[10 * index010]);
+          // z direction
+          hydro.do_gradient_calculation(
+              2, &_primitive_variables[5 * index000],
+              &_primitive_variables[5 * index001], _inv_cell_size[2],
+              &_primitive_variable_gradients[15 * index000],
+              &_primitive_variable_limiters[10 * index000],
+              &_primitive_variable_gradients[15 * index001],
+              &_primitive_variable_limiters[10 * index001]);
+        }
+        // do the missing x and y gradients
+        const int iz = _number_of_cells[2] - 1;
+        {
+          const unsigned int index000 =
+              ix * _number_of_cells[3] + iy * _number_of_cells[2] + iz;
+          const unsigned int index010 =
+              ix * _number_of_cells[3] + (iy + 1) * _number_of_cells[2] + iz;
+          const unsigned int index100 =
+              (ix + 1) * _number_of_cells[3] + iy * _number_of_cells[2] + iz;
+          // x direction
+          hydro.do_gradient_calculation(
+              0, &_primitive_variables[5 * index000],
+              &_primitive_variables[5 * index100], _inv_cell_size[0],
+              &_primitive_variable_gradients[15 * index000],
+              &_primitive_variable_limiters[10 * index000],
+              &_primitive_variable_gradients[15 * index100],
+              &_primitive_variable_limiters[10 * index100]);
+          // y direction
+          hydro.do_gradient_calculation(
+              1, &_primitive_variables[5 * index000],
+              &_primitive_variables[5 * index010], _inv_cell_size[1],
+              &_primitive_variable_gradients[15 * index000],
+              &_primitive_variable_limiters[10 * index000],
+              &_primitive_variable_gradients[15 * index010],
+              &_primitive_variable_limiters[10 * index010]);
+        }
+      }
+      // do the missing x and z gradients
+      const int iy = _number_of_cells[1] - 1;
+      for (int iz = 0; iz < _number_of_cells[2] - 1; ++iz) {
+        const unsigned int index000 =
+            ix * _number_of_cells[3] + iy * _number_of_cells[2] + iz;
+        const unsigned int index001 =
+            ix * _number_of_cells[3] + iy * _number_of_cells[2] + iz + 1;
+        const unsigned int index100 =
+            (ix + 1) * _number_of_cells[3] + iy * _number_of_cells[2] + iz;
+        // x direction
+        hydro.do_gradient_calculation(
+            0, &_primitive_variables[5 * index000],
+            &_primitive_variables[5 * index100], _inv_cell_size[0],
+            &_primitive_variable_gradients[15 * index000],
+            &_primitive_variable_limiters[10 * index000],
+            &_primitive_variable_gradients[15 * index100],
+            &_primitive_variable_limiters[10 * index100]);
+        // z direction
+        hydro.do_gradient_calculation(
+            2, &_primitive_variables[5 * index000],
+            &_primitive_variables[5 * index001], _inv_cell_size[2],
+            &_primitive_variable_gradients[15 * index000],
+            &_primitive_variable_limiters[10 * index000],
+            &_primitive_variable_gradients[15 * index001],
+            &_primitive_variable_limiters[10 * index001]);
+      }
+      // do the missing x gradient
+      {
+        const int iz = _number_of_cells[2] - 1;
+        const unsigned int index000 =
+            ix * _number_of_cells[3] + iy * _number_of_cells[2] + iz;
+        const unsigned int index100 =
+            (ix + 1) * _number_of_cells[3] + iy * _number_of_cells[2] + iz;
+        // x direction
+        hydro.do_gradient_calculation(
+            0, &_primitive_variables[5 * index000],
+            &_primitive_variables[5 * index100], _inv_cell_size[0],
+            &_primitive_variable_gradients[15 * index000],
+            &_primitive_variable_limiters[10 * index000],
+            &_primitive_variable_gradients[15 * index100],
+            &_primitive_variable_limiters[10 * index100]);
+      }
+    }
+    // do the missing y and z gradients
+    const int ix = _number_of_cells[0] - 1;
+    for (int iy = 0; iy < _number_of_cells[1] - 1; ++iy) {
+      for (int iz = 0; iz < _number_of_cells[2] - 1; ++iz) {
+        const unsigned int index000 =
+            ix * _number_of_cells[3] + iy * _number_of_cells[2] + iz;
+        const unsigned int index001 =
+            ix * _number_of_cells[3] + iy * _number_of_cells[2] + iz + 1;
+        const unsigned int index010 =
+            ix * _number_of_cells[3] + (iy + 1) * _number_of_cells[2] + iz;
+        // y direction
+        hydro.do_gradient_calculation(
+            1, &_primitive_variables[5 * index000],
+            &_primitive_variables[5 * index010], _inv_cell_size[1],
+            &_primitive_variable_gradients[15 * index000],
+            &_primitive_variable_limiters[10 * index000],
+            &_primitive_variable_gradients[15 * index010],
+            &_primitive_variable_limiters[10 * index010]);
+        // z direction
+        hydro.do_gradient_calculation(
+            2, &_primitive_variables[5 * index000],
+            &_primitive_variables[5 * index001], _inv_cell_size[2],
+            &_primitive_variable_gradients[15 * index000],
+            &_primitive_variable_limiters[10 * index000],
+            &_primitive_variable_gradients[15 * index001],
+            &_primitive_variable_limiters[10 * index001]);
+      }
+      // do the missing y gradient
+      {
+        const int iz = _number_of_cells[2] - 1;
+        const unsigned int index000 =
+            ix * _number_of_cells[3] + iy * _number_of_cells[2] + iz;
+        const unsigned int index010 =
+            ix * _number_of_cells[3] + (iy + 1) * _number_of_cells[2] + iz;
+        // y direction
+        hydro.do_gradient_calculation(
+            1, &_primitive_variables[5 * index000],
+            &_primitive_variables[5 * index010], _inv_cell_size[1],
+            &_primitive_variable_gradients[15 * index000],
+            &_primitive_variable_limiters[10 * index000],
+            &_primitive_variable_gradients[15 * index010],
+            &_primitive_variable_limiters[10 * index010]);
+      }
+    }
+  }
+
+  /**
+   * @brief Compute the hydrodynamical gradients for all interfaces at the
+   * boundary between this subgrid and the given neighbouring subgrid.
+   *
+   * @param direction TravelDirection of the neighbour.
+   * @param hydro Hydro instance to use.
+   * @param neighbour Neighbouring DensitySubGrid.
+   */
+  inline void outer_gradient_sweep(const int direction, const Hydro &hydro,
+                                   DensitySubGrid &neighbour) {
+    int i;
+    unsigned int start_index_left, start_index_right, row_increment, row_length,
+        column_increment, column_length;
+    double dxinv;
+    DensitySubGrid *left_grid, *right_grid;
+    switch (direction) {
+    case TRAVELDIRECTION_FACE_X_P:
+      i = 0;
+      left_grid = this;
+      right_grid = &neighbour;
+      start_index_left = (_number_of_cells[0] - 1) * _number_of_cells[3];
+      start_index_right = 0;
+      row_increment = 1;
+      row_length = _number_of_cells[2];
+      column_increment = _number_of_cells[2];
+      column_length = _number_of_cells[1];
+      dxinv = _inv_cell_size[0];
+      break;
+    case TRAVELDIRECTION_FACE_X_N:
+      i = 0;
+      left_grid = &neighbour;
+      right_grid = this;
+      start_index_left = (_number_of_cells[0] - 1) * _number_of_cells[3];
+      start_index_right = 0;
+      row_increment = 1;
+      row_length = _number_of_cells[2];
+      column_increment = _number_of_cells[2];
+      column_length = _number_of_cells[1];
+      dxinv = -_inv_cell_size[0];
+      break;
+    case TRAVELDIRECTION_FACE_Y_P:
+      i = 1;
+      left_grid = this;
+      right_grid = &neighbour;
+      start_index_left = (_number_of_cells[1] - 1) * _number_of_cells[2];
+      start_index_right = 0;
+      row_increment = 1;
+      row_length = _number_of_cells[2];
+      column_increment = _number_of_cells[3];
+      column_length = _number_of_cells[0];
+      dxinv = _inv_cell_size[1];
+      break;
+    case TRAVELDIRECTION_FACE_Y_N:
+      i = 1;
+      left_grid = &neighbour;
+      right_grid = this;
+      start_index_left = (_number_of_cells[1] - 1) * _number_of_cells[2];
+      start_index_right = 0;
+      row_increment = 1;
+      row_length = _number_of_cells[2];
+      column_increment = _number_of_cells[3];
+      column_length = _number_of_cells[0];
+      dxinv = -_inv_cell_size[1];
+      break;
+    case TRAVELDIRECTION_FACE_Z_P:
+      i = 2;
+      left_grid = this;
+      right_grid = &neighbour;
+      start_index_left = _number_of_cells[2] - 1;
+      start_index_right = 0;
+      row_increment = _number_of_cells[2];
+      row_length = _number_of_cells[1];
+      column_increment = _number_of_cells[3];
+      column_length = _number_of_cells[0];
+      dxinv = _inv_cell_size[2];
+      break;
+    case TRAVELDIRECTION_FACE_Z_N:
+      i = 2;
+      left_grid = &neighbour;
+      right_grid = this;
+      start_index_left = _number_of_cells[2] - 1;
+      start_index_right = 0;
+      row_increment = _number_of_cells[2];
+      row_length = _number_of_cells[1];
+      column_increment = _number_of_cells[3];
+      column_length = _number_of_cells[0];
+      dxinv = -_inv_cell_size[2];
+      break;
+    default:
+      cmac_error("Unknown hydro neighbour: %i", direction);
+      break;
+    }
+
+    // using the index computation below is (much) faster than setting the
+    // increment correctly and summing the indices manually
+    for (unsigned int ic = 0; ic < column_length; ++ic) {
+      for (unsigned int ir = 0; ir < row_length; ++ir) {
+        const unsigned int index_left =
+            start_index_left + ic * column_increment + ir * row_increment;
+        const unsigned int index_right =
+            start_index_right + ic * column_increment + ir * row_increment;
+        hydro.do_gradient_calculation(
+            i, &left_grid->_primitive_variables[5 * index_left],
+            &right_grid->_primitive_variables[5 * index_right], dxinv,
+            &left_grid->_primitive_variable_gradients[15 * index_left],
+            &left_grid->_primitive_variable_limiters[10 * index_left],
+            &right_grid->_primitive_variable_gradients[15 * index_right],
+            &right_grid->_primitive_variable_limiters[10 * index_right]);
+      }
     }
   }
 };

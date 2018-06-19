@@ -28,6 +28,8 @@
 
 #include "HLLCRiemannSolver.hpp"
 
+#include <cfloat>
+
 /**
  * @brief Hydro related functionality.
  */
@@ -153,13 +155,23 @@ public:
                                   const double A, double dQL[5],
                                   double dQR[5]) const {
 
+    const double WLext[5] = {
+        WL[0] + 0.5 * dWL[i] * dx, WL[1] + 0.5 * dWL[3 + i] * dx,
+        WL[2] + 0.5 * dWL[6 + i] * dx, WL[3] + 0.5 * dWL[9 + i] * dx,
+        WL[4] + 0.5 * dWL[12 + i] * dx};
+    const double WRext[5] = {
+        WR[0] - 0.5 * dWR[i] * dx, WR[1] - 0.5 * dWR[3 + i] * dx,
+        WR[2] - 0.5 * dWR[6 + i] * dx, WR[3] - 0.5 * dWR[9 + i] * dx,
+        WR[4] - 0.5 * dWR[12 + i] * dx};
+
     double mflux = 0.;
     double pflux[3] = {0., 0., 0.};
     double Eflux = 0.;
     double normal[3] = {0, 0, 0};
     normal[i] = 1.;
-    _riemann_solver.solve_for_flux(WL[0], &WL[1], WL[4], WR[0], &WR[1], WR[4],
-                                   mflux, pflux, Eflux, normal);
+    _riemann_solver.solve_for_flux(WLext[0], &WLext[1], WLext[4], WRext[0],
+                                   &WRext[1], WRext[4], mflux, pflux, Eflux,
+                                   normal);
 
     mflux *= A;
     pflux[0] *= A;
@@ -178,6 +190,87 @@ public:
     dQR[2] += pflux[1];
     dQR[3] += pflux[2];
     dQR[4] += Eflux;
+  }
+
+  /**
+   * @brief Do the gradient calculation for the given interface.
+   *
+   * @param i Interface direction: x (0), y (1) or z (2).
+   * @param WL Left state primitive variables (density - kg m^-3, velocity -
+   * m s^-1, pressure - kg m^-1 s^-2).
+   * @param WR Right state primitive variables (density - kg m^-3, velocity -
+   * m s^-1, pressure - kg m^-1 s^-2).
+   * @param dxinv Inverse distance between left and right state midpoint (in m).
+   * @param dWL Left state primitive variable gradients (updated; density -
+   * kg m^-4, velocity - s^-1, pressure - kg m^-2 s^-2).
+   * @param WLlim Left state primitive variable limiters (updated; density -
+   * kg m^-3, velocity - m s^-1, pressure - kg m^-1 s^-2).
+   * @param dWR Right state primitive variable gradients (updated; density -
+   * kg m^-4, velocity - s^-1, pressure - kg m^-2 s^-2).
+   * @param WRlim Right state primitive variable limiters (updated; density -
+   * kg m^-3, velocity - m s^-1, pressure - kg m^-1 s^-2).
+   */
+  inline void do_gradient_calculation(const int i, const double WL[5],
+                                      const double WR[5], const double dxinv,
+                                      double dWL[15], double WLlim[10],
+                                      double dWR[15], double WRlim[10]) const {
+
+    for (int j = 0; j < 5; ++j) {
+      const double dwdx = 0.5 * (WL[j] - WR[j]) * dxinv;
+      dWL[3 * j + i] -= dwdx;
+      dWR[3 * j + i] += dwdx;
+      WLlim[2 * j] = std::min(WLlim[2 * j], WR[j]);
+      WLlim[2 * j + 1] = std::max(WLlim[2 * j + 1], WR[j]);
+      WRlim[2 * j] = std::min(WRlim[2 * j], WL[j]);
+      WRlim[2 * j + 1] = std::max(WRlim[2 * j + 1], WL[j]);
+    }
+  }
+
+  /**
+   * @brief Apply the slope limiter for the given variables.
+   *
+   * @param W Primitive variables (density - kg m^-3, velocity - m s^-1,
+   * pressure - kg m^-1 s^-2).
+   * @param dW Primitive variable gradients (updated; density - kg m^-4,
+   * velocity - s^-1, pressure - kg m^-2 s^-2).
+   * @param Wlim Primitive variable limiters (density - kg m^-3, velocity -
+   * m s^-1, pressure - kg m^-1 s^-2).
+   * @param dx Distance between the cell and the neighbouring cells in all
+   * directions (in m).
+   */
+  inline void apply_slope_limiter(const double W[5], double dW[15],
+                                  const double Wlim[10],
+                                  const double dx[3]) const {
+
+    for (int i = 0; i < 5; ++i) {
+      const double dwext[3] = {dW[3 * i] * 0.5 * dx[0],
+                               dW[3 * i + 1] * 0.5 * dx[1],
+                               dW[3 * i + 2] * 0.5 * dx[2]};
+      double dwmax = std::max(W[i] + dwext[0], W[i] - dwext[0]);
+      double dwmin = std::min(W[i] + dwext[0], W[i] - dwext[0]);
+      for (int j = 1; j < 3; ++j) {
+        dwmax = std::max(dwmax, W[i] + dwext[j]);
+        dwmin = std::min(dwmin, W[i] + dwext[j]);
+        dwmax = std::max(dwmax, W[i] - dwext[j]);
+        dwmin = std::min(dwmin, W[i] - dwext[j]);
+      }
+      dwmax -= W[i];
+      dwmin -= W[i];
+      double maxfac = DBL_MAX;
+      if (dwmax != 0.) {
+        const double dwngbmax = Wlim[2 * i + 1] - W[i];
+        maxfac = dwngbmax / dwmax;
+      }
+      double minfac = DBL_MAX;
+      if (dwmin != 0.) {
+        const double dwngbmin = Wlim[2 * i] - W[i];
+        minfac = dwngbmin / dwmin;
+      }
+      const double alpha = std::min(1., 0.5 * std::min(maxfac, minfac));
+      dW[3 * i] *= alpha;
+      dW[3 * i + 1] *= alpha;
+      dW[3 * i + 2] *= alpha;
+    }
   }
 };
 
