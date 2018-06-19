@@ -35,7 +35,7 @@ import scipy.stats as stats
 # number of cells in one coordinate dimension
 # should be synced with the values used in the unit test
 # we guess based on the file size
-ncell = 100
+ncell = 1000
 
 # memory-map the binary output file to a numpy array
 data = np.memmap("hydro.dat", dtype = np.float64,
@@ -44,7 +44,7 @@ pos = data[:, 0:3]
 rho = data[:, 5]
 
 # plot the means and scatter regions
-pl.plot(pos, rho, "k.")
+pl.plot(pos[:,0], rho, "k.")
 # set axis labels
 pl.xlabel("position (m))")
 pl.ylabel("density (kg m^-3)")

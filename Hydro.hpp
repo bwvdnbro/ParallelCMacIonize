@@ -127,6 +127,58 @@ public:
         0.5 * (velocity[0] * momentum[0] + velocity[1] * momentum[1] +
                velocity[2] * momentum[2]);
   }
+
+  /**
+   * @brief Do the flux calculation for the given interface.
+   *
+   * @param i Interface direction: x (0), y (1) or z (2).
+   * @param WL Left state primitive variables (density - kg m^-3, velocity -
+   * m s^-1, pressure - kg m^-1 s^-2).
+   * @param dWL Left state primitive variable gradients (density - kg m^-4,
+   * velocity - s^-1, pressure - kg m^-2 s^-2).
+   * @param WR Right state primitive variables (density - kg m^-3, velocity -
+   * m s^-1, pressure - kg m^-1 s^-2).
+   * @param dWR Right state primitive variable gradients (density - kg m^-4,
+   * velocity - s^-1, pressure - kg m^-2 s^-2).
+   * @param dx Distance between left and right state midpoint (in m).
+   * @param A Surface area of the interface (in m^2).
+   * @param dQL Left state conserved variable changes (updated; mass - kg s^-1,
+   * momentum - kg m s^-2, total energy - kg m^2 s^-3).
+   * @param dQR Right state conserved variable changes (updated; mass - kg s^-1,
+   * momentum - kg m s^-2, total energy - kg m^2 s^-3).
+   */
+  inline void do_flux_calculation(const int i, const double WL[5],
+                                  const double dWL[15], const double WR[5],
+                                  const double dWR[15], const double dx,
+                                  const double A, double dQL[5],
+                                  double dQR[5]) const {
+
+    double mflux = 0.;
+    double pflux[3] = {0., 0., 0.};
+    double Eflux = 0.;
+    double normal[3] = {0, 0, 0};
+    normal[i] = 1.;
+    _riemann_solver.solve_for_flux(WL[0], &WL[1], WL[4], WR[0], &WR[1], WR[4],
+                                   mflux, pflux, Eflux, normal);
+
+    mflux *= A;
+    pflux[0] *= A;
+    pflux[1] *= A;
+    pflux[2] *= A;
+    Eflux *= A;
+
+    dQL[0] -= mflux;
+    dQL[1] -= pflux[0];
+    dQL[2] -= pflux[1];
+    dQL[3] -= pflux[2];
+    dQL[4] -= Eflux;
+
+    dQR[0] += mflux;
+    dQR[1] += pflux[0];
+    dQR[2] += pflux[1];
+    dQR[3] += pflux[2];
+    dQR[4] += Eflux;
+  }
 };
 
 #endif // HYDRO_HPP

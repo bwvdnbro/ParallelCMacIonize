@@ -69,7 +69,7 @@
 /*! @brief Size of the DensitySubGrid variables that need to be communicated
  *  over MPI, and whose size is known at compile time. */
 #define DENSITYSUBGRID_FIXED_MPI_SIZE                                          \
-  (sizeof(unsigned long) + (9 + 2) * sizeof(double) + 4 * sizeof(int) +        \
+  (sizeof(unsigned long) + (9 + 5) * sizeof(double) + 4 * sizeof(int) +        \
    TRAVELDIRECTION_NUMBER * sizeof(unsigned int))
 
 /*! @brief Size of all DensitySubGrid variables whose size is known at compile
@@ -158,6 +158,9 @@ private:
 
   /*! @brief Inverse volume of a single cell (in m^-3). */
   double _inverse_cell_volume;
+
+  /*! @brief Surface areas of a single cell (in m^2). */
+  double _cell_areas[3];
 
   /*! @brief Conserved variables (mass - kg, momentum - kg m s^-1, energy -
    *  kg m^2 s^-2). */
@@ -504,7 +507,10 @@ public:
         _owning_thread(0), _largest_buffer_index(TRAVELDIRECTION_NUMBER),
         _largest_buffer_size(0),
         _cell_volume(_cell_size[0] * _cell_size[1] * _cell_size[2]),
-        _inverse_cell_volume(1. / _cell_volume) {
+        _inverse_cell_volume(1. / _cell_volume),
+        _cell_areas{_cell_size[1] * _cell_size[2],
+                    _cell_size[0] * _cell_size[2],
+                    _cell_size[0] * _cell_size[1]} {
 
 #ifdef DENSITYGRID_EDGECOST
     // initialize edge communication costs
@@ -552,7 +558,7 @@ public:
       _primitive_variables[5 * i + 1] = 0.;
       _primitive_variables[5 * i + 2] = 0.;
       _primitive_variables[5 * i + 3] = 0.;
-      _primitive_variables[5 * i + 1] = 1.;
+      _primitive_variables[5 * i + 4] = 1.;
 
       _primitive_variable_gradients[15 * i] = 0.;
       _primitive_variable_gradients[15 * i + 1] = 0.;
@@ -590,7 +596,9 @@ public:
         _owning_thread(original._owning_thread),
         _largest_buffer_index(TRAVELDIRECTION_NUMBER), _largest_buffer_size(0),
         _cell_volume(original._cell_volume),
-        _inverse_cell_volume(original._inverse_cell_volume) {
+        _inverse_cell_volume(original._inverse_cell_volume),
+        _cell_areas{original._cell_areas[0], original._cell_areas[1],
+                    original._cell_areas[2]} {
 
 #ifdef DENSITYGRID_EDGECOST
     // initialize edge communication costs
@@ -647,7 +655,7 @@ public:
           original._primitive_variables[5 * i + 2];
       _primitive_variables[5 * i + 3] =
           original._primitive_variables[5 * i + 3];
-      _primitive_variables[5 * i + 1] =
+      _primitive_variables[5 * i + 4] =
           original._primitive_variables[5 * i + 4];
 
       _primitive_variable_gradients[15 * i] =
@@ -878,6 +886,8 @@ public:
              &buffer_position, MPI_COMM_WORLD);
     MPI_Pack(&_inverse_cell_volume, 1, MPI_DOUBLE, buffer, buffer_size,
              &buffer_position, MPI_COMM_WORLD);
+    MPI_Pack(_cell_areas, 3, MPI_DOUBLE, buffer, buffer_size, &buffer_position,
+             MPI_COMM_WORLD);
     MPI_Pack(_conserved_variables, 5 * tot_num_cells, MPI_DOUBLE, buffer,
              buffer_size, &buffer_position, MPI_COMM_WORLD);
     MPI_Pack(_delta_conserved_variables, 5 * tot_num_cells, MPI_DOUBLE, buffer,
@@ -948,6 +958,8 @@ public:
     MPI_Unpack(buffer, buffer_size, &buffer_position, &_cell_volume, 1,
                MPI_DOUBLE, MPI_COMM_WORLD);
     MPI_Unpack(buffer, buffer_size, &buffer_position, &_inverse_cell_volume, 1,
+               MPI_DOUBLE, MPI_COMM_WORLD);
+    MPI_Unpack(buffer, buffer_size, &buffer_position, _cell_areas, 3,
                MPI_DOUBLE, MPI_COMM_WORLD);
     MPI_Unpack(buffer, buffer_size, &buffer_position, _conserved_variables,
                5 * tot_num_cells, MPI_DOUBLE, MPI_COMM_WORLD);
@@ -1276,7 +1288,11 @@ public:
           const int index = get_one_index(three_index);
           stream << pos_x << "\t" << pos_y << "\t" << pos_z << "\t"
                  << _neutral_fraction[index] << "\t" << _number_density[index]
-                 << "\n";
+                 << "\t" << _primitive_variables[5 * index] << "\t"
+                 << _primitive_variables[5 * index + 1] << "\t"
+                 << _primitive_variables[5 * index + 2] << "\t"
+                 << _primitive_variables[5 * index + 3] << "\t"
+                 << _primitive_variables[5 * index + 4] << "\n";
         }
       }
     }
@@ -1468,6 +1484,15 @@ public:
         }
       }
     }
+    myassert(_cell_volume == other._cell_volume, "Cell volumes not the same!");
+    myassert(_inverse_cell_volume == other._inverse_cell_volume,
+             "Inverse cell volumes not the same!");
+    myassert(_cell_areas[0] == other._cell_areas[0],
+             "Cell areas not the same!");
+    myassert(_cell_areas[1] == other._cell_areas[1],
+             "Cell areas not the same!");
+    myassert(_cell_areas[2] == other._cell_areas[2],
+             "Cell areas not the same!");
   }
 
   /**
@@ -1488,6 +1513,38 @@ public:
   }
 
   /**
+   * @brief Update the conserved variables for all cells in the grid.
+   *
+   * @param time_step Integration time step size (in s).
+   */
+  inline void update_conserved_variables(const double time_step) {
+    const int tot_num_cells = _number_of_cells[0] * _number_of_cells[3];
+    for (int i = 0; i < tot_num_cells; ++i) {
+      for (int j = 0; j < 5; ++j) {
+        _conserved_variables[5 * i + j] +=
+            _delta_conserved_variables[5 * i + j] * time_step;
+        _delta_conserved_variables[5 * i + j] = 0.;
+      }
+    }
+  }
+
+  /**
+   * @brief Update the primitive variables for the grid.
+   *
+   * @param hydro Hydro instance to use.
+   */
+  inline void update_primitive_variables(const Hydro &hydro) {
+    const int tot_num_cells = _number_of_cells[0] * _number_of_cells[3];
+    for (int i = 0; i < tot_num_cells; ++i) {
+      hydro.get_primitive_variables(
+          _conserved_variables[5 * i], &_conserved_variables[5 * i + 1],
+          _conserved_variables[5 * i + 4], _inverse_cell_volume,
+          _primitive_variables[5 * i], &_primitive_variables[5 * i + 1],
+          _primitive_variables[5 * i + 4]);
+    }
+  }
+
+  /**
    * @brief Get the midpoint of the cell with the given index.
    *
    * @param index Index of a cell.
@@ -1497,9 +1554,9 @@ public:
 
     int three_index[3];
     get_three_index(index, three_index);
-    midpoint[0] = _anchor[0] + three_index[0] * _cell_size[0];
-    midpoint[1] = _anchor[1] + three_index[1] * _cell_size[1];
-    midpoint[2] = _anchor[2] + three_index[2] * _cell_size[2];
+    midpoint[0] = _anchor[0] + (three_index[0] + 0.5) * _cell_size[0];
+    midpoint[1] = _anchor[1] + (three_index[1] + 0.5) * _cell_size[1];
+    midpoint[2] = _anchor[2] + (three_index[2] + 0.5) * _cell_size[2];
   }
 
   /**
@@ -1520,6 +1577,282 @@ public:
     _primitive_variables[5 * index + 2] = velocity[1];
     _primitive_variables[5 * index + 3] = velocity[2];
     _primitive_variables[5 * index + 4] = pressure;
+  }
+
+  /**
+   * @brief Compute the hydrodynamical fluxes for all interfaces inside the
+   * subgrid.
+   *
+   * @param hydro Hydro instance to use.
+   */
+  inline void inner_flux_sweep(const Hydro &hydro) {
+
+    for (int ix = 0; ix < _number_of_cells[0] - 1; ++ix) {
+      for (int iy = 0; iy < _number_of_cells[1] - 1; ++iy) {
+        for (int iz = 0; iz < _number_of_cells[2] - 1; ++iz) {
+          const unsigned int index000 =
+              ix * _number_of_cells[3] + iy * _number_of_cells[2] + iz;
+          const unsigned int index001 =
+              ix * _number_of_cells[3] + iy * _number_of_cells[2] + iz + 1;
+          const unsigned int index010 =
+              ix * _number_of_cells[3] + (iy + 1) * _number_of_cells[2] + iz;
+          const unsigned int index100 =
+              (ix + 1) * _number_of_cells[3] + iy * _number_of_cells[2] + iz;
+          // x direction
+          hydro.do_flux_calculation(
+              0, &_primitive_variables[5 * index000],
+              &_primitive_variable_gradients[15 * index000],
+              &_primitive_variables[5 * index100],
+              &_primitive_variable_gradients[15 * index100], _cell_size[0],
+              _cell_areas[0], &_delta_conserved_variables[5 * index000],
+              &_delta_conserved_variables[5 * index100]);
+          // y direction
+          hydro.do_flux_calculation(
+              1, &_primitive_variables[5 * index000],
+              &_primitive_variable_gradients[15 * index000],
+              &_primitive_variables[5 * index010],
+              &_primitive_variable_gradients[15 * index010], _cell_size[1],
+              _cell_areas[1], &_delta_conserved_variables[5 * index000],
+              &_delta_conserved_variables[5 * index010]);
+          // z direction
+          hydro.do_flux_calculation(
+              2, &_primitive_variables[5 * index000],
+              &_primitive_variable_gradients[15 * index000],
+              &_primitive_variables[5 * index001],
+              &_primitive_variable_gradients[15 * index001], _cell_size[2],
+              _cell_areas[2], &_delta_conserved_variables[5 * index000],
+              &_delta_conserved_variables[5 * index001]);
+        }
+        // do the missing x and y fluxes
+        const int iz = _number_of_cells[2] - 1;
+        {
+          const unsigned int index000 =
+              ix * _number_of_cells[3] + iy * _number_of_cells[2] + iz;
+          const unsigned int index010 =
+              ix * _number_of_cells[3] + (iy + 1) * _number_of_cells[2] + iz;
+          const unsigned int index100 =
+              (ix + 1) * _number_of_cells[3] + iy * _number_of_cells[2] + iz;
+          // x direction
+          hydro.do_flux_calculation(
+              0, &_primitive_variables[5 * index000],
+              &_primitive_variable_gradients[15 * index000],
+              &_primitive_variables[5 * index100],
+              &_primitive_variable_gradients[15 * index100], _cell_size[0],
+              _cell_areas[0], &_delta_conserved_variables[5 * index000],
+              &_delta_conserved_variables[5 * index100]);
+          // y direction
+          hydro.do_flux_calculation(
+              1, &_primitive_variables[5 * index000],
+              &_primitive_variable_gradients[15 * index000],
+              &_primitive_variables[5 * index010],
+              &_primitive_variable_gradients[15 * index010], _cell_size[1],
+              _cell_areas[1], &_delta_conserved_variables[5 * index000],
+              &_delta_conserved_variables[5 * index010]);
+        }
+      }
+      // do the missing x and z fluxes
+      const int iy = _number_of_cells[1] - 1;
+      for (int iz = 0; iz < _number_of_cells[2] - 1; ++iz) {
+        const unsigned int index000 =
+            ix * _number_of_cells[3] + iy * _number_of_cells[2] + iz;
+        const unsigned int index001 =
+            ix * _number_of_cells[3] + iy * _number_of_cells[2] + iz + 1;
+        const unsigned int index100 =
+            (ix + 1) * _number_of_cells[3] + iy * _number_of_cells[2] + iz;
+        // x direction
+        hydro.do_flux_calculation(0, &_primitive_variables[5 * index000],
+                                  &_primitive_variable_gradients[15 * index000],
+                                  &_primitive_variables[5 * index100],
+                                  &_primitive_variable_gradients[15 * index100],
+                                  _cell_size[0], _cell_areas[0],
+                                  &_delta_conserved_variables[5 * index000],
+                                  &_delta_conserved_variables[5 * index100]);
+        // z direction
+        hydro.do_flux_calculation(2, &_primitive_variables[5 * index000],
+                                  &_primitive_variable_gradients[15 * index000],
+                                  &_primitive_variables[5 * index001],
+                                  &_primitive_variable_gradients[15 * index001],
+                                  _cell_size[2], _cell_areas[2],
+                                  &_delta_conserved_variables[5 * index000],
+                                  &_delta_conserved_variables[5 * index001]);
+      }
+      // do the missing x flux
+      {
+        const int iz = _number_of_cells[2] - 1;
+        const unsigned int index000 =
+            ix * _number_of_cells[3] + iy * _number_of_cells[2] + iz;
+        const unsigned int index100 =
+            (ix + 1) * _number_of_cells[3] + iy * _number_of_cells[2] + iz;
+        // x direction
+        hydro.do_flux_calculation(0, &_primitive_variables[5 * index000],
+                                  &_primitive_variable_gradients[15 * index000],
+                                  &_primitive_variables[5 * index100],
+                                  &_primitive_variable_gradients[15 * index100],
+                                  _cell_size[0], _cell_areas[0],
+                                  &_delta_conserved_variables[5 * index000],
+                                  &_delta_conserved_variables[5 * index100]);
+      }
+    }
+    // do the missing y and z fluxes
+    const int ix = _number_of_cells[0] - 1;
+    for (int iy = 0; iy < _number_of_cells[1] - 1; ++iy) {
+      for (int iz = 0; iz < _number_of_cells[2] - 1; ++iz) {
+        const unsigned int index000 =
+            ix * _number_of_cells[3] + iy * _number_of_cells[2] + iz;
+        const unsigned int index001 =
+            ix * _number_of_cells[3] + iy * _number_of_cells[2] + iz + 1;
+        const unsigned int index010 =
+            ix * _number_of_cells[3] + (iy + 1) * _number_of_cells[2] + iz;
+        // y direction
+        hydro.do_flux_calculation(1, &_primitive_variables[5 * index000],
+                                  &_primitive_variable_gradients[15 * index000],
+                                  &_primitive_variables[5 * index010],
+                                  &_primitive_variable_gradients[15 * index010],
+                                  _cell_size[1], _cell_areas[1],
+                                  &_delta_conserved_variables[5 * index000],
+                                  &_delta_conserved_variables[5 * index010]);
+        // z direction
+        hydro.do_flux_calculation(2, &_primitive_variables[5 * index000],
+                                  &_primitive_variable_gradients[15 * index000],
+                                  &_primitive_variables[5 * index001],
+                                  &_primitive_variable_gradients[15 * index001],
+                                  _cell_size[2], _cell_areas[2],
+                                  &_delta_conserved_variables[5 * index000],
+                                  &_delta_conserved_variables[5 * index001]);
+      }
+      // do the missing y flux
+      {
+        const int iz = _number_of_cells[2] - 1;
+        const unsigned int index000 =
+            ix * _number_of_cells[3] + iy * _number_of_cells[2] + iz;
+        const unsigned int index010 =
+            ix * _number_of_cells[3] + (iy + 1) * _number_of_cells[2] + iz;
+        // y direction
+        hydro.do_flux_calculation(1, &_primitive_variables[5 * index000],
+                                  &_primitive_variable_gradients[15 * index000],
+                                  &_primitive_variables[5 * index010],
+                                  &_primitive_variable_gradients[15 * index010],
+                                  _cell_size[1], _cell_areas[1],
+                                  &_delta_conserved_variables[5 * index000],
+                                  &_delta_conserved_variables[5 * index010]);
+      }
+    }
+  }
+
+  /**
+   * @brief Compute the hydrodynamical fluxes for all interfaces at the boundary
+   * between this subgrid and the given neighbouring subgrid.
+   *
+   * @param direction TravelDirection of the neighbour.
+   * @param hydro Hydro instance to use.
+   * @param neighbour Neighbouring DensitySubGrid.
+   */
+  inline void outer_flux_sweep(const int direction, const Hydro &hydro,
+                               DensitySubGrid &neighbour) {
+    int i;
+    unsigned int index_left, index_right, row_increment, row_length,
+        column_increment, column_length;
+    double dx, A;
+    DensitySubGrid *left_grid, *right_grid;
+    switch (direction) {
+    case TRAVELDIRECTION_FACE_X_P:
+      i = 0;
+      left_grid = this;
+      right_grid = &neighbour;
+      index_left = (_number_of_cells[0] - 1) * _number_of_cells[3];
+      index_right = 0;
+      row_increment = 1;
+      row_length = _number_of_cells[2];
+      column_increment = _number_of_cells[2];
+      column_length = _number_of_cells[1];
+      dx = _cell_size[0];
+      A = _cell_areas[0];
+      break;
+    case TRAVELDIRECTION_FACE_X_N:
+      i = 0;
+      left_grid = &neighbour;
+      right_grid = this;
+      index_left = (_number_of_cells[0] - 1) * _number_of_cells[3];
+      index_right = 0;
+      row_increment = 1;
+      row_length = _number_of_cells[2];
+      column_increment = _number_of_cells[2];
+      column_length = _number_of_cells[1];
+      dx = -_cell_size[0];
+      A = _cell_areas[0];
+      break;
+    case TRAVELDIRECTION_FACE_Y_P:
+      i = 1;
+      left_grid = this;
+      right_grid = &neighbour;
+      index_left = (_number_of_cells[1] - 1) * _number_of_cells[2];
+      index_right = 0;
+      row_increment = 1;
+      row_length = _number_of_cells[2];
+      column_increment = _number_of_cells[3];
+      column_length = _number_of_cells[0];
+      dx = _cell_size[1];
+      A = _cell_areas[1];
+      break;
+    case TRAVELDIRECTION_FACE_Y_N:
+      i = 1;
+      left_grid = &neighbour;
+      right_grid = this;
+      index_left = (_number_of_cells[1] - 1) * _number_of_cells[2];
+      index_right = 0;
+      row_increment = 1;
+      row_length = _number_of_cells[2];
+      column_increment = _number_of_cells[3];
+      column_length = _number_of_cells[0];
+      dx = -_cell_size[1];
+      A = _cell_areas[1];
+      break;
+    case TRAVELDIRECTION_FACE_Z_P:
+      i = 2;
+      left_grid = this;
+      right_grid = &neighbour;
+      index_left = _number_of_cells[2] - 1;
+      index_right = 0;
+      row_increment = _number_of_cells[2];
+      row_length = _number_of_cells[1];
+      column_increment = _number_of_cells[3];
+      column_length = _number_of_cells[0];
+      dx = _cell_size[2];
+      A = _cell_areas[2];
+      break;
+    case TRAVELDIRECTION_FACE_Z_N:
+      i = 2;
+      left_grid = &neighbour;
+      right_grid = this;
+      index_left = _number_of_cells[2] - 1;
+      index_right = 0;
+      row_increment = _number_of_cells[2];
+      row_length = _number_of_cells[1];
+      column_increment = _number_of_cells[3];
+      column_length = _number_of_cells[0];
+      dx = -_cell_size[2];
+      A = _cell_areas[2];
+      break;
+    default:
+      cmac_error("Unknown hydro neighbour: %i", direction);
+      break;
+    }
+
+    for (unsigned int ic = 0; ic < column_length; ++ic) {
+      for (unsigned int ir = 0; ir < row_length; ++ir) {
+        hydro.do_flux_calculation(
+            i, &left_grid->_primitive_variables[5 * index_left],
+            &left_grid->_primitive_variable_gradients[15 * index_left],
+            &right_grid->_primitive_variables[5 * index_right],
+            &right_grid->_primitive_variable_gradients[15 * index_right], dx, A,
+            &left_grid->_delta_conserved_variables[5 * index_left],
+            &right_grid->_delta_conserved_variables[5 * index_right]);
+        index_left += row_increment;
+        index_right += row_increment;
+      }
+      index_left += column_increment;
+      index_right += column_increment;
+    }
   }
 };
 

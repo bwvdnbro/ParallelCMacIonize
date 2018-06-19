@@ -83,6 +83,12 @@ int main(int argc, char **argv) {
         i, random_generator.get_uniform_random_double());
     test_grid.set_intensity_integral(
         i, random_generator.get_uniform_random_double());
+    const double v[3] = {random_generator.get_uniform_random_double(),
+                         random_generator.get_uniform_random_double(),
+                         random_generator.get_uniform_random_double()};
+    test_grid.set_primitive_variables(
+        i, random_generator.get_uniform_random_double(), v,
+        random_generator.get_uniform_random_double());
   }
 
   // now communicate:

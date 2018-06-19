@@ -27,6 +27,11 @@
 #include "DensitySubGrid.hpp"
 #include "Hydro.hpp"
 
+#include <fstream>
+
+// global variables, as we need them in the log macro
+int MPI_rank, MPI_size;
+
 /**
  * @brief Test for the hydro.
  *
@@ -37,7 +42,7 @@
 int main(int argc, char **argv) {
 
   const double box[6] = {-0.5, -0.5, -0.5, 1., 1., 1.};
-  const int ncell[3] = {100, 1, 1};
+  const int ncell[3] = {1000, 1, 1};
   const unsigned int tot_ncell = ncell[0] * ncell[1] * ncell[2];
   DensitySubGrid test_grid(box, ncell);
 
@@ -61,10 +66,26 @@ int main(int argc, char **argv) {
     test_grid.set_primitive_variables(i, density, velocity, pressure);
   }
 
+  const double dt = 0.0001;
   Hydro hydro;
 
   test_grid.initialize_conserved_variables(hydro);
+  for (unsigned int istep = 0; istep < 1000; ++istep) {
+    // flux exchanges
+    test_grid.inner_flux_sweep(hydro);
+    test_grid.outer_flux_sweep(TRAVELDIRECTION_FACE_X_P, hydro, test_grid);
+    test_grid.outer_flux_sweep(TRAVELDIRECTION_FACE_Y_P, hydro, test_grid);
+    test_grid.outer_flux_sweep(TRAVELDIRECTION_FACE_Z_P, hydro, test_grid);
 
+    // conserved variable update
+    test_grid.update_conserved_variables(dt);
+
+    // primitive variable update
+    test_grid.update_primitive_variables(hydro);
+  }
+
+  std::ofstream ofile("hydro.txt");
+  test_grid.print_intensities(ofile);
   MemoryMap file("hydro.dat", test_grid.get_output_size());
   test_grid.output_intensities(0, file);
 
