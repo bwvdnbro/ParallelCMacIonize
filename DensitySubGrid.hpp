@@ -1631,6 +1631,22 @@ public:
   }
 
   /**
+   * @brief Half time step prediction for the primitive variables.
+   *
+   * @param hydro Hydro instance to use.
+   * @param timestep Half system time step (in s).
+   */
+  inline void predict_primitive_variables(const Hydro &hydro,
+                                          const double timestep) {
+    const int tot_num_cells = _number_of_cells[0] * _number_of_cells[3];
+    for (int i = 0; i < tot_num_cells; ++i) {
+      hydro.predict_primitive_variables(&_primitive_variables[5 * i],
+                                        &_primitive_variable_gradients[15 * i],
+                                        timestep);
+    }
+  }
+
+  /**
    * @brief Apply the slope limiter to all primitive variable gradients.
    *
    * @param hydro Hydro instance to use.
@@ -1881,7 +1897,7 @@ public:
       row_length = _number_of_cells[2];
       column_increment = _number_of_cells[2];
       column_length = _number_of_cells[1];
-      dx = -_cell_size[0];
+      dx = _cell_size[0];
       A = _cell_areas[0];
       break;
     case TRAVELDIRECTION_FACE_Y_P:
@@ -1907,7 +1923,7 @@ public:
       row_length = _number_of_cells[2];
       column_increment = _number_of_cells[3];
       column_length = _number_of_cells[0];
-      dx = -_cell_size[1];
+      dx = _cell_size[1];
       A = _cell_areas[1];
       break;
     case TRAVELDIRECTION_FACE_Z_P:
@@ -1933,7 +1949,7 @@ public:
       row_length = _number_of_cells[1];
       column_increment = _number_of_cells[3];
       column_length = _number_of_cells[0];
-      dx = -_cell_size[2];
+      dx = _cell_size[2];
       A = _cell_areas[2];
       break;
     default:
@@ -1956,6 +1972,101 @@ public:
             &right_grid->_primitive_variable_gradients[15 * index_right], dx, A,
             &left_grid->_delta_conserved_variables[5 * index_left],
             &right_grid->_delta_conserved_variables[5 * index_right]);
+      }
+    }
+  }
+
+  /**
+   * @brief Compute the hydrodynamical fluxes for all interfaces at the boundary
+   * between this subgrid and the given box boundary.
+   *
+   * @param direction TravelDirection of the neighbour.
+   * @param hydro Hydro instance to use.
+   * @param boundary HydroBoundary that sets the right state primitive
+   * variables.
+   */
+  inline void outer_ghost_flux_sweep(const int direction, const Hydro &hydro,
+                                     const HydroBoundary &boundary) {
+    int i;
+    unsigned int start_index_left, row_increment, row_length, column_increment,
+        column_length;
+    double dx, A;
+    switch (direction) {
+    case TRAVELDIRECTION_FACE_X_P:
+      i = 0;
+      start_index_left = (_number_of_cells[0] - 1) * _number_of_cells[3];
+      row_increment = 1;
+      row_length = _number_of_cells[2];
+      column_increment = _number_of_cells[2];
+      column_length = _number_of_cells[1];
+      dx = _cell_size[0];
+      A = _cell_areas[0];
+      break;
+    case TRAVELDIRECTION_FACE_X_N:
+      i = 0;
+      start_index_left = 0;
+      row_increment = 1;
+      row_length = _number_of_cells[2];
+      column_increment = _number_of_cells[2];
+      column_length = _number_of_cells[1];
+      dx = -_cell_size[0];
+      A = _cell_areas[0];
+      break;
+    case TRAVELDIRECTION_FACE_Y_P:
+      i = 1;
+      start_index_left = (_number_of_cells[1] - 1) * _number_of_cells[2];
+      row_increment = 1;
+      row_length = _number_of_cells[2];
+      column_increment = _number_of_cells[3];
+      column_length = _number_of_cells[0];
+      dx = _cell_size[1];
+      A = _cell_areas[1];
+      break;
+    case TRAVELDIRECTION_FACE_Y_N:
+      i = 1;
+      start_index_left = 0;
+      row_increment = 1;
+      row_length = _number_of_cells[2];
+      column_increment = _number_of_cells[3];
+      column_length = _number_of_cells[0];
+      dx = -_cell_size[1];
+      A = _cell_areas[1];
+      break;
+    case TRAVELDIRECTION_FACE_Z_P:
+      i = 2;
+      start_index_left = _number_of_cells[2] - 1;
+      row_increment = _number_of_cells[2];
+      row_length = _number_of_cells[1];
+      column_increment = _number_of_cells[3];
+      column_length = _number_of_cells[0];
+      dx = _cell_size[2];
+      A = _cell_areas[2];
+      break;
+    case TRAVELDIRECTION_FACE_Z_N:
+      i = 2;
+      start_index_left = 0;
+      row_increment = _number_of_cells[2];
+      row_length = _number_of_cells[1];
+      column_increment = _number_of_cells[3];
+      column_length = _number_of_cells[0];
+      dx = -_cell_size[2];
+      A = _cell_areas[2];
+      break;
+    default:
+      cmac_error("Unknown hydro neighbour: %i", direction);
+      break;
+    }
+
+    // using the index computation below is (much) faster than setting the
+    // increment correctly and summing the indices manually
+    for (unsigned int ic = 0; ic < column_length; ++ic) {
+      for (unsigned int ir = 0; ir < row_length; ++ir) {
+        const unsigned int index_left =
+            start_index_left + ic * column_increment + ir * row_increment;
+        hydro.do_ghost_flux_calculation(
+            i, &_primitive_variables[5 * index_left],
+            &_primitive_variable_gradients[15 * index_left], boundary, dx, A,
+            &_delta_conserved_variables[5 * index_left]);
       }
     }
   }
@@ -2161,7 +2272,7 @@ public:
       row_length = _number_of_cells[2];
       column_increment = _number_of_cells[2];
       column_length = _number_of_cells[1];
-      dxinv = -_inv_cell_size[0];
+      dxinv = _inv_cell_size[0];
       break;
     case TRAVELDIRECTION_FACE_Y_P:
       i = 1;
@@ -2185,7 +2296,7 @@ public:
       row_length = _number_of_cells[2];
       column_increment = _number_of_cells[3];
       column_length = _number_of_cells[0];
-      dxinv = -_inv_cell_size[1];
+      dxinv = _inv_cell_size[1];
       break;
     case TRAVELDIRECTION_FACE_Z_P:
       i = 2;
@@ -2209,7 +2320,7 @@ public:
       row_length = _number_of_cells[1];
       column_increment = _number_of_cells[3];
       column_length = _number_of_cells[0];
-      dxinv = -_inv_cell_size[2];
+      dxinv = _inv_cell_size[2];
       break;
     default:
       cmac_error("Unknown hydro neighbour: %i", direction);
@@ -2231,6 +2342,104 @@ public:
             &left_grid->_primitive_variable_limiters[10 * index_left],
             &right_grid->_primitive_variable_gradients[15 * index_right],
             &right_grid->_primitive_variable_limiters[10 * index_right]);
+      }
+    }
+  }
+
+  /**
+   * @brief Compute the hydrodynamical gradients for all interfaces at the
+   * boundary between this subgrid and the given box boundary with boundary
+   * condition.
+   *
+   * @param direction TravelDirection of the neighbour.
+   * @param hydro Hydro instance to use.
+   * @param boundary HydroBoundary that sets the right state primitive
+   * variables.
+   */
+  inline void outer_ghost_gradient_sweep(const int direction,
+                                         const Hydro &hydro,
+                                         const HydroBoundary &boundary) {
+    int i;
+    unsigned int start_index_left, row_increment, row_length, column_increment,
+        column_length;
+    double dxinv;
+    DensitySubGrid *left_grid;
+    switch (direction) {
+    case TRAVELDIRECTION_FACE_X_P:
+      i = 0;
+      left_grid = this;
+      start_index_left = (_number_of_cells[0] - 1) * _number_of_cells[3];
+      row_increment = 1;
+      row_length = _number_of_cells[2];
+      column_increment = _number_of_cells[2];
+      column_length = _number_of_cells[1];
+      dxinv = _inv_cell_size[0];
+      break;
+    case TRAVELDIRECTION_FACE_X_N:
+      i = 0;
+      left_grid = this;
+      start_index_left = 0;
+      row_increment = 1;
+      row_length = _number_of_cells[2];
+      column_increment = _number_of_cells[2];
+      column_length = _number_of_cells[1];
+      dxinv = -_inv_cell_size[0];
+      break;
+    case TRAVELDIRECTION_FACE_Y_P:
+      i = 1;
+      left_grid = this;
+      start_index_left = (_number_of_cells[1] - 1) * _number_of_cells[2];
+      row_increment = 1;
+      row_length = _number_of_cells[2];
+      column_increment = _number_of_cells[3];
+      column_length = _number_of_cells[0];
+      dxinv = _inv_cell_size[1];
+      break;
+    case TRAVELDIRECTION_FACE_Y_N:
+      i = 1;
+      left_grid = this;
+      start_index_left = 0;
+      row_increment = 1;
+      row_length = _number_of_cells[2];
+      column_increment = _number_of_cells[3];
+      column_length = _number_of_cells[0];
+      dxinv = -_inv_cell_size[1];
+      break;
+    case TRAVELDIRECTION_FACE_Z_P:
+      i = 2;
+      left_grid = this;
+      start_index_left = _number_of_cells[2] - 1;
+      row_increment = _number_of_cells[2];
+      row_length = _number_of_cells[1];
+      column_increment = _number_of_cells[3];
+      column_length = _number_of_cells[0];
+      dxinv = _inv_cell_size[2];
+      break;
+    case TRAVELDIRECTION_FACE_Z_N:
+      i = 2;
+      left_grid = this;
+      start_index_left = 0;
+      row_increment = _number_of_cells[2];
+      row_length = _number_of_cells[1];
+      column_increment = _number_of_cells[3];
+      column_length = _number_of_cells[0];
+      dxinv = -_inv_cell_size[2];
+      break;
+    default:
+      cmac_error("Unknown hydro neighbour: %i", direction);
+      break;
+    }
+
+    // using the index computation below is (much) faster than setting the
+    // increment correctly and summing the indices manually
+    for (unsigned int ic = 0; ic < column_length; ++ic) {
+      for (unsigned int ir = 0; ir < row_length; ++ir) {
+        const unsigned int index_left =
+            start_index_left + ic * column_increment + ir * row_increment;
+        hydro.do_ghost_gradient_calculation(
+            i, &left_grid->_primitive_variables[5 * index_left], boundary,
+            dxinv, &left_grid->_primitive_variable_gradients[15 * index_left],
+            &left_grid->_primitive_variable_limiters[10 * index_left]);
       }
     }
   }

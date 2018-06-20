@@ -27,6 +27,9 @@
 /*! @brief Ascii output of the result. */
 //#define ASCII_OUTPUT
 
+/*! @brief Second order hydro scheme. */
+#define SECOND_ORDER
+
 #include "DensitySubGrid.hpp"
 #include "Hydro.hpp"
 #include "Timer.hpp"
@@ -141,61 +144,88 @@ int main(int argc, char **argv) {
 
   /// DensitySubGrid hydro
   {
-    const double box[6] = {-0.5, -0.5, -0.5, 1., 1., 1.};
-    const int ncell[3] = {100, 50, 50};
+    const double box1[6] = {-0.5, -0.25, -0.25, 0.5, 0.5, 0.5};
+    const double box2[6] = {0., -0.25, -0.25, 0.5, 0.5, 0.5};
+    const int ncell[3] = {50, 50, 50};
     const unsigned int tot_ncell = ncell[0] * ncell[1] * ncell[2];
-    DensitySubGrid test_grid(box, ncell);
+    DensitySubGrid test_grid1(box1, ncell);
+    DensitySubGrid test_grid2(box2, ncell);
 
     for (unsigned int i = 0; i < tot_ncell; ++i) {
-      double midpoint[3];
-      test_grid.get_cell_midpoint(i, midpoint);
       double density, velocity[3], pressure;
-      if (midpoint[0] <= 0.) {
-        density = 1.;
-        velocity[0] = 0.;
-        velocity[1] = 0.;
-        velocity[2] = 0.;
-        pressure = 1.;
-      } else {
-        density = 0.125;
-        velocity[0] = 0.;
-        velocity[1] = 0.;
-        velocity[2] = 0.;
-        pressure = 0.1;
-      }
-      test_grid.set_primitive_variables(i, density, velocity, pressure);
+      density = 1.;
+      velocity[0] = 0.;
+      velocity[1] = 0.;
+      velocity[2] = 0.;
+      pressure = 1.;
+      test_grid1.set_primitive_variables(i, density, velocity, pressure);
+
+      density = 0.125;
+      velocity[0] = 0.;
+      velocity[1] = 0.;
+      velocity[2] = 0.;
+      pressure = 0.1;
+      test_grid2.set_primitive_variables(i, density, velocity, pressure);
     }
 
     const double dt = 0.001;
     Hydro hydro;
+    HydroBoundary boundary;
 
-    test_grid.initialize_conserved_variables(hydro);
+    test_grid1.initialize_conserved_variables(hydro);
+    test_grid2.initialize_conserved_variables(hydro);
     Timer hydro_timer;
     hydro_timer.start();
     for (unsigned int istep = 0; istep < 100; ++istep) {
+
+#ifdef SECOND_ORDER
       // gradient calculations
-      test_grid.inner_gradient_sweep(hydro);
-      test_grid.outer_gradient_sweep(TRAVELDIRECTION_FACE_X_P, hydro,
-                                     test_grid);
-      test_grid.outer_gradient_sweep(TRAVELDIRECTION_FACE_Y_P, hydro,
-                                     test_grid);
-      test_grid.outer_gradient_sweep(TRAVELDIRECTION_FACE_Z_P, hydro,
-                                     test_grid);
+      test_grid1.inner_gradient_sweep(hydro);
+      test_grid1.outer_ghost_gradient_sweep(TRAVELDIRECTION_FACE_X_N, hydro,
+                                            boundary);
+      test_grid1.outer_gradient_sweep(TRAVELDIRECTION_FACE_X_P, hydro,
+                                      test_grid2);
+      test_grid1.outer_gradient_sweep(TRAVELDIRECTION_FACE_Y_P, hydro,
+                                      test_grid1);
+      test_grid1.outer_gradient_sweep(TRAVELDIRECTION_FACE_Z_P, hydro,
+                                      test_grid1);
+      test_grid2.inner_gradient_sweep(hydro);
+      test_grid2.outer_ghost_gradient_sweep(TRAVELDIRECTION_FACE_X_P, hydro,
+                                            boundary);
+      test_grid2.outer_gradient_sweep(TRAVELDIRECTION_FACE_Y_P, hydro,
+                                      test_grid2);
+      test_grid2.outer_gradient_sweep(TRAVELDIRECTION_FACE_Z_P, hydro,
+                                      test_grid2);
 
       // slope limiting
-      test_grid.apply_slope_limiter(hydro);
+      test_grid1.apply_slope_limiter(hydro);
+      test_grid2.apply_slope_limiter(hydro);
+
+      // second order time prediction
+      test_grid1.predict_primitive_variables(hydro, 0.5 * dt);
+      test_grid2.predict_primitive_variables(hydro, 0.5 * dt);
+#endif
 
       // flux exchanges
-      test_grid.inner_flux_sweep(hydro);
-      test_grid.outer_flux_sweep(TRAVELDIRECTION_FACE_X_P, hydro, test_grid);
-      test_grid.outer_flux_sweep(TRAVELDIRECTION_FACE_Y_P, hydro, test_grid);
-      test_grid.outer_flux_sweep(TRAVELDIRECTION_FACE_Z_P, hydro, test_grid);
+      test_grid1.inner_flux_sweep(hydro);
+      test_grid1.outer_ghost_flux_sweep(TRAVELDIRECTION_FACE_X_N, hydro,
+                                        boundary);
+      test_grid1.outer_flux_sweep(TRAVELDIRECTION_FACE_X_P, hydro, test_grid2);
+      test_grid1.outer_flux_sweep(TRAVELDIRECTION_FACE_Y_P, hydro, test_grid1);
+      test_grid1.outer_flux_sweep(TRAVELDIRECTION_FACE_Z_P, hydro, test_grid1);
+      test_grid2.inner_flux_sweep(hydro);
+      test_grid2.outer_ghost_flux_sweep(TRAVELDIRECTION_FACE_X_P, hydro,
+                                        boundary);
+      test_grid2.outer_flux_sweep(TRAVELDIRECTION_FACE_Y_P, hydro, test_grid2);
+      test_grid2.outer_flux_sweep(TRAVELDIRECTION_FACE_Z_P, hydro, test_grid2);
 
       // conserved variable update
-      test_grid.update_conserved_variables(dt);
+      test_grid1.update_conserved_variables(dt);
+      test_grid2.update_conserved_variables(dt);
 
       // primitive variable update
-      test_grid.update_primitive_variables(hydro);
+      test_grid1.update_primitive_variables(hydro);
+      test_grid2.update_primitive_variables(hydro);
     }
     hydro_timer.stop();
 
@@ -203,10 +233,12 @@ int main(int argc, char **argv) {
 
 #ifdef ASCII_OUTPUT
     std::ofstream ofile("hydro.txt");
-    test_grid.print_intensities(ofile);
+    test_grid1.print_intensities(ofile);
+    test_grid2.print_intensities(ofile);
 #endif
-    MemoryMap file("hydro.dat", test_grid.get_output_size());
-    test_grid.output_intensities(0, file);
+    MemoryMap file("hydro.dat", 2 * test_grid1.get_output_size());
+    test_grid1.output_intensities(0, file);
+    test_grid2.output_intensities(test_grid1.get_output_size(), file);
   }
 
   return 0;
