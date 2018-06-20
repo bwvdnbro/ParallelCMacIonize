@@ -30,14 +30,45 @@
 /*! @brief Second order hydro scheme. */
 #define SECOND_ORDER
 
+#include "Atomic.hpp"
 #include "DensitySubGrid.hpp"
 #include "Hydro.hpp"
+#include "HydroIC.hpp"
 #include "Timer.hpp"
 
 #include <fstream>
+#include <vector>
 
 // global variables, as we need them in the log macro
 int MPI_rank, MPI_size;
+
+/**
+ * @brief Output the subgrid values for inspection of the physical result.
+ *
+ * @param gridvec Subgrids.
+ * @param tot_num_subgrid Total number of original subgrids.
+ */
+inline void output_result(const std::vector< DensitySubGrid * > &gridvec,
+                          const unsigned int tot_num_subgrid) {
+
+  const size_t blocksize = gridvec[0]->get_output_size();
+
+  MemoryMap file("hydro_result.dat", tot_num_subgrid * blocksize);
+
+  // write the subgrids using multiple threads
+  Atomic< unsigned int > igrid(0);
+#pragma omp parallel default(shared)
+  {
+    while (igrid.value() < tot_num_subgrid) {
+      const unsigned int this_igrid = igrid.post_increment();
+      // only write local subgrids
+      if (this_igrid < tot_num_subgrid) {
+        const size_t offset = this_igrid * blocksize;
+        gridvec[this_igrid]->output_intensities(offset, file);
+      }
+    }
+  }
+}
 
 /**
  * @brief Test for the hydro.
@@ -169,9 +200,9 @@ int main(int argc, char **argv) {
     }
 
     const double dt = 0.001;
-    Hydro hydro;
-    InflowHydroBoundary inflow_boundary;
-    ReflectiveHydroBoundary reflective_boundary;
+    const Hydro hydro;
+    const InflowHydroBoundary inflow_boundary;
+    const ReflectiveHydroBoundary reflective_boundary;
 
     test_grid1.initialize_conserved_variables(hydro);
     test_grid2.initialize_conserved_variables(hydro);
@@ -263,6 +294,214 @@ int main(int argc, char **argv) {
     test_grid1.output_intensities(0, file);
     test_grid2.output_intensities(test_grid1.get_output_size(), file);
   }
+
+  /// The real stuff: task based hydro
+
+  const SodShockHydroIC sodshock_ic;
+  const double box[6] = {-0.5, -0.5, -0.5, 1., 1., 1.};
+  const int ncell[3] = {64, 64, 64};
+  const int num_subgrid[3] = {8, 8, 8};
+  const unsigned int tot_num_subgrid =
+      num_subgrid[0] * num_subgrid[1] * num_subgrid[2];
+
+  std::vector< DensitySubGrid * > gridvec(tot_num_subgrid, nullptr);
+
+  const double subbox_side[3] = {box[3] / num_subgrid[0],
+                                 box[4] / num_subgrid[1],
+                                 box[5] / num_subgrid[2]};
+  const int subbox_ncell[3] = {ncell[0] / num_subgrid[0],
+                               ncell[1] / num_subgrid[1],
+                               ncell[2] / num_subgrid[2]};
+
+  // set up the subgrids (in parallel)
+  Atomic< unsigned int > atomic_index(0);
+#pragma omp parallel default(shared)
+  {
+    // id of this specific thread
+    const int thread_id = omp_get_thread_num();
+    while (atomic_index.value() < tot_num_subgrid) {
+      const unsigned int index = atomic_index.post_increment();
+      if (index < tot_num_subgrid) {
+        const int ix = index / (num_subgrid[1] * num_subgrid[2]);
+        const int iy =
+            (index - ix * num_subgrid[1] * num_subgrid[2]) / num_subgrid[2];
+        const int iz =
+            index - ix * num_subgrid[1] * num_subgrid[2] - iy * num_subgrid[2];
+        const double subbox[6] = {box[0] + ix * subbox_side[0],
+                                  box[1] + iy * subbox_side[1],
+                                  box[2] + iz * subbox_side[2],
+                                  subbox_side[0],
+                                  subbox_side[1],
+                                  subbox_side[2]};
+        gridvec[index] = new DensitySubGrid(subbox, subbox_ncell);
+        gridvec[index]->set_primitive_variables(sodshock_ic);
+        DensitySubGrid &this_grid = *gridvec[index];
+        this_grid.set_owning_thread(thread_id);
+        // set up neighbouring information. We first make sure all
+        // neighbours are initialized to NEIGHBOUR_OUTSIDE, indicating no
+        // neighbour
+        for (int i = 0; i < TRAVELDIRECTION_NUMBER; ++i) {
+          this_grid.set_neighbour(i, NEIGHBOUR_OUTSIDE);
+          this_grid.set_active_buffer(i, NEIGHBOUR_OUTSIDE);
+        }
+        // now set up the correct neighbour relations for the neighbours
+        // that exist
+        for (int nix = -1; nix < 2; ++nix) {
+          for (int niy = -1; niy < 2; ++niy) {
+            for (int niz = -1; niz < 2; ++niz) {
+              // get neighbour corrected indices
+              const int cix = ix + nix;
+              const int ciy = iy + niy;
+              const int ciz = iz + niz;
+              // if the indices above point to a real subgrid: set up the
+              // neighbour relations
+              if (cix >= 0 && cix < num_subgrid[0] && ciy >= 0 &&
+                  ciy < num_subgrid[1] && ciz >= 0 && ciz < num_subgrid[2]) {
+                // we use get_output_direction() to get the correct index
+                // for the neighbour
+                // the three_index components will either be
+                //  - -ncell --> negative --> lower limit
+                //  - 0 --> in range --> inside
+                //  - ncell --> upper limit
+                const int three_index[3] = {nix * subbox_ncell[0],
+                                            niy * subbox_ncell[1],
+                                            niz * subbox_ncell[2]};
+                const int ngbi = this_grid.get_output_direction(three_index);
+                // now get the actual ngb index
+                const unsigned int ngb_index =
+                    cix * num_subgrid[1] * num_subgrid[2] +
+                    ciy * num_subgrid[2] + ciz;
+                this_grid.set_neighbour(ngbi, ngb_index);
+              } // if ci
+            }   // for niz
+          }     // for niy
+        }       // for nix
+      }         // if local index
+    }
+  } // end parallel region
+
+  const Hydro hydro;
+  const InflowHydroBoundary inflow_boundary;
+
+  for (unsigned int igrid = 0; igrid < tot_num_subgrid; ++igrid) {
+    gridvec[igrid]->initialize_conserved_variables(hydro);
+  }
+
+  const double dt = 0.001;
+  for (unsigned int istep = 0; istep < 100; ++istep) {
+    // gradient computation and prediction
+    for (unsigned int igrid = 0; igrid < tot_num_subgrid; ++igrid) {
+      DensitySubGrid &this_grid = *gridvec[igrid];
+      // inner sweep
+      this_grid.inner_gradient_sweep(hydro);
+      // outer sweeps
+      if (this_grid.get_neighbour(TRAVELDIRECTION_FACE_X_N) ==
+          NEIGHBOUR_OUTSIDE) {
+        this_grid.outer_ghost_gradient_sweep(TRAVELDIRECTION_FACE_X_N, hydro,
+                                             inflow_boundary);
+      }
+      const unsigned int ngbx =
+          this_grid.get_neighbour(TRAVELDIRECTION_FACE_X_P);
+      if (ngbx == NEIGHBOUR_OUTSIDE) {
+        this_grid.outer_ghost_gradient_sweep(TRAVELDIRECTION_FACE_X_P, hydro,
+                                             inflow_boundary);
+      } else {
+        this_grid.outer_gradient_sweep(TRAVELDIRECTION_FACE_X_P, hydro,
+                                       *gridvec[ngbx]);
+      }
+      if (this_grid.get_neighbour(TRAVELDIRECTION_FACE_Y_N) ==
+          NEIGHBOUR_OUTSIDE) {
+        this_grid.outer_ghost_gradient_sweep(TRAVELDIRECTION_FACE_Y_N, hydro,
+                                             inflow_boundary);
+      }
+      const unsigned int ngby =
+          this_grid.get_neighbour(TRAVELDIRECTION_FACE_Y_P);
+      if (ngby == NEIGHBOUR_OUTSIDE) {
+        this_grid.outer_ghost_gradient_sweep(TRAVELDIRECTION_FACE_Y_P, hydro,
+                                             inflow_boundary);
+      } else {
+        this_grid.outer_gradient_sweep(TRAVELDIRECTION_FACE_Y_P, hydro,
+                                       *gridvec[ngby]);
+      }
+      if (this_grid.get_neighbour(TRAVELDIRECTION_FACE_Z_N) ==
+          NEIGHBOUR_OUTSIDE) {
+        this_grid.outer_ghost_gradient_sweep(TRAVELDIRECTION_FACE_Z_N, hydro,
+                                             inflow_boundary);
+      }
+      const unsigned int ngbz =
+          this_grid.get_neighbour(TRAVELDIRECTION_FACE_Z_P);
+      if (ngbz == NEIGHBOUR_OUTSIDE) {
+        this_grid.outer_ghost_gradient_sweep(TRAVELDIRECTION_FACE_Z_P, hydro,
+                                             inflow_boundary);
+      } else {
+        this_grid.outer_gradient_sweep(TRAVELDIRECTION_FACE_Z_P, hydro,
+                                       *gridvec[ngbz]);
+      }
+    }
+    for (unsigned int igrid = 0; igrid < tot_num_subgrid; ++igrid) {
+      gridvec[igrid]->apply_slope_limiter(hydro);
+    }
+    for (unsigned int igrid = 0; igrid < tot_num_subgrid; ++igrid) {
+      gridvec[igrid]->predict_primitive_variables(hydro, 0.5 * dt);
+    }
+    // flux exchange
+    for (unsigned int igrid = 0; igrid < tot_num_subgrid; ++igrid) {
+      DensitySubGrid &this_grid = *gridvec[igrid];
+      // inner sweep
+      this_grid.inner_flux_sweep(hydro);
+      // outer sweeps
+      if (this_grid.get_neighbour(TRAVELDIRECTION_FACE_X_N) ==
+          NEIGHBOUR_OUTSIDE) {
+        this_grid.outer_ghost_flux_sweep(TRAVELDIRECTION_FACE_X_N, hydro,
+                                         inflow_boundary);
+      }
+      const unsigned int ngbx =
+          this_grid.get_neighbour(TRAVELDIRECTION_FACE_X_P);
+      if (ngbx == NEIGHBOUR_OUTSIDE) {
+        this_grid.outer_ghost_flux_sweep(TRAVELDIRECTION_FACE_X_P, hydro,
+                                         inflow_boundary);
+      } else {
+        this_grid.outer_flux_sweep(TRAVELDIRECTION_FACE_X_P, hydro,
+                                   *gridvec[ngbx]);
+      }
+      if (this_grid.get_neighbour(TRAVELDIRECTION_FACE_Y_N) ==
+          NEIGHBOUR_OUTSIDE) {
+        this_grid.outer_ghost_flux_sweep(TRAVELDIRECTION_FACE_Y_N, hydro,
+                                         inflow_boundary);
+      }
+      const unsigned int ngby =
+          this_grid.get_neighbour(TRAVELDIRECTION_FACE_Y_P);
+      if (ngby == NEIGHBOUR_OUTSIDE) {
+        this_grid.outer_ghost_flux_sweep(TRAVELDIRECTION_FACE_Y_P, hydro,
+                                         inflow_boundary);
+      } else {
+        this_grid.outer_flux_sweep(TRAVELDIRECTION_FACE_Y_P, hydro,
+                                   *gridvec[ngby]);
+      }
+      if (this_grid.get_neighbour(TRAVELDIRECTION_FACE_Z_N) ==
+          NEIGHBOUR_OUTSIDE) {
+        this_grid.outer_ghost_flux_sweep(TRAVELDIRECTION_FACE_Z_N, hydro,
+                                         inflow_boundary);
+      }
+      const unsigned int ngbz =
+          this_grid.get_neighbour(TRAVELDIRECTION_FACE_Z_P);
+      if (ngbz == NEIGHBOUR_OUTSIDE) {
+        this_grid.outer_ghost_flux_sweep(TRAVELDIRECTION_FACE_Z_P, hydro,
+                                         inflow_boundary);
+      } else {
+        this_grid.outer_flux_sweep(TRAVELDIRECTION_FACE_Z_P, hydro,
+                                   *gridvec[ngbz]);
+      }
+    }
+    for (unsigned int igrid = 0; igrid < tot_num_subgrid; ++igrid) {
+      gridvec[igrid]->update_conserved_variables(dt);
+    }
+    for (unsigned int igrid = 0; igrid < tot_num_subgrid; ++igrid) {
+      gridvec[igrid]->update_primitive_variables(hydro);
+    }
+  }
+
+  output_result(gridvec, tot_num_subgrid);
 
   return 0;
 }

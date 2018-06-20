@@ -40,6 +40,8 @@
 #error "No atomic implementation chosen!"
 #endif
 
+#include <algorithm>
+
 /**
  * @brief Atomic variable.
  */

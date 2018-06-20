@@ -547,11 +547,11 @@ public:
     _primitive_variable_limiters = new double[tot_ncell * 10];
 
     for (int i = 0; i < tot_ncell; ++i) {
-      _conserved_variables[5 * i] = _cell_volume;
+      _conserved_variables[5 * i] = 0.;
       _conserved_variables[5 * i + 1] = 0.;
       _conserved_variables[5 * i + 2] = 0.;
       _conserved_variables[5 * i + 3] = 0.;
-      _conserved_variables[5 * i + 4] = 1.5 * _cell_volume;
+      _conserved_variables[5 * i + 4] = 0.;
 
       _delta_conserved_variables[5 * i] = 0.;
       _delta_conserved_variables[5 * i + 1] = 0.;
@@ -559,11 +559,11 @@ public:
       _delta_conserved_variables[5 * i + 3] = 0.;
       _delta_conserved_variables[5 * i + 4] = 0.;
 
-      _primitive_variables[5 * i] = 1.;
+      _primitive_variables[5 * i] = 0.;
       _primitive_variables[5 * i + 1] = 0.;
       _primitive_variables[5 * i + 2] = 0.;
       _primitive_variables[5 * i + 3] = 0.;
-      _primitive_variables[5 * i + 4] = 1.;
+      _primitive_variables[5 * i + 4] = 0.;
 
       _primitive_variable_gradients[15 * i] = 0.;
       _primitive_variable_gradients[15 * i + 1] = 0.;
@@ -1693,6 +1693,22 @@ public:
     _primitive_variables[5 * index + 2] = velocity[1];
     _primitive_variables[5 * index + 3] = velocity[2];
     _primitive_variables[5 * index + 4] = pressure;
+  }
+
+  /**
+   * @brief Set the primitive variables for all cells based on the given initial
+   * condition.
+   *
+   * @param ic HydroIC to use.
+   */
+  template < typename _ic_ >
+  inline void set_primitive_variables(const _ic_ &ic) {
+    const int tot_num_cells = _number_of_cells[0] * _number_of_cells[3];
+    for (int i = 0; i < tot_num_cells; ++i) {
+      double midpoint[3];
+      get_cell_midpoint(i, midpoint);
+      ic.set_primitive_variables(midpoint, &_primitive_variables[5 * i]);
+    }
   }
 
   /**
