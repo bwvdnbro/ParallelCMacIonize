@@ -144,7 +144,7 @@ public:
    * @param dWR Right state primitive variable gradients (density - kg m^-4,
    * velocity - s^-1, pressure - kg m^-2 s^-2).
    * @param dx Distance between left and right state midpoint (in m).
-   * @param A Surface area of the interface (in m^2).
+   * @param A Signed surface area of the interface (in m^2).
    * @param dQL Left state conserved variable changes (updated; mass - kg s^-1,
    * momentum - kg m s^-2, total energy - kg m^2 s^-3).
    * @param dQR Right state conserved variable changes (updated; mass - kg s^-1,
@@ -169,7 +169,7 @@ public:
     double pflux[3] = {0., 0., 0.};
     double Eflux = 0.;
     double normal[3] = {0, 0, 0};
-    normal[i] = std::copysign(1., dx);
+    normal[i] = 1.;
     _riemann_solver.solve_for_flux(WLext[0], &WLext[1], WLext[4], WRext[0],
                                    &WRext[1], WRext[4], mflux, pflux, Eflux,
                                    normal);
@@ -203,13 +203,14 @@ public:
    * velocity - s^-1, pressure - kg m^-2 s^-2).
    * @param boundary HydroBoundary that sets the right state variables.
    * @param dx Distance between left and right state midpoint (in m).
-   * @param A Surface area of the interface (in m^2).
+   * @param A Signed surface area of the interface (in m^2).
    * @param dQL Left state conserved variable changes (updated; mass - kg s^-1,
    * momentum - kg m s^-2, total energy - kg m^2 s^-3).
    */
+  template < typename _boundary_ >
   inline void do_ghost_flux_calculation(const int i, const double WL[5],
                                         const double dWL[15],
-                                        const HydroBoundary &boundary,
+                                        const _boundary_ &boundary,
                                         const double dx, const double A,
                                         double dQL[5]) const {
 
@@ -229,7 +230,7 @@ public:
     double pflux[3] = {0., 0., 0.};
     double Eflux = 0.;
     double normal[3] = {0, 0, 0};
-    normal[i] = std::copysign(1., dx);
+    normal[i] = 1.;
     _riemann_solver.solve_for_flux(WLext[0], &WLext[1], WLext[4], WRext[0],
                                    &WRext[1], WRext[4], mflux, pflux, Eflux,
                                    normal);
@@ -294,8 +295,9 @@ public:
    * @param WLlim Left state primitive variable limiters (updated; density -
    * kg m^-3, velocity - m s^-1, pressure - kg m^-1 s^-2).
    */
+  template < typename _boundary_ >
   inline void do_ghost_gradient_calculation(const int i, const double WL[5],
-                                            const HydroBoundary &boundary,
+                                            const _boundary_ &boundary,
                                             const double dxinv, double dWL[15],
                                             double WLlim[10]) const {
 

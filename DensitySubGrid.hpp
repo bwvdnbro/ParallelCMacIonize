@@ -1703,18 +1703,12 @@ public:
    */
   inline void inner_flux_sweep(const Hydro &hydro) {
 
-    // the complicated loop structure below turns out to be the most efficient
-    // sweep algorithm
-    // doing 3 separate sweeps is noticeably slower
+    // we do three separate sweeps: one for every coordinate direction
     for (int ix = 0; ix < _number_of_cells[0] - 1; ++ix) {
-      for (int iy = 0; iy < _number_of_cells[1] - 1; ++iy) {
-        for (int iz = 0; iz < _number_of_cells[2] - 1; ++iz) {
+      for (int iy = 0; iy < _number_of_cells[1]; ++iy) {
+        for (int iz = 0; iz < _number_of_cells[2]; ++iz) {
           const unsigned int index000 =
               ix * _number_of_cells[3] + iy * _number_of_cells[2] + iz;
-          const unsigned int index001 =
-              ix * _number_of_cells[3] + iy * _number_of_cells[2] + iz + 1;
-          const unsigned int index010 =
-              ix * _number_of_cells[3] + (iy + 1) * _number_of_cells[2] + iz;
           const unsigned int index100 =
               (ix + 1) * _number_of_cells[3] + iy * _number_of_cells[2] + iz;
           // x direction
@@ -1725,6 +1719,16 @@ public:
               &_primitive_variable_gradients[15 * index100], _cell_size[0],
               _cell_areas[0], &_delta_conserved_variables[5 * index000],
               &_delta_conserved_variables[5 * index100]);
+        }
+      }
+    }
+    for (int ix = 0; ix < _number_of_cells[0]; ++ix) {
+      for (int iy = 0; iy < _number_of_cells[1] - 1; ++iy) {
+        for (int iz = 0; iz < _number_of_cells[2]; ++iz) {
+          const unsigned int index000 =
+              ix * _number_of_cells[3] + iy * _number_of_cells[2] + iz;
+          const unsigned int index010 =
+              ix * _number_of_cells[3] + (iy + 1) * _number_of_cells[2] + iz;
           // y direction
           hydro.do_flux_calculation(
               1, &_primitive_variables[5 * index000],
@@ -1733,6 +1737,16 @@ public:
               &_primitive_variable_gradients[15 * index010], _cell_size[1],
               _cell_areas[1], &_delta_conserved_variables[5 * index000],
               &_delta_conserved_variables[5 * index010]);
+        }
+      }
+    }
+    for (int ix = 0; ix < _number_of_cells[0]; ++ix) {
+      for (int iy = 0; iy < _number_of_cells[1]; ++iy) {
+        for (int iz = 0; iz < _number_of_cells[2] - 1; ++iz) {
+          const unsigned int index000 =
+              ix * _number_of_cells[3] + iy * _number_of_cells[2] + iz;
+          const unsigned int index001 =
+              ix * _number_of_cells[3] + iy * _number_of_cells[2] + iz + 1;
           // z direction
           hydro.do_flux_calculation(
               2, &_primitive_variables[5 * index000],
@@ -1742,118 +1756,6 @@ public:
               _cell_areas[2], &_delta_conserved_variables[5 * index000],
               &_delta_conserved_variables[5 * index001]);
         }
-        // do the missing x and y fluxes
-        const int iz = _number_of_cells[2] - 1;
-        {
-          const unsigned int index000 =
-              ix * _number_of_cells[3] + iy * _number_of_cells[2] + iz;
-          const unsigned int index010 =
-              ix * _number_of_cells[3] + (iy + 1) * _number_of_cells[2] + iz;
-          const unsigned int index100 =
-              (ix + 1) * _number_of_cells[3] + iy * _number_of_cells[2] + iz;
-          // x direction
-          hydro.do_flux_calculation(
-              0, &_primitive_variables[5 * index000],
-              &_primitive_variable_gradients[15 * index000],
-              &_primitive_variables[5 * index100],
-              &_primitive_variable_gradients[15 * index100], _cell_size[0],
-              _cell_areas[0], &_delta_conserved_variables[5 * index000],
-              &_delta_conserved_variables[5 * index100]);
-          // y direction
-          hydro.do_flux_calculation(
-              1, &_primitive_variables[5 * index000],
-              &_primitive_variable_gradients[15 * index000],
-              &_primitive_variables[5 * index010],
-              &_primitive_variable_gradients[15 * index010], _cell_size[1],
-              _cell_areas[1], &_delta_conserved_variables[5 * index000],
-              &_delta_conserved_variables[5 * index010]);
-        }
-      }
-      // do the missing x and z fluxes
-      const int iy = _number_of_cells[1] - 1;
-      for (int iz = 0; iz < _number_of_cells[2] - 1; ++iz) {
-        const unsigned int index000 =
-            ix * _number_of_cells[3] + iy * _number_of_cells[2] + iz;
-        const unsigned int index001 =
-            ix * _number_of_cells[3] + iy * _number_of_cells[2] + iz + 1;
-        const unsigned int index100 =
-            (ix + 1) * _number_of_cells[3] + iy * _number_of_cells[2] + iz;
-        // x direction
-        hydro.do_flux_calculation(0, &_primitive_variables[5 * index000],
-                                  &_primitive_variable_gradients[15 * index000],
-                                  &_primitive_variables[5 * index100],
-                                  &_primitive_variable_gradients[15 * index100],
-                                  _cell_size[0], _cell_areas[0],
-                                  &_delta_conserved_variables[5 * index000],
-                                  &_delta_conserved_variables[5 * index100]);
-        // z direction
-        hydro.do_flux_calculation(2, &_primitive_variables[5 * index000],
-                                  &_primitive_variable_gradients[15 * index000],
-                                  &_primitive_variables[5 * index001],
-                                  &_primitive_variable_gradients[15 * index001],
-                                  _cell_size[2], _cell_areas[2],
-                                  &_delta_conserved_variables[5 * index000],
-                                  &_delta_conserved_variables[5 * index001]);
-      }
-      // do the missing x flux
-      {
-        const int iz = _number_of_cells[2] - 1;
-        const unsigned int index000 =
-            ix * _number_of_cells[3] + iy * _number_of_cells[2] + iz;
-        const unsigned int index100 =
-            (ix + 1) * _number_of_cells[3] + iy * _number_of_cells[2] + iz;
-        // x direction
-        hydro.do_flux_calculation(0, &_primitive_variables[5 * index000],
-                                  &_primitive_variable_gradients[15 * index000],
-                                  &_primitive_variables[5 * index100],
-                                  &_primitive_variable_gradients[15 * index100],
-                                  _cell_size[0], _cell_areas[0],
-                                  &_delta_conserved_variables[5 * index000],
-                                  &_delta_conserved_variables[5 * index100]);
-      }
-    }
-    // do the missing y and z fluxes
-    const int ix = _number_of_cells[0] - 1;
-    for (int iy = 0; iy < _number_of_cells[1] - 1; ++iy) {
-      for (int iz = 0; iz < _number_of_cells[2] - 1; ++iz) {
-        const unsigned int index000 =
-            ix * _number_of_cells[3] + iy * _number_of_cells[2] + iz;
-        const unsigned int index001 =
-            ix * _number_of_cells[3] + iy * _number_of_cells[2] + iz + 1;
-        const unsigned int index010 =
-            ix * _number_of_cells[3] + (iy + 1) * _number_of_cells[2] + iz;
-        // y direction
-        hydro.do_flux_calculation(1, &_primitive_variables[5 * index000],
-                                  &_primitive_variable_gradients[15 * index000],
-                                  &_primitive_variables[5 * index010],
-                                  &_primitive_variable_gradients[15 * index010],
-                                  _cell_size[1], _cell_areas[1],
-                                  &_delta_conserved_variables[5 * index000],
-                                  &_delta_conserved_variables[5 * index010]);
-        // z direction
-        hydro.do_flux_calculation(2, &_primitive_variables[5 * index000],
-                                  &_primitive_variable_gradients[15 * index000],
-                                  &_primitive_variables[5 * index001],
-                                  &_primitive_variable_gradients[15 * index001],
-                                  _cell_size[2], _cell_areas[2],
-                                  &_delta_conserved_variables[5 * index000],
-                                  &_delta_conserved_variables[5 * index001]);
-      }
-      // do the missing y flux
-      {
-        const int iz = _number_of_cells[2] - 1;
-        const unsigned int index000 =
-            ix * _number_of_cells[3] + iy * _number_of_cells[2] + iz;
-        const unsigned int index010 =
-            ix * _number_of_cells[3] + (iy + 1) * _number_of_cells[2] + iz;
-        // y direction
-        hydro.do_flux_calculation(1, &_primitive_variables[5 * index000],
-                                  &_primitive_variable_gradients[15 * index000],
-                                  &_primitive_variables[5 * index010],
-                                  &_primitive_variable_gradients[15 * index010],
-                                  _cell_size[1], _cell_areas[1],
-                                  &_delta_conserved_variables[5 * index000],
-                                  &_delta_conserved_variables[5 * index010]);
       }
     }
   }
@@ -1985,8 +1887,9 @@ public:
    * @param boundary HydroBoundary that sets the right state primitive
    * variables.
    */
+  template < typename _boundary_ >
   inline void outer_ghost_flux_sweep(const int direction, const Hydro &hydro,
-                                     const HydroBoundary &boundary) {
+                                     const _boundary_ &boundary) {
     int i;
     unsigned int start_index_left, row_increment, row_length, column_increment,
         column_length;
@@ -2010,7 +1913,7 @@ public:
       column_increment = _number_of_cells[2];
       column_length = _number_of_cells[1];
       dx = -_cell_size[0];
-      A = _cell_areas[0];
+      A = -_cell_areas[0];
       break;
     case TRAVELDIRECTION_FACE_Y_P:
       i = 1;
@@ -2030,7 +1933,7 @@ public:
       column_increment = _number_of_cells[3];
       column_length = _number_of_cells[0];
       dx = -_cell_size[1];
-      A = _cell_areas[1];
+      A = -_cell_areas[1];
       break;
     case TRAVELDIRECTION_FACE_Z_P:
       i = 2;
@@ -2050,7 +1953,7 @@ public:
       column_increment = _number_of_cells[3];
       column_length = _number_of_cells[0];
       dx = -_cell_size[2];
-      A = _cell_areas[2];
+      A = -_cell_areas[2];
       break;
     default:
       cmac_error("Unknown hydro neighbour: %i", direction);
@@ -2079,18 +1982,12 @@ public:
    */
   inline void inner_gradient_sweep(const Hydro &hydro) {
 
-    // the complicated loop structure below turns out to be the most efficient
-    // sweep algorithm
-    // doing 3 separate sweeps is noticeably slower
+    // we do three separate sweeps: one for every coordinate direction
     for (int ix = 0; ix < _number_of_cells[0] - 1; ++ix) {
-      for (int iy = 0; iy < _number_of_cells[1] - 1; ++iy) {
-        for (int iz = 0; iz < _number_of_cells[2] - 1; ++iz) {
+      for (int iy = 0; iy < _number_of_cells[1]; ++iy) {
+        for (int iz = 0; iz < _number_of_cells[2]; ++iz) {
           const unsigned int index000 =
               ix * _number_of_cells[3] + iy * _number_of_cells[2] + iz;
-          const unsigned int index001 =
-              ix * _number_of_cells[3] + iy * _number_of_cells[2] + iz + 1;
-          const unsigned int index010 =
-              ix * _number_of_cells[3] + (iy + 1) * _number_of_cells[2] + iz;
           const unsigned int index100 =
               (ix + 1) * _number_of_cells[3] + iy * _number_of_cells[2] + iz;
           // x direction
@@ -2101,6 +1998,16 @@ public:
               &_primitive_variable_limiters[10 * index000],
               &_primitive_variable_gradients[15 * index100],
               &_primitive_variable_limiters[10 * index100]);
+        }
+      }
+    }
+    for (int ix = 0; ix < _number_of_cells[0]; ++ix) {
+      for (int iy = 0; iy < _number_of_cells[1] - 1; ++iy) {
+        for (int iz = 0; iz < _number_of_cells[2]; ++iz) {
+          const unsigned int index000 =
+              ix * _number_of_cells[3] + iy * _number_of_cells[2] + iz;
+          const unsigned int index010 =
+              ix * _number_of_cells[3] + (iy + 1) * _number_of_cells[2] + iz;
           // y direction
           hydro.do_gradient_calculation(
               1, &_primitive_variables[5 * index000],
@@ -2109,6 +2016,16 @@ public:
               &_primitive_variable_limiters[10 * index000],
               &_primitive_variable_gradients[15 * index010],
               &_primitive_variable_limiters[10 * index010]);
+        }
+      }
+    }
+    for (int ix = 0; ix < _number_of_cells[0]; ++ix) {
+      for (int iy = 0; iy < _number_of_cells[1]; ++iy) {
+        for (int iz = 0; iz < _number_of_cells[2] - 1; ++iz) {
+          const unsigned int index000 =
+              ix * _number_of_cells[3] + iy * _number_of_cells[2] + iz;
+          const unsigned int index001 =
+              ix * _number_of_cells[3] + iy * _number_of_cells[2] + iz + 1;
           // z direction
           hydro.do_gradient_calculation(
               2, &_primitive_variables[5 * index000],
@@ -2118,118 +2035,6 @@ public:
               &_primitive_variable_gradients[15 * index001],
               &_primitive_variable_limiters[10 * index001]);
         }
-        // do the missing x and y gradients
-        const int iz = _number_of_cells[2] - 1;
-        {
-          const unsigned int index000 =
-              ix * _number_of_cells[3] + iy * _number_of_cells[2] + iz;
-          const unsigned int index010 =
-              ix * _number_of_cells[3] + (iy + 1) * _number_of_cells[2] + iz;
-          const unsigned int index100 =
-              (ix + 1) * _number_of_cells[3] + iy * _number_of_cells[2] + iz;
-          // x direction
-          hydro.do_gradient_calculation(
-              0, &_primitive_variables[5 * index000],
-              &_primitive_variables[5 * index100], _inv_cell_size[0],
-              &_primitive_variable_gradients[15 * index000],
-              &_primitive_variable_limiters[10 * index000],
-              &_primitive_variable_gradients[15 * index100],
-              &_primitive_variable_limiters[10 * index100]);
-          // y direction
-          hydro.do_gradient_calculation(
-              1, &_primitive_variables[5 * index000],
-              &_primitive_variables[5 * index010], _inv_cell_size[1],
-              &_primitive_variable_gradients[15 * index000],
-              &_primitive_variable_limiters[10 * index000],
-              &_primitive_variable_gradients[15 * index010],
-              &_primitive_variable_limiters[10 * index010]);
-        }
-      }
-      // do the missing x and z gradients
-      const int iy = _number_of_cells[1] - 1;
-      for (int iz = 0; iz < _number_of_cells[2] - 1; ++iz) {
-        const unsigned int index000 =
-            ix * _number_of_cells[3] + iy * _number_of_cells[2] + iz;
-        const unsigned int index001 =
-            ix * _number_of_cells[3] + iy * _number_of_cells[2] + iz + 1;
-        const unsigned int index100 =
-            (ix + 1) * _number_of_cells[3] + iy * _number_of_cells[2] + iz;
-        // x direction
-        hydro.do_gradient_calculation(
-            0, &_primitive_variables[5 * index000],
-            &_primitive_variables[5 * index100], _inv_cell_size[0],
-            &_primitive_variable_gradients[15 * index000],
-            &_primitive_variable_limiters[10 * index000],
-            &_primitive_variable_gradients[15 * index100],
-            &_primitive_variable_limiters[10 * index100]);
-        // z direction
-        hydro.do_gradient_calculation(
-            2, &_primitive_variables[5 * index000],
-            &_primitive_variables[5 * index001], _inv_cell_size[2],
-            &_primitive_variable_gradients[15 * index000],
-            &_primitive_variable_limiters[10 * index000],
-            &_primitive_variable_gradients[15 * index001],
-            &_primitive_variable_limiters[10 * index001]);
-      }
-      // do the missing x gradient
-      {
-        const int iz = _number_of_cells[2] - 1;
-        const unsigned int index000 =
-            ix * _number_of_cells[3] + iy * _number_of_cells[2] + iz;
-        const unsigned int index100 =
-            (ix + 1) * _number_of_cells[3] + iy * _number_of_cells[2] + iz;
-        // x direction
-        hydro.do_gradient_calculation(
-            0, &_primitive_variables[5 * index000],
-            &_primitive_variables[5 * index100], _inv_cell_size[0],
-            &_primitive_variable_gradients[15 * index000],
-            &_primitive_variable_limiters[10 * index000],
-            &_primitive_variable_gradients[15 * index100],
-            &_primitive_variable_limiters[10 * index100]);
-      }
-    }
-    // do the missing y and z gradients
-    const int ix = _number_of_cells[0] - 1;
-    for (int iy = 0; iy < _number_of_cells[1] - 1; ++iy) {
-      for (int iz = 0; iz < _number_of_cells[2] - 1; ++iz) {
-        const unsigned int index000 =
-            ix * _number_of_cells[3] + iy * _number_of_cells[2] + iz;
-        const unsigned int index001 =
-            ix * _number_of_cells[3] + iy * _number_of_cells[2] + iz + 1;
-        const unsigned int index010 =
-            ix * _number_of_cells[3] + (iy + 1) * _number_of_cells[2] + iz;
-        // y direction
-        hydro.do_gradient_calculation(
-            1, &_primitive_variables[5 * index000],
-            &_primitive_variables[5 * index010], _inv_cell_size[1],
-            &_primitive_variable_gradients[15 * index000],
-            &_primitive_variable_limiters[10 * index000],
-            &_primitive_variable_gradients[15 * index010],
-            &_primitive_variable_limiters[10 * index010]);
-        // z direction
-        hydro.do_gradient_calculation(
-            2, &_primitive_variables[5 * index000],
-            &_primitive_variables[5 * index001], _inv_cell_size[2],
-            &_primitive_variable_gradients[15 * index000],
-            &_primitive_variable_limiters[10 * index000],
-            &_primitive_variable_gradients[15 * index001],
-            &_primitive_variable_limiters[10 * index001]);
-      }
-      // do the missing y gradient
-      {
-        const int iz = _number_of_cells[2] - 1;
-        const unsigned int index000 =
-            ix * _number_of_cells[3] + iy * _number_of_cells[2] + iz;
-        const unsigned int index010 =
-            ix * _number_of_cells[3] + (iy + 1) * _number_of_cells[2] + iz;
-        // y direction
-        hydro.do_gradient_calculation(
-            1, &_primitive_variables[5 * index000],
-            &_primitive_variables[5 * index010], _inv_cell_size[1],
-            &_primitive_variable_gradients[15 * index000],
-            &_primitive_variable_limiters[10 * index000],
-            &_primitive_variable_gradients[15 * index010],
-            &_primitive_variable_limiters[10 * index010]);
       }
     }
   }
@@ -2356,9 +2161,10 @@ public:
    * @param boundary HydroBoundary that sets the right state primitive
    * variables.
    */
+  template < typename _boundary_ >
   inline void outer_ghost_gradient_sweep(const int direction,
                                          const Hydro &hydro,
-                                         const HydroBoundary &boundary) {
+                                         const _boundary_ &boundary) {
     int i;
     unsigned int start_index_left, row_increment, row_length, column_increment,
         column_length;

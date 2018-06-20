@@ -27,9 +27,9 @@
 #define HYDROBOUNDARY_HPP
 
 /**
- * @brief Hydro boundary condition related functionality.
+ * @brief Inflow hydro boundary.
  */
-class HydroBoundary {
+class InflowHydroBoundary {
 public:
   /**
    * @brief Get the right state primitive variables corresponding to the given
@@ -41,9 +41,9 @@ public:
    * @param WR Output right state primitive variables (density - kg m^-3,
    * velocity - m s^-1, pressure - kg m^-1 s^-2).
    */
-  inline void get_right_state_gradient_variables(const int i,
-                                                 const double WL[5],
-                                                 double WR[5]) const {
+  inline static void get_right_state_gradient_variables(const int i,
+                                                        const double WL[5],
+                                                        double WR[5]) {
 
     WR[0] = WL[0];
     WR[1] = WL[1];
@@ -66,9 +66,11 @@ public:
    * @param dWR Output right state primitive variable gradients (density -
    * kg m^-4, velocity - s^-1, pressure - kg m^-2 s^-2).
    */
-  inline void get_right_state_flux_variables(const int i, const double WL[5],
-                                             const double dWL[15], double WR[5],
-                                             double dWR[15]) const {
+  inline static void get_right_state_flux_variables(const int i,
+                                                    const double WL[5],
+                                                    const double dWL[15],
+                                                    double WR[5],
+                                                    double dWR[15]) {
 
     WR[0] = WL[0];
     WR[1] = WL[1];
@@ -91,6 +93,98 @@ public:
     dWR[12] = dWL[12];
     dWR[13] = dWL[13];
     dWR[14] = dWL[14];
+  }
+};
+
+/**
+ * @brief Reflective hydro boundary.
+ */
+class ReflectiveHydroBoundary {
+public:
+  /**
+   * @brief Get the right state primitive variables corresponding to the given
+   * left state boundary ghost.
+   *
+   * @param i Interface direction: x (0), y (1) or z (2).
+   * @param WL Left state primitive variables (density - kg m^-3, velocity -
+   * m s^-1, pressure - kg m^-1 s^-2).
+   * @param WR Output right state primitive variables (density - kg m^-3,
+   * velocity - m s^-1, pressure - kg m^-1 s^-2).
+   */
+  inline static void get_right_state_gradient_variables(const int i,
+                                                        const double WL[5],
+                                                        double WR[5]) {
+
+    // indices in a frame where the x-axis is aligned with the interface normal
+    const int idx = i;
+    const int idy = (i + 1) % 3;
+    const int idz = (i + 2) % 3;
+
+    // we need to reverse the sign for the velocity component aligned with the
+    // interface normal: idx
+    WR[0] = WL[0];
+    WR[idx + 1] = -WL[idx + 1];
+    WR[idy + 1] = WL[idy + 1];
+    WR[idz + 1] = WL[idz + 1];
+    WR[4] = WL[4];
+  }
+
+  /**
+   * @brief Get the right state primitive variables and gradients corresponding
+   * to the given left state boundary ghost.
+   *
+   * @param i Interface direction: x (0), y (1) or z (2).
+   * @param WL Left state primitive variables (density - kg m^-3, velocity -
+   * m s^-1, pressure - kg m^-1 s^-2).
+   * @param dWL Left state primitive variable gradients (density - kg m^-4,
+   * velocity - s^-1, pressure - kg m^-2 s^-2).
+   * @param WR Output right state primitive variables (density - kg m^-3,
+   * velocity - m s^-1, pressure - kg m^-1 s^-2).
+   * @param dWR Output right state primitive variable gradients (density -
+   * kg m^-4, velocity - s^-1, pressure - kg m^-2 s^-2).
+   */
+  inline static void get_right_state_flux_variables(const int i,
+                                                    const double WL[5],
+                                                    const double dWL[15],
+                                                    double WR[5],
+                                                    double dWR[15]) {
+
+    // indices in a frame where the x-axis is aligned with the interface normal
+    const int idx = i;
+    const int idy = (i + 1) % 3;
+    const int idz = (i + 2) % 3;
+    // offsets of the velocity variables in the same reference frame
+    const int vdx = 3 * idx + 3;
+    const int vdy = 3 * idy + 3;
+    const int vdz = 3 * idz + 3;
+
+    // we need to reverse the sign for the velocity component aligned with the
+    // interface normal: idx
+    WR[0] = WL[0];
+    WR[idx + 1] = -WL[idx + 1];
+    WR[idy + 1] = WL[idy + 1];
+    WR[idz + 1] = WL[idz + 1];
+    WR[4] = WL[4];
+
+    // we need to invert all gradients that are aligned with the interface
+    // normal: idx
+    // however, we do not invert the gradient of the velocity aligned with the
+    // interface normal (idx + vdx), as the velocity itself also changes sign
+    dWR[idx] = -dWL[idx];
+    dWR[idy] = dWL[idy];
+    dWR[idz] = dWL[idz];
+    dWR[idx + vdx] = dWL[idx + vdx];
+    dWR[idy + vdx] = dWL[idy + vdx];
+    dWR[idz + vdx] = dWL[idz + vdx];
+    dWR[idx + vdy] = -dWL[idx + vdy];
+    dWR[idy + vdy] = dWL[idy + vdy];
+    dWR[idz + vdy] = dWL[idz + vdy];
+    dWR[idx + vdz] = -dWL[idx + vdz];
+    dWR[idy + vdz] = dWL[idy + vdz];
+    dWR[idz + vdz] = dWL[idz + vdz];
+    dWR[idx + 12] = -dWL[idx + 12];
+    dWR[idy + 12] = dWL[idy + 12];
+    dWR[idz + 12] = dWL[idz + 12];
   }
 };
 

@@ -25,7 +25,7 @@
  */
 
 /*! @brief Ascii output of the result. */
-//#define ASCII_OUTPUT
+#define ASCII_OUTPUT
 
 /*! @brief Second order hydro scheme. */
 #define SECOND_ORDER
@@ -146,7 +146,7 @@ int main(int argc, char **argv) {
   {
     const double box1[6] = {-0.5, -0.25, -0.25, 0.5, 0.5, 0.5};
     const double box2[6] = {0., -0.25, -0.25, 0.5, 0.5, 0.5};
-    const int ncell[3] = {50, 50, 50};
+    const int ncell[3] = {50, 3, 3};
     const unsigned int tot_ncell = ncell[0] * ncell[1] * ncell[2];
     DensitySubGrid test_grid1(box1, ncell);
     DensitySubGrid test_grid2(box2, ncell);
@@ -170,32 +170,42 @@ int main(int argc, char **argv) {
 
     const double dt = 0.001;
     Hydro hydro;
-    HydroBoundary boundary;
+    InflowHydroBoundary inflow_boundary;
+    ReflectiveHydroBoundary reflective_boundary;
 
     test_grid1.initialize_conserved_variables(hydro);
     test_grid2.initialize_conserved_variables(hydro);
     Timer hydro_timer;
     hydro_timer.start();
-    for (unsigned int istep = 0; istep < 100; ++istep) {
+    for (unsigned int istep = 0; istep < 300; ++istep) {
 
 #ifdef SECOND_ORDER
       // gradient calculations
       test_grid1.inner_gradient_sweep(hydro);
-      test_grid1.outer_ghost_gradient_sweep(TRAVELDIRECTION_FACE_X_N, hydro,
-                                            boundary);
+      test_grid2.inner_gradient_sweep(hydro);
       test_grid1.outer_gradient_sweep(TRAVELDIRECTION_FACE_X_P, hydro,
                                       test_grid2);
-      test_grid1.outer_gradient_sweep(TRAVELDIRECTION_FACE_Y_P, hydro,
-                                      test_grid1);
-      test_grid1.outer_gradient_sweep(TRAVELDIRECTION_FACE_Z_P, hydro,
-                                      test_grid1);
-      test_grid2.inner_gradient_sweep(hydro);
+      test_grid1.outer_ghost_gradient_sweep(TRAVELDIRECTION_FACE_X_N, hydro,
+                                            inflow_boundary);
       test_grid2.outer_ghost_gradient_sweep(TRAVELDIRECTION_FACE_X_P, hydro,
-                                            boundary);
-      test_grid2.outer_gradient_sweep(TRAVELDIRECTION_FACE_Y_P, hydro,
-                                      test_grid2);
-      test_grid2.outer_gradient_sweep(TRAVELDIRECTION_FACE_Z_P, hydro,
-                                      test_grid2);
+                                            reflective_boundary);
+
+      test_grid1.outer_ghost_gradient_sweep(TRAVELDIRECTION_FACE_Y_N, hydro,
+                                            inflow_boundary);
+      test_grid1.outer_ghost_gradient_sweep(TRAVELDIRECTION_FACE_Y_P, hydro,
+                                            inflow_boundary);
+      test_grid1.outer_ghost_gradient_sweep(TRAVELDIRECTION_FACE_Z_N, hydro,
+                                            inflow_boundary);
+      test_grid1.outer_ghost_gradient_sweep(TRAVELDIRECTION_FACE_Z_P, hydro,
+                                            inflow_boundary);
+      test_grid2.outer_ghost_gradient_sweep(TRAVELDIRECTION_FACE_Y_N, hydro,
+                                            inflow_boundary);
+      test_grid2.outer_ghost_gradient_sweep(TRAVELDIRECTION_FACE_Y_P, hydro,
+                                            inflow_boundary);
+      test_grid2.outer_ghost_gradient_sweep(TRAVELDIRECTION_FACE_Z_N, hydro,
+                                            inflow_boundary);
+      test_grid2.outer_ghost_gradient_sweep(TRAVELDIRECTION_FACE_Z_P, hydro,
+                                            inflow_boundary);
 
       // slope limiting
       test_grid1.apply_slope_limiter(hydro);
@@ -208,16 +218,29 @@ int main(int argc, char **argv) {
 
       // flux exchanges
       test_grid1.inner_flux_sweep(hydro);
-      test_grid1.outer_ghost_flux_sweep(TRAVELDIRECTION_FACE_X_N, hydro,
-                                        boundary);
-      test_grid1.outer_flux_sweep(TRAVELDIRECTION_FACE_X_P, hydro, test_grid2);
-      test_grid1.outer_flux_sweep(TRAVELDIRECTION_FACE_Y_P, hydro, test_grid1);
-      test_grid1.outer_flux_sweep(TRAVELDIRECTION_FACE_Z_P, hydro, test_grid1);
       test_grid2.inner_flux_sweep(hydro);
+      test_grid1.outer_ghost_flux_sweep(TRAVELDIRECTION_FACE_X_N, hydro,
+                                        inflow_boundary);
+      test_grid1.outer_flux_sweep(TRAVELDIRECTION_FACE_X_P, hydro, test_grid2);
       test_grid2.outer_ghost_flux_sweep(TRAVELDIRECTION_FACE_X_P, hydro,
-                                        boundary);
-      test_grid2.outer_flux_sweep(TRAVELDIRECTION_FACE_Y_P, hydro, test_grid2);
-      test_grid2.outer_flux_sweep(TRAVELDIRECTION_FACE_Z_P, hydro, test_grid2);
+                                        reflective_boundary);
+
+      test_grid1.outer_ghost_flux_sweep(TRAVELDIRECTION_FACE_Y_N, hydro,
+                                        inflow_boundary);
+      test_grid1.outer_ghost_flux_sweep(TRAVELDIRECTION_FACE_Y_P, hydro,
+                                        inflow_boundary);
+      test_grid1.outer_ghost_flux_sweep(TRAVELDIRECTION_FACE_Z_N, hydro,
+                                        inflow_boundary);
+      test_grid1.outer_ghost_flux_sweep(TRAVELDIRECTION_FACE_Z_P, hydro,
+                                        inflow_boundary);
+      test_grid2.outer_ghost_flux_sweep(TRAVELDIRECTION_FACE_Y_N, hydro,
+                                        inflow_boundary);
+      test_grid2.outer_ghost_flux_sweep(TRAVELDIRECTION_FACE_Y_P, hydro,
+                                        inflow_boundary);
+      test_grid2.outer_ghost_flux_sweep(TRAVELDIRECTION_FACE_Z_N, hydro,
+                                        inflow_boundary);
+      test_grid2.outer_ghost_flux_sweep(TRAVELDIRECTION_FACE_Z_P, hydro,
+                                        inflow_boundary);
 
       // conserved variable update
       test_grid1.update_conserved_variables(dt);
