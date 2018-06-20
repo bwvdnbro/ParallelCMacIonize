@@ -46,6 +46,26 @@ enum TaskType {
   TASKTYPE_SEND,
   /*! @brief Receive a buffer from another process. */
   TASKTYPE_RECV,
+  /*! @brief Do an internal gradient sweep. */
+  TASKTYPE_GRADIENTSWEEP_INTERNAL,
+  /*! @brief Do an external neighbour gradient sweep. */
+  TASKTYPE_GRADIENTSWEEP_EXTERNAL_NEIGHBOUR,
+  /*! @brief Do an external boundary gradient sweep. */
+  TASKTYPE_GRADIENTSWEEP_EXTERNAL_BOUNDARY,
+  /*! @brief Do a slope limiter sweep. */
+  TASKTYPE_SLOPE_LIMITER,
+  /*! @brief Do a primitive variable prediction sweep. */
+  TASKTYPE_PREDICT_PRIMITIVES,
+  /*! @brief Do an internal flux sweep. */
+  TASKTYPE_FLUXSWEEP_INTERNAL,
+  /*! @brief Do an external neighbour flux sweep. */
+  TASKTYPE_FLUXSWEEP_EXTERNAL_NEIGHBOUR,
+  /*! @brief Do an external boundary flux sweep. */
+  TASKTYPE_FLUXSWEEP_EXTERNAL_BOUNDARY,
+  /*! @brief Do a conserved variable update sweep. */
+  TASKTYPE_UPDATE_CONSERVED,
+  /*! @brief Do a primitive variable update sweep. */
+  TASKTYPE_UPDATE_PRIMITIVES,
   /*! @brief Task type counter. */
   TASKTYPE_NUMBER
 };
@@ -64,14 +84,20 @@ private:
   /*! @brief Index of the associated input photon buffer (if any). */
   size_t _buffer;
 
-  /*! @brief Dependency (if any). */
-  Lock *_dependency;
+  /*! @brief Direction of interaction (used by hydro tasks). */
+  int _interaction_direction;
 
-  /*! @brief Index of the first dependency of the task. */
-  size_t _first_dependency;
+  /*! @brief Number of unfinished parent tasks. */
+  unsigned char _number_of_unfinished_parents;
 
-  /*! @brief Number of dependencies of the task. */
-  size_t _number_of_dependencies;
+  /*! @brief Number of child tasks. */
+  unsigned char _number_of_children;
+
+  /*! @brief Child tasks of this task. */
+  size_t _children[7];
+
+  /*! @brief Dependencies (if any). */
+  Lock *_dependency[2];
 
 #ifdef TASK_PLOT
   /*! @brief Rank of the thread that executed the task. */
@@ -90,7 +116,9 @@ public:
    *
    * Used to flag unexecuted tasks and initialize the dependency.
    */
-  Task() : _dependency(nullptr) {
+  Task()
+      : _number_of_unfinished_parents(0), _number_of_children(0),
+        _dependency{nullptr, nullptr} {
 #ifdef TASK_PLOT
     _end_time = 0;
 #else
@@ -142,7 +170,71 @@ public:
    *
    * @param dependency Dependency.
    */
-  inline void set_dependency(Lock *dependency) { _dependency = dependency; }
+  inline void set_dependency(Lock *dependency) { _dependency[0] = dependency; }
+
+  /**
+   * @brief Set the extra dependency for the task.
+   *
+   * @param dependency Dependency.
+   */
+  inline void set_extra_dependency(Lock *dependency) {
+    _dependency[1] = dependency;
+  }
+
+  /**
+   * @brief Add a child task.
+   *
+   * @param child Child task.
+   */
+  inline void add_child(const size_t child) {
+    _children[_number_of_children] = child;
+    ++_number_of_children;
+  }
+
+  /**
+   * @brief Get the number of child tasks.
+   *
+   * @return Number of child tasks.
+   */
+  inline unsigned char get_number_of_children() const {
+    return _number_of_children;
+  }
+
+  /**
+   * @brief Get the child with the given index.
+   *
+   * @param index Index.
+   * @return Corresponding child.
+   */
+  inline size_t get_child(const unsigned char index) const {
+    return _children[index];
+  }
+
+  /**
+   * @brief Set the number of unfinished parents.
+   *
+   * @param number_of_unfinished_parents Number of unfinished parents.
+   */
+  inline void set_number_of_unfinished_parents(
+      const unsigned char number_of_unfinished_parents) {
+    _number_of_unfinished_parents = number_of_unfinished_parents;
+  }
+
+  /**
+   * @brief Decrement the number of unfinished parents by one.
+   */
+  inline void decrement_number_of_unfinished_parents() {
+    --_number_of_unfinished_parents;
+  }
+
+  /**
+   * @brief Get the number of unfinished parents.
+   *
+   * @return Number of unfinished parents.
+   */
+  inline unsigned char get_number_of_unfinished_parents() const {
+    return _number_of_unfinished_parents;
+  }
 
   /**
    * @brief Try to lock the dependency (if there is one) for the task.
@@ -150,8 +242,21 @@ public:
    * @return True if locking succeeded, false otherwise.
    */
   inline bool lock_dependency() {
-    if (_dependency != nullptr) {
-      return _dependency->try_lock();
+    if (_dependency[0] != nullptr) {
+      if (_dependency[0]->try_lock()) {
+        if (_dependency[1] != nullptr) {
+          if (_dependency[1]->try_lock()) {
+            return true;
+          } else {
+            _dependency[0]->unlock();
+            return false;
+          }
+        } else {
+          return true;
+        }
+      } else {
+        return false;
+      }
     } else {
       return true;
     }
@@ -161,8 +266,11 @@ public:
    * @brief Unlock the dependency (if there is one) for the task.
    */
   inline void unlock_dependency() {
-    if (_dependency != nullptr) {
-      _dependency->unlock();
+    if (_dependency[0] != nullptr) {
+      if (_dependency[1] != nullptr) {
+        _dependency[1]->unlock();
+      }
+      _dependency[0]->unlock();
     }
   }
 
@@ -207,6 +315,24 @@ public:
    * @param subgrid Index of the associated subgrid.
    */
   inline void set_subgrid(const unsigned int subgrid) { _subgrid = subgrid; }
+
+  /**
+   * @brief Get the interaction direction.
+   *
+   * @return Interaction direction.
+   */
+  inline int get_interaction_direction() const {
+    return _interaction_direction;
+  }
+
+  /**
+   * @brief Set the interaction direction.
+   *
+   * @param interaction_direction Interaction direction.
+   */
+  inline void set_interaction_direction(const int interaction_direction) {
+    _interaction_direction = interaction_direction;
+  }
 
 #ifdef TASK_PLOT
   /**

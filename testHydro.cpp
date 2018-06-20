@@ -24,6 +24,12 @@
  * @author Bert Vandenbroucke (bv7@st-andrews.ac.uk)
  */
 
+/*! @brief Hydro only test (without DensitySubGrid calls). */
+//#define DO_HYDRO_ONLY_TEST
+
+/*! @brief Hydro test through DensitySubGrid. */
+//#define DO_HYDRO_SUBGRID_TEST
+
 /*! @brief Ascii output of the result. */
 #define ASCII_OUTPUT
 
@@ -34,6 +40,7 @@
 #include "DensitySubGrid.hpp"
 #include "Hydro.hpp"
 #include "HydroIC.hpp"
+#include "Task.hpp"
 #include "Timer.hpp"
 
 #include <fstream>
@@ -71,6 +78,349 @@ inline void output_result(const std::vector< DensitySubGrid * > &gridvec,
 }
 
 /**
+ * @brief Make the hydro tasks for the given subgrid.
+ *
+ * @param next_task Index of the next task that will be created (updated).
+ * @param tasks Task vector.
+ * @param igrid Index of the subgrid.
+ * @param gridvec Subgrids.
+ */
+inline void make_hydro_tasks(size_t &next_task, std::vector< Task > &tasks,
+                             const unsigned int igrid,
+                             std::vector< DensitySubGrid * > &gridvec) {
+
+  DensitySubGrid &this_grid = *gridvec[igrid];
+  const unsigned int ngbx = this_grid.get_neighbour(TRAVELDIRECTION_FACE_X_P);
+  const unsigned int ngby = this_grid.get_neighbour(TRAVELDIRECTION_FACE_Y_P);
+  const unsigned int ngbz = this_grid.get_neighbour(TRAVELDIRECTION_FACE_Z_P);
+
+  /// gradient computation and prediction
+
+  // internal gradient sweep
+  {
+    Task &task = tasks[next_task];
+    task.set_type(TASKTYPE_GRADIENTSWEEP_INTERNAL);
+    task.set_dependency(this_grid.get_dependency());
+    task.set_subgrid(igrid);
+    this_grid.set_hydro_task(0, next_task);
+    ++next_task;
+  }
+  // external gradient sweeps
+  // x
+  if (this_grid.get_neighbour(TRAVELDIRECTION_FACE_X_N) == NEIGHBOUR_OUTSIDE) {
+    Task &task = tasks[next_task];
+    task.set_type(TASKTYPE_GRADIENTSWEEP_EXTERNAL_BOUNDARY);
+    task.set_dependency(this_grid.get_dependency());
+    task.set_subgrid(igrid);
+    task.set_interaction_direction(TRAVELDIRECTION_FACE_X_N);
+    this_grid.set_hydro_task(1, next_task);
+    ++next_task;
+  } else {
+    this_grid.set_hydro_task(1, tasks.size());
+  }
+  if (ngbx == NEIGHBOUR_OUTSIDE) {
+    Task &task = tasks[next_task];
+    task.set_type(TASKTYPE_GRADIENTSWEEP_EXTERNAL_BOUNDARY);
+    task.set_dependency(this_grid.get_dependency());
+    task.set_subgrid(igrid);
+    task.set_interaction_direction(TRAVELDIRECTION_FACE_X_P);
+    this_grid.set_hydro_task(2, next_task);
+    ++next_task;
+  } else {
+    Task &task = tasks[next_task];
+    task.set_type(TASKTYPE_GRADIENTSWEEP_EXTERNAL_NEIGHBOUR);
+    task.set_dependency(this_grid.get_dependency());
+    task.set_extra_dependency(gridvec[ngbx]->get_dependency());
+    task.set_subgrid(igrid);
+    task.set_buffer(ngbx);
+    task.set_interaction_direction(TRAVELDIRECTION_FACE_X_P);
+    this_grid.set_hydro_task(2, next_task);
+    ++next_task;
+  }
+  // y
+  if (this_grid.get_neighbour(TRAVELDIRECTION_FACE_Y_N) == NEIGHBOUR_OUTSIDE) {
+    Task &task = tasks[next_task];
+    task.set_type(TASKTYPE_GRADIENTSWEEP_EXTERNAL_BOUNDARY);
+    task.set_dependency(this_grid.get_dependency());
+    task.set_subgrid(igrid);
+    task.set_interaction_direction(TRAVELDIRECTION_FACE_Y_N);
+    this_grid.set_hydro_task(3, next_task);
+    ++next_task;
+  } else {
+    this_grid.set_hydro_task(3, tasks.size());
+  }
+  if (ngby == NEIGHBOUR_OUTSIDE) {
+    Task &task = tasks[next_task];
+    task.set_type(TASKTYPE_GRADIENTSWEEP_EXTERNAL_BOUNDARY);
+    task.set_dependency(this_grid.get_dependency());
+    task.set_subgrid(igrid);
+    task.set_interaction_direction(TRAVELDIRECTION_FACE_Y_P);
+    this_grid.set_hydro_task(4, next_task);
+    ++next_task;
+  } else {
+    Task &task = tasks[next_task];
+    task.set_type(TASKTYPE_GRADIENTSWEEP_EXTERNAL_NEIGHBOUR);
+    task.set_dependency(this_grid.get_dependency());
+    task.set_extra_dependency(gridvec[ngby]->get_dependency());
+    task.set_subgrid(igrid);
+    task.set_buffer(ngby);
+    task.set_interaction_direction(TRAVELDIRECTION_FACE_Y_P);
+    this_grid.set_hydro_task(4, next_task);
+    ++next_task;
+  }
+  // z
+  if (this_grid.get_neighbour(TRAVELDIRECTION_FACE_Z_N) == NEIGHBOUR_OUTSIDE) {
+    Task &task = tasks[next_task];
+    task.set_type(TASKTYPE_GRADIENTSWEEP_EXTERNAL_BOUNDARY);
+    task.set_dependency(this_grid.get_dependency());
+    task.set_subgrid(igrid);
+    task.set_interaction_direction(TRAVELDIRECTION_FACE_Z_N);
+    this_grid.set_hydro_task(5, next_task);
+    ++next_task;
+  } else {
+    this_grid.set_hydro_task(5, tasks.size());
+  }
+  if (ngbz == NEIGHBOUR_OUTSIDE) {
+    Task &task = tasks[next_task];
+    task.set_type(TASKTYPE_GRADIENTSWEEP_EXTERNAL_BOUNDARY);
+    task.set_dependency(this_grid.get_dependency());
+    task.set_subgrid(igrid);
+    task.set_interaction_direction(TRAVELDIRECTION_FACE_Z_P);
+    this_grid.set_hydro_task(6, next_task);
+    ++next_task;
+  } else {
+    Task &task = tasks[next_task];
+    task.set_type(TASKTYPE_GRADIENTSWEEP_EXTERNAL_NEIGHBOUR);
+    task.set_dependency(this_grid.get_dependency());
+    task.set_extra_dependency(gridvec[ngbz]->get_dependency());
+    task.set_subgrid(igrid);
+    task.set_buffer(ngbz);
+    task.set_interaction_direction(TRAVELDIRECTION_FACE_Z_P);
+    this_grid.set_hydro_task(6, next_task);
+    ++next_task;
+  }
+  // slope limiter
+  {
+    Task &task = tasks[next_task];
+    task.set_type(TASKTYPE_SLOPE_LIMITER);
+    task.set_dependency(this_grid.get_dependency());
+    task.set_subgrid(igrid);
+    this_grid.set_hydro_task(7, next_task);
+    ++next_task;
+  }
+  // primitive variable prediction
+  {
+    Task &task = tasks[next_task];
+    task.set_type(TASKTYPE_PREDICT_PRIMITIVES);
+    task.set_dependency(this_grid.get_dependency());
+    task.set_subgrid(igrid);
+    this_grid.set_hydro_task(8, next_task);
+    ++next_task;
+  }
+
+  /// flux exchange and primitive variable update
+
+  // internal flux sweep
+  {
+    Task &task = tasks[next_task];
+    task.set_type(TASKTYPE_FLUXSWEEP_INTERNAL);
+    task.set_dependency(this_grid.get_dependency());
+    task.set_subgrid(igrid);
+    this_grid.set_hydro_task(9, next_task);
+    ++next_task;
+  }
+  // external flux sweeps
+  // x
+  if (this_grid.get_neighbour(TRAVELDIRECTION_FACE_X_N) == NEIGHBOUR_OUTSIDE) {
+    Task &task = tasks[next_task];
+    task.set_type(TASKTYPE_FLUXSWEEP_EXTERNAL_BOUNDARY);
+    task.set_dependency(this_grid.get_dependency());
+    task.set_subgrid(igrid);
+    task.set_interaction_direction(TRAVELDIRECTION_FACE_X_N);
+    this_grid.set_hydro_task(10, next_task);
+    ++next_task;
+  } else {
+    this_grid.set_hydro_task(10, tasks.size());
+  }
+  if (ngbx == NEIGHBOUR_OUTSIDE) {
+    Task &task = tasks[next_task];
+    task.set_type(TASKTYPE_FLUXSWEEP_EXTERNAL_BOUNDARY);
+    task.set_dependency(this_grid.get_dependency());
+    task.set_subgrid(igrid);
+    task.set_interaction_direction(TRAVELDIRECTION_FACE_X_P);
+    this_grid.set_hydro_task(11, next_task);
+    ++next_task;
+  } else {
+    Task &task = tasks[next_task];
+    task.set_type(TASKTYPE_FLUXSWEEP_EXTERNAL_NEIGHBOUR);
+    task.set_dependency(this_grid.get_dependency());
+    task.set_extra_dependency(gridvec[ngbx]->get_dependency());
+    task.set_subgrid(igrid);
+    task.set_buffer(ngbx);
+    task.set_interaction_direction(TRAVELDIRECTION_FACE_X_P);
+    this_grid.set_hydro_task(11, next_task);
+    ++next_task;
+  }
+  // y
+  if (this_grid.get_neighbour(TRAVELDIRECTION_FACE_Y_N) == NEIGHBOUR_OUTSIDE) {
+    Task &task = tasks[next_task];
+    task.set_type(TASKTYPE_FLUXSWEEP_EXTERNAL_BOUNDARY);
+    task.set_dependency(this_grid.get_dependency());
+    task.set_subgrid(igrid);
+    task.set_interaction_direction(TRAVELDIRECTION_FACE_Y_N);
+    this_grid.set_hydro_task(12, next_task);
+    ++next_task;
+  } else {
+    this_grid.set_hydro_task(12, tasks.size());
+  }
+  if (ngby == NEIGHBOUR_OUTSIDE) {
+    Task &task = tasks[next_task];
+    task.set_type(TASKTYPE_FLUXSWEEP_EXTERNAL_BOUNDARY);
+    task.set_dependency(this_grid.get_dependency());
+    task.set_subgrid(igrid);
+    task.set_interaction_direction(TRAVELDIRECTION_FACE_Y_P);
+    this_grid.set_hydro_task(13, next_task);
+    ++next_task;
+  } else {
+    Task &task = tasks[next_task];
+    task.set_type(TASKTYPE_FLUXSWEEP_EXTERNAL_NEIGHBOUR);
+    task.set_dependency(this_grid.get_dependency());
+    task.set_extra_dependency(gridvec[ngby]->get_dependency());
+    task.set_subgrid(igrid);
+    task.set_buffer(ngby);
+    task.set_interaction_direction(TRAVELDIRECTION_FACE_Y_P);
+    this_grid.set_hydro_task(13, next_task);
+    ++next_task;
+  }
+  // z
+  if (this_grid.get_neighbour(TRAVELDIRECTION_FACE_Z_N) == NEIGHBOUR_OUTSIDE) {
+    Task &task = tasks[next_task];
+    task.set_type(TASKTYPE_FLUXSWEEP_EXTERNAL_BOUNDARY);
+    task.set_dependency(this_grid.get_dependency());
+    task.set_subgrid(igrid);
+    task.set_interaction_direction(TRAVELDIRECTION_FACE_Z_N);
+    this_grid.set_hydro_task(14, next_task);
+    ++next_task;
+  } else {
+    this_grid.set_hydro_task(14, tasks.size());
+  }
+  if (ngbz == NEIGHBOUR_OUTSIDE) {
+    Task &task = tasks[next_task];
+    task.set_type(TASKTYPE_FLUXSWEEP_EXTERNAL_BOUNDARY);
+    task.set_dependency(this_grid.get_dependency());
+    task.set_subgrid(igrid);
+    task.set_interaction_direction(TRAVELDIRECTION_FACE_Z_P);
+    this_grid.set_hydro_task(15, next_task);
+    ++next_task;
+  } else {
+    Task &task = tasks[next_task];
+    task.set_type(TASKTYPE_FLUXSWEEP_EXTERNAL_NEIGHBOUR);
+    task.set_dependency(this_grid.get_dependency());
+    task.set_extra_dependency(gridvec[ngbz]->get_dependency());
+    task.set_subgrid(igrid);
+    task.set_buffer(ngbz);
+    task.set_interaction_direction(TRAVELDIRECTION_FACE_Z_P);
+    this_grid.set_hydro_task(15, next_task);
+    ++next_task;
+  }
+  // conserved variable update
+  {
+    Task &task = tasks[next_task];
+    task.set_type(TASKTYPE_UPDATE_CONSERVED);
+    task.set_dependency(this_grid.get_dependency());
+    task.set_subgrid(igrid);
+    this_grid.set_hydro_task(16, next_task);
+    ++next_task;
+  }
+  // primitive variable update
+  {
+    Task &task = tasks[next_task];
+    task.set_type(TASKTYPE_UPDATE_PRIMITIVES);
+    task.set_dependency(this_grid.get_dependency());
+    task.set_subgrid(igrid);
+    this_grid.set_hydro_task(17, next_task);
+    ++next_task;
+  }
+}
+
+/**
+ * @brief Reset the hydro tasks for the given subgrid.
+ *
+ * @param tasks Tasks.
+ * @param this_grid Subgrid.
+ */
+inline void reset_hydro_tasks(std::vector< Task > &tasks,
+                              DensitySubGrid &this_grid) {
+
+  // gradient sweeps
+  // internal
+  tasks[this_grid.get_hydro_task(0)].set_number_of_unfinished_parents(0);
+  unsigned char num_ngb = 4;
+  // external
+  if (this_grid.get_hydro_task(1) < tasks.size()) {
+    tasks[this_grid.get_hydro_task(1)].set_number_of_unfinished_parents(0);
+    ++num_ngb;
+  }
+  tasks[this_grid.get_hydro_task(2)].set_number_of_unfinished_parents(0);
+  if (this_grid.get_hydro_task(3) < tasks.size()) {
+    tasks[this_grid.get_hydro_task(3)].set_number_of_unfinished_parents(0);
+    ++num_ngb;
+  }
+  tasks[this_grid.get_hydro_task(4)].set_number_of_unfinished_parents(0);
+  if (this_grid.get_hydro_task(5) < tasks.size()) {
+    tasks[this_grid.get_hydro_task(5)].set_number_of_unfinished_parents(0);
+    ++num_ngb;
+  }
+  tasks[this_grid.get_hydro_task(6)].set_number_of_unfinished_parents(0);
+
+  // slope limiter
+  tasks[this_grid.get_hydro_task(7)].set_number_of_unfinished_parents(num_ngb);
+  // primitive variable prediction
+  tasks[this_grid.get_hydro_task(8)].set_number_of_unfinished_parents(1);
+
+  // flux sweeps
+  // internal
+  tasks[this_grid.get_hydro_task(9)].set_number_of_unfinished_parents(1);
+  // external
+  if (this_grid.get_hydro_task(10) < tasks.size()) {
+    tasks[this_grid.get_hydro_task(10)].set_number_of_unfinished_parents(1);
+  }
+  if (tasks[this_grid.get_hydro_task(11)].get_type() ==
+      TASKTYPE_FLUXSWEEP_EXTERNAL_BOUNDARY) {
+    tasks[this_grid.get_hydro_task(11)].set_number_of_unfinished_parents(1);
+  } else {
+    tasks[this_grid.get_hydro_task(11)].set_number_of_unfinished_parents(2);
+  }
+  if (this_grid.get_hydro_task(12) < tasks.size()) {
+    tasks[this_grid.get_hydro_task(12)].set_number_of_unfinished_parents(1);
+  }
+  if (tasks[this_grid.get_hydro_task(13)].get_type() ==
+      TASKTYPE_FLUXSWEEP_EXTERNAL_BOUNDARY) {
+    tasks[this_grid.get_hydro_task(13)].set_number_of_unfinished_parents(1);
+  } else {
+    tasks[this_grid.get_hydro_task(13)].set_number_of_unfinished_parents(2);
+  }
+  if (this_grid.get_hydro_task(14) < tasks.size()) {
+    tasks[this_grid.get_hydro_task(14)].set_number_of_unfinished_parents(1);
+  }
+  if (tasks[this_grid.get_hydro_task(15)].get_type() ==
+      TASKTYPE_FLUXSWEEP_EXTERNAL_BOUNDARY) {
+    tasks[this_grid.get_hydro_task(15)].set_number_of_unfinished_parents(1);
+  } else {
+    tasks[this_grid.get_hydro_task(15)].set_number_of_unfinished_parents(2);
+  }
+
+  // conserved variable update
+  tasks[this_grid.get_hydro_task(16)].set_number_of_unfinished_parents(num_ngb);
+  // primitive variable update
+  tasks[this_grid.get_hydro_task(17)].set_number_of_unfinished_parents(1);
+}
+
+inline void set_dependencies() {
+  // START AGAIN HERE!
+}
+
+/**
  * @brief Test for the hydro.
  *
  * @param argc Number of command line arguments.
@@ -79,6 +429,7 @@ inline void output_result(const std::vector< DensitySubGrid * > &gridvec,
  */
 int main(int argc, char **argv) {
 
+#ifdef DO_HYDRO_ONLY_TEST
   /// Hydro only
   {
     Hydro hydro;
@@ -172,7 +523,9 @@ int main(int argc, char **argv) {
       ofile << (i + 0.5) * 0.01 << "\t" << primitives[5 * i] << "\n";
     }
   }
+#endif // DO_HYDRO_ONLY_TEST
 
+#ifdef DO_HYDRO_SUBGRID_TEST
   /// DensitySubGrid hydro
   {
     const double box1[6] = {-0.5, -0.25, -0.25, 0.5, 0.5, 0.5};
@@ -294,6 +647,7 @@ int main(int argc, char **argv) {
     test_grid1.output_intensities(0, file);
     test_grid2.output_intensities(test_grid1.get_output_size(), file);
   }
+#endif // DO_HYDRO_SUBGRID_TEST
 
   /// The real stuff: task based hydro
 
@@ -383,12 +737,19 @@ int main(int argc, char **argv) {
   const Hydro hydro;
   const InflowHydroBoundary inflow_boundary;
 
+  std::vector< Task > tasks(18 * tot_num_subgrid);
+
+  size_t next_task = 0;
   for (unsigned int igrid = 0; igrid < tot_num_subgrid; ++igrid) {
     gridvec[igrid]->initialize_conserved_variables(hydro);
+    make_hydro_tasks(next_task, tasks, igrid, gridvec);
   }
 
   const double dt = 0.001;
+  Timer hydro_loop_timer;
+  hydro_loop_timer.start();
   for (unsigned int istep = 0; istep < 100; ++istep) {
+
     // gradient computation and prediction
     for (unsigned int igrid = 0; igrid < tot_num_subgrid; ++igrid) {
       DensitySubGrid &this_grid = *gridvec[igrid];
@@ -500,6 +861,9 @@ int main(int argc, char **argv) {
       gridvec[igrid]->update_primitive_variables(hydro);
     }
   }
+  hydro_loop_timer.stop();
+
+  cmac_status("Total hydro loop time: %g s", hydro_loop_timer.value());
 
   output_result(gridvec, tot_num_subgrid);
 

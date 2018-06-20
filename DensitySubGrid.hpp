@@ -182,6 +182,9 @@ private:
    *  (density - kg m^-3, velocity - m s^-1, pressure - kg m^-1 s^-2). */
   double *_primitive_variable_limiters;
 
+  /*! @brief Indices of the hydro tasks associated with this subgrid. */
+  size_t _hydro_tasks[18];
+
   /*! @brief Cell locks (if active). */
   subgrid_cell_lock_variables();
 
@@ -2265,6 +2268,24 @@ public:
       }
     }
   }
+
+  /**
+   * @brief Set the hydro task with the given index.
+   *
+   * @param i Index.
+   * @param task Task.
+   */
+  inline void set_hydro_task(const int i, const size_t task) {
+    _hydro_tasks[i] = task;
+  }
+
+  /**
+   * @brief Get the hydro task with the given index.
+   *
+   * @param i Index.
+   * @return Task.
+   */
+  inline size_t get_hydro_task(const int i) const { return _hydro_tasks[i]; }
 };
 
 #endif // DENSITYSUBGRID_HPP
