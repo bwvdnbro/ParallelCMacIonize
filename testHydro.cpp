@@ -401,26 +401,22 @@ inline void reset_hydro_tasks(ThreadSafeVector< Task > &tasks,
   // gradient sweeps
   // internal
   tasks[this_grid.get_hydro_task(0)].set_number_of_unfinished_parents(0);
-  unsigned char num_ngb = 4;
   // external
   tasks[this_grid.get_hydro_task(1)].set_number_of_unfinished_parents(0);
   if (this_grid.get_hydro_task(2) != NO_TASK) {
     tasks[this_grid.get_hydro_task(2)].set_number_of_unfinished_parents(0);
-    ++num_ngb;
   }
   tasks[this_grid.get_hydro_task(3)].set_number_of_unfinished_parents(0);
   if (this_grid.get_hydro_task(4) != NO_TASK) {
     tasks[this_grid.get_hydro_task(4)].set_number_of_unfinished_parents(0);
-    ++num_ngb;
   }
   tasks[this_grid.get_hydro_task(5)].set_number_of_unfinished_parents(0);
   if (this_grid.get_hydro_task(6) != NO_TASK) {
     tasks[this_grid.get_hydro_task(6)].set_number_of_unfinished_parents(0);
-    ++num_ngb;
   }
 
   // slope limiter
-  tasks[this_grid.get_hydro_task(7)].set_number_of_unfinished_parents(num_ngb);
+  tasks[this_grid.get_hydro_task(7)].set_number_of_unfinished_parents(7);
   // primitive variable prediction
   tasks[this_grid.get_hydro_task(8)].set_number_of_unfinished_parents(1);
 
@@ -457,7 +453,7 @@ inline void reset_hydro_tasks(ThreadSafeVector< Task > &tasks,
   }
 
   // conserved variable update
-  tasks[this_grid.get_hydro_task(16)].set_number_of_unfinished_parents(num_ngb);
+  tasks[this_grid.get_hydro_task(16)].set_number_of_unfinished_parents(7);
   // primitive variable update
   tasks[this_grid.get_hydro_task(17)].set_number_of_unfinished_parents(1);
 }
@@ -974,6 +970,8 @@ int main(int argc, char **argv) {
       for (unsigned char i = 0; i < numchild; ++i) {
         const size_t ichild = tasks[current_task].get_child(i);
         myassert(ichild != NO_TASK, "Child task does not exist!");
+        myassert(tasks[ichild].get_number_of_unfinished_parents() > 0,
+                 "Child task was already unlocked!");
         // we need to make this thread safe...
         tasks[ichild].decrement_number_of_unfinished_parents();
         if (tasks[ichild].get_number_of_unfinished_parents() == 0) {
