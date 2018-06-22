@@ -24,6 +24,10 @@
  * @author Bert Vandenbroucke (bv7@st-andrews.ac.uk)
  */
 
+/*! @brief Output log level. The higher the value, the more stuff is printed to
+ *  the stderr. Comment to disable logging altogether. */
+#define LOG_OUTPUT 1
+
 /*! @brief Hydro only test (without DensitySubGrid calls). */
 //#define DO_HYDRO_ONLY_TEST
 
@@ -36,11 +40,18 @@
 /*! @brief Second order hydro scheme. */
 #define SECOND_ORDER
 
+/*! @brief Uncomment this to enable run time assertions. */
+#define DO_ASSERTS
+
+#include "Assert.hpp"
 #include "Atomic.hpp"
 #include "DensitySubGrid.hpp"
 #include "Hydro.hpp"
 #include "HydroIC.hpp"
+#include "Log.hpp"
+#include "Queue.hpp"
 #include "Task.hpp"
+#include "ThreadSafeVector.hpp"
 #include "Timer.hpp"
 
 #include <fstream>
@@ -80,12 +91,11 @@ inline void output_result(const std::vector< DensitySubGrid * > &gridvec,
 /**
  * @brief Make the hydro tasks for the given subgrid.
  *
- * @param next_task Index of the next task that will be created (updated).
  * @param tasks Task vector.
  * @param igrid Index of the subgrid.
  * @param gridvec Subgrids.
  */
-inline void make_hydro_tasks(size_t &next_task, std::vector< Task > &tasks,
+inline void make_hydro_tasks(ThreadSafeVector< Task > &tasks,
                              const unsigned int igrid,
                              std::vector< DensitySubGrid * > &gridvec) {
 
@@ -98,253 +108,284 @@ inline void make_hydro_tasks(size_t &next_task, std::vector< Task > &tasks,
 
   // internal gradient sweep
   {
+    const size_t next_task = tasks.get_free_element();
     Task &task = tasks[next_task];
     task.set_type(TASKTYPE_GRADIENTSWEEP_INTERNAL);
     task.set_dependency(this_grid.get_dependency());
     task.set_subgrid(igrid);
     this_grid.set_hydro_task(0, next_task);
-    ++next_task;
   }
   // external gradient sweeps
   // x
   // positive: always apply
   if (ngbx == NEIGHBOUR_OUTSIDE) {
+    const size_t next_task = tasks.get_free_element();
     Task &task = tasks[next_task];
     task.set_type(TASKTYPE_GRADIENTSWEEP_EXTERNAL_BOUNDARY);
     task.set_dependency(this_grid.get_dependency());
     task.set_subgrid(igrid);
     task.set_interaction_direction(TRAVELDIRECTION_FACE_X_P);
     this_grid.set_hydro_task(1, next_task);
-    ++next_task;
   } else {
+    const size_t next_task = tasks.get_free_element();
     Task &task = tasks[next_task];
     task.set_type(TASKTYPE_GRADIENTSWEEP_EXTERNAL_NEIGHBOUR);
-    task.set_dependency(this_grid.get_dependency());
-    task.set_extra_dependency(gridvec[ngbx]->get_dependency());
+    // avoid dining philosophers by sorting the dependencies on subgrid index
+    if (igrid < ngbx) {
+      task.set_dependency(this_grid.get_dependency());
+      task.set_extra_dependency(gridvec[ngbx]->get_dependency());
+    } else {
+      task.set_dependency(gridvec[ngbx]->get_dependency());
+      task.set_extra_dependency(this_grid.get_dependency());
+    }
     task.set_subgrid(igrid);
     task.set_buffer(ngbx);
     task.set_interaction_direction(TRAVELDIRECTION_FACE_X_P);
     this_grid.set_hydro_task(1, next_task);
-    ++next_task;
   }
   // negative: only apply if we have a non-periodic boundary
   if (this_grid.get_neighbour(TRAVELDIRECTION_FACE_X_N) == NEIGHBOUR_OUTSIDE) {
+    const size_t next_task = tasks.get_free_element();
     Task &task = tasks[next_task];
     task.set_type(TASKTYPE_GRADIENTSWEEP_EXTERNAL_BOUNDARY);
     task.set_dependency(this_grid.get_dependency());
     task.set_subgrid(igrid);
     task.set_interaction_direction(TRAVELDIRECTION_FACE_X_N);
     this_grid.set_hydro_task(2, next_task);
-    ++next_task;
   } else {
-    this_grid.set_hydro_task(2, tasks.size());
+    this_grid.set_hydro_task(2, NO_TASK);
   }
   // y
   if (ngby == NEIGHBOUR_OUTSIDE) {
+    const size_t next_task = tasks.get_free_element();
     Task &task = tasks[next_task];
     task.set_type(TASKTYPE_GRADIENTSWEEP_EXTERNAL_BOUNDARY);
     task.set_dependency(this_grid.get_dependency());
     task.set_subgrid(igrid);
     task.set_interaction_direction(TRAVELDIRECTION_FACE_Y_P);
     this_grid.set_hydro_task(3, next_task);
-    ++next_task;
   } else {
+    const size_t next_task = tasks.get_free_element();
     Task &task = tasks[next_task];
     task.set_type(TASKTYPE_GRADIENTSWEEP_EXTERNAL_NEIGHBOUR);
-    task.set_dependency(this_grid.get_dependency());
-    task.set_extra_dependency(gridvec[ngby]->get_dependency());
+    if (igrid < ngby) {
+      task.set_dependency(this_grid.get_dependency());
+      task.set_extra_dependency(gridvec[ngby]->get_dependency());
+    } else {
+      task.set_dependency(gridvec[ngby]->get_dependency());
+      task.set_extra_dependency(this_grid.get_dependency());
+    }
     task.set_subgrid(igrid);
     task.set_buffer(ngby);
     task.set_interaction_direction(TRAVELDIRECTION_FACE_Y_P);
     this_grid.set_hydro_task(3, next_task);
-    ++next_task;
   }
   if (this_grid.get_neighbour(TRAVELDIRECTION_FACE_Y_N) == NEIGHBOUR_OUTSIDE) {
+    const size_t next_task = tasks.get_free_element();
     Task &task = tasks[next_task];
     task.set_type(TASKTYPE_GRADIENTSWEEP_EXTERNAL_BOUNDARY);
     task.set_dependency(this_grid.get_dependency());
     task.set_subgrid(igrid);
     task.set_interaction_direction(TRAVELDIRECTION_FACE_Y_N);
     this_grid.set_hydro_task(4, next_task);
-    ++next_task;
   } else {
-    this_grid.set_hydro_task(4, tasks.size());
+    this_grid.set_hydro_task(4, NO_TASK);
   }
   // z
   if (ngbz == NEIGHBOUR_OUTSIDE) {
+    const size_t next_task = tasks.get_free_element();
     Task &task = tasks[next_task];
     task.set_type(TASKTYPE_GRADIENTSWEEP_EXTERNAL_BOUNDARY);
     task.set_dependency(this_grid.get_dependency());
     task.set_subgrid(igrid);
     task.set_interaction_direction(TRAVELDIRECTION_FACE_Z_P);
     this_grid.set_hydro_task(5, next_task);
-    ++next_task;
   } else {
+    const size_t next_task = tasks.get_free_element();
     Task &task = tasks[next_task];
     task.set_type(TASKTYPE_GRADIENTSWEEP_EXTERNAL_NEIGHBOUR);
-    task.set_dependency(this_grid.get_dependency());
-    task.set_extra_dependency(gridvec[ngbz]->get_dependency());
+    if (igrid < ngbz) {
+      task.set_dependency(this_grid.get_dependency());
+      task.set_extra_dependency(gridvec[ngbz]->get_dependency());
+    } else {
+      task.set_dependency(gridvec[ngbz]->get_dependency());
+      task.set_extra_dependency(this_grid.get_dependency());
+    }
     task.set_subgrid(igrid);
     task.set_buffer(ngbz);
     task.set_interaction_direction(TRAVELDIRECTION_FACE_Z_P);
     this_grid.set_hydro_task(5, next_task);
-    ++next_task;
   }
   if (this_grid.get_neighbour(TRAVELDIRECTION_FACE_Z_N) == NEIGHBOUR_OUTSIDE) {
+    const size_t next_task = tasks.get_free_element();
     Task &task = tasks[next_task];
     task.set_type(TASKTYPE_GRADIENTSWEEP_EXTERNAL_BOUNDARY);
     task.set_dependency(this_grid.get_dependency());
     task.set_subgrid(igrid);
     task.set_interaction_direction(TRAVELDIRECTION_FACE_Z_N);
     this_grid.set_hydro_task(6, next_task);
-    ++next_task;
   } else {
-    this_grid.set_hydro_task(6, tasks.size());
+    this_grid.set_hydro_task(6, NO_TASK);
   }
   // slope limiter
   {
+    const size_t next_task = tasks.get_free_element();
     Task &task = tasks[next_task];
     task.set_type(TASKTYPE_SLOPE_LIMITER);
     task.set_dependency(this_grid.get_dependency());
     task.set_subgrid(igrid);
     this_grid.set_hydro_task(7, next_task);
-    ++next_task;
   }
   // primitive variable prediction
   {
+    const size_t next_task = tasks.get_free_element();
     Task &task = tasks[next_task];
     task.set_type(TASKTYPE_PREDICT_PRIMITIVES);
     task.set_dependency(this_grid.get_dependency());
     task.set_subgrid(igrid);
     this_grid.set_hydro_task(8, next_task);
-    ++next_task;
   }
 
   /// flux exchange and primitive variable update
 
   // internal flux sweep
   {
+    const size_t next_task = tasks.get_free_element();
     Task &task = tasks[next_task];
     task.set_type(TASKTYPE_FLUXSWEEP_INTERNAL);
     task.set_dependency(this_grid.get_dependency());
     task.set_subgrid(igrid);
     this_grid.set_hydro_task(9, next_task);
-    ++next_task;
   }
   // external flux sweeps
   // x
   // positive: always do flux exchange
   if (ngbx == NEIGHBOUR_OUTSIDE) {
+    const size_t next_task = tasks.get_free_element();
     Task &task = tasks[next_task];
     task.set_type(TASKTYPE_FLUXSWEEP_EXTERNAL_BOUNDARY);
     task.set_dependency(this_grid.get_dependency());
     task.set_subgrid(igrid);
     task.set_interaction_direction(TRAVELDIRECTION_FACE_X_P);
     this_grid.set_hydro_task(10, next_task);
-    ++next_task;
   } else {
+    const size_t next_task = tasks.get_free_element();
     Task &task = tasks[next_task];
     task.set_type(TASKTYPE_FLUXSWEEP_EXTERNAL_NEIGHBOUR);
-    task.set_dependency(this_grid.get_dependency());
-    task.set_extra_dependency(gridvec[ngbx]->get_dependency());
+    if (igrid < ngbx) {
+      task.set_dependency(this_grid.get_dependency());
+      task.set_extra_dependency(gridvec[ngbx]->get_dependency());
+    } else {
+      task.set_dependency(gridvec[ngbx]->get_dependency());
+      task.set_extra_dependency(this_grid.get_dependency());
+    }
     task.set_subgrid(igrid);
     task.set_buffer(ngbx);
     task.set_interaction_direction(TRAVELDIRECTION_FACE_X_P);
     this_grid.set_hydro_task(10, next_task);
-    ++next_task;
   }
   // negative: only do flux exchange when we need to apply a non-periodic
   // boundary condition
   if (this_grid.get_neighbour(TRAVELDIRECTION_FACE_X_N) == NEIGHBOUR_OUTSIDE) {
+    const size_t next_task = tasks.get_free_element();
     Task &task = tasks[next_task];
     task.set_type(TASKTYPE_FLUXSWEEP_EXTERNAL_BOUNDARY);
     task.set_dependency(this_grid.get_dependency());
     task.set_subgrid(igrid);
     task.set_interaction_direction(TRAVELDIRECTION_FACE_X_N);
     this_grid.set_hydro_task(11, next_task);
-    ++next_task;
   } else {
-    this_grid.set_hydro_task(11, tasks.size());
+    this_grid.set_hydro_task(11, NO_TASK);
   }
   // y
   if (ngby == NEIGHBOUR_OUTSIDE) {
+    const size_t next_task = tasks.get_free_element();
     Task &task = tasks[next_task];
     task.set_type(TASKTYPE_FLUXSWEEP_EXTERNAL_BOUNDARY);
     task.set_dependency(this_grid.get_dependency());
     task.set_subgrid(igrid);
     task.set_interaction_direction(TRAVELDIRECTION_FACE_Y_P);
     this_grid.set_hydro_task(12, next_task);
-    ++next_task;
   } else {
+    const size_t next_task = tasks.get_free_element();
     Task &task = tasks[next_task];
     task.set_type(TASKTYPE_FLUXSWEEP_EXTERNAL_NEIGHBOUR);
-    task.set_dependency(this_grid.get_dependency());
-    task.set_extra_dependency(gridvec[ngby]->get_dependency());
+    if (igrid < ngby) {
+      task.set_dependency(this_grid.get_dependency());
+      task.set_extra_dependency(gridvec[ngby]->get_dependency());
+    } else {
+      task.set_dependency(gridvec[ngby]->get_dependency());
+      task.set_extra_dependency(this_grid.get_dependency());
+    }
     task.set_subgrid(igrid);
     task.set_buffer(ngby);
     task.set_interaction_direction(TRAVELDIRECTION_FACE_Y_P);
     this_grid.set_hydro_task(12, next_task);
-    ++next_task;
   }
   if (this_grid.get_neighbour(TRAVELDIRECTION_FACE_Y_N) == NEIGHBOUR_OUTSIDE) {
+    const size_t next_task = tasks.get_free_element();
     Task &task = tasks[next_task];
     task.set_type(TASKTYPE_FLUXSWEEP_EXTERNAL_BOUNDARY);
     task.set_dependency(this_grid.get_dependency());
     task.set_subgrid(igrid);
     task.set_interaction_direction(TRAVELDIRECTION_FACE_Y_N);
     this_grid.set_hydro_task(13, next_task);
-    ++next_task;
   } else {
-    this_grid.set_hydro_task(13, tasks.size());
+    this_grid.set_hydro_task(13, NO_TASK);
   }
   // z
   if (ngbz == NEIGHBOUR_OUTSIDE) {
+    const size_t next_task = tasks.get_free_element();
     Task &task = tasks[next_task];
     task.set_type(TASKTYPE_FLUXSWEEP_EXTERNAL_BOUNDARY);
     task.set_dependency(this_grid.get_dependency());
     task.set_subgrid(igrid);
     task.set_interaction_direction(TRAVELDIRECTION_FACE_Z_P);
     this_grid.set_hydro_task(14, next_task);
-    ++next_task;
   } else {
+    const size_t next_task = tasks.get_free_element();
     Task &task = tasks[next_task];
     task.set_type(TASKTYPE_FLUXSWEEP_EXTERNAL_NEIGHBOUR);
-    task.set_dependency(this_grid.get_dependency());
-    task.set_extra_dependency(gridvec[ngbz]->get_dependency());
+    if (igrid < ngbz) {
+      task.set_dependency(this_grid.get_dependency());
+      task.set_extra_dependency(gridvec[ngbz]->get_dependency());
+    } else {
+      task.set_dependency(gridvec[ngbz]->get_dependency());
+      task.set_extra_dependency(this_grid.get_dependency());
+    }
     task.set_subgrid(igrid);
     task.set_buffer(ngbz);
     task.set_interaction_direction(TRAVELDIRECTION_FACE_Z_P);
     this_grid.set_hydro_task(14, next_task);
-    ++next_task;
   }
   if (this_grid.get_neighbour(TRAVELDIRECTION_FACE_Z_N) == NEIGHBOUR_OUTSIDE) {
+    const size_t next_task = tasks.get_free_element();
     Task &task = tasks[next_task];
     task.set_type(TASKTYPE_FLUXSWEEP_EXTERNAL_BOUNDARY);
     task.set_dependency(this_grid.get_dependency());
     task.set_subgrid(igrid);
     task.set_interaction_direction(TRAVELDIRECTION_FACE_Z_N);
     this_grid.set_hydro_task(15, next_task);
-    ++next_task;
   } else {
-    this_grid.set_hydro_task(15, tasks.size());
+    this_grid.set_hydro_task(15, NO_TASK);
   }
   // conserved variable update
   {
+    const size_t next_task = tasks.get_free_element();
     Task &task = tasks[next_task];
     task.set_type(TASKTYPE_UPDATE_CONSERVED);
     task.set_dependency(this_grid.get_dependency());
     task.set_subgrid(igrid);
     this_grid.set_hydro_task(16, next_task);
-    ++next_task;
   }
   // primitive variable update
   {
+    const size_t next_task = tasks.get_free_element();
     Task &task = tasks[next_task];
     task.set_type(TASKTYPE_UPDATE_PRIMITIVES);
     task.set_dependency(this_grid.get_dependency());
     task.set_subgrid(igrid);
     this_grid.set_hydro_task(17, next_task);
-    ++next_task;
   }
 }
 
@@ -354,7 +395,7 @@ inline void make_hydro_tasks(size_t &next_task, std::vector< Task > &tasks,
  * @param tasks Tasks.
  * @param this_grid Subgrid.
  */
-inline void reset_hydro_tasks(std::vector< Task > &tasks,
+inline void reset_hydro_tasks(ThreadSafeVector< Task > &tasks,
                               DensitySubGrid &this_grid) {
 
   // gradient sweeps
@@ -363,17 +404,17 @@ inline void reset_hydro_tasks(std::vector< Task > &tasks,
   unsigned char num_ngb = 4;
   // external
   tasks[this_grid.get_hydro_task(1)].set_number_of_unfinished_parents(0);
-  if (this_grid.get_hydro_task(2) < tasks.size()) {
+  if (this_grid.get_hydro_task(2) != NO_TASK) {
     tasks[this_grid.get_hydro_task(2)].set_number_of_unfinished_parents(0);
     ++num_ngb;
   }
   tasks[this_grid.get_hydro_task(3)].set_number_of_unfinished_parents(0);
-  if (this_grid.get_hydro_task(4) < tasks.size()) {
+  if (this_grid.get_hydro_task(4) != NO_TASK) {
     tasks[this_grid.get_hydro_task(4)].set_number_of_unfinished_parents(0);
     ++num_ngb;
   }
   tasks[this_grid.get_hydro_task(5)].set_number_of_unfinished_parents(0);
-  if (this_grid.get_hydro_task(6) < tasks.size()) {
+  if (this_grid.get_hydro_task(6) != NO_TASK) {
     tasks[this_grid.get_hydro_task(6)].set_number_of_unfinished_parents(0);
     ++num_ngb;
   }
@@ -393,7 +434,7 @@ inline void reset_hydro_tasks(std::vector< Task > &tasks,
   } else {
     tasks[this_grid.get_hydro_task(10)].set_number_of_unfinished_parents(2);
   }
-  if (this_grid.get_hydro_task(11) < tasks.size()) {
+  if (this_grid.get_hydro_task(11) != NO_TASK) {
     tasks[this_grid.get_hydro_task(11)].set_number_of_unfinished_parents(1);
   }
   if (tasks[this_grid.get_hydro_task(12)].get_type() ==
@@ -402,7 +443,7 @@ inline void reset_hydro_tasks(std::vector< Task > &tasks,
   } else {
     tasks[this_grid.get_hydro_task(12)].set_number_of_unfinished_parents(2);
   }
-  if (this_grid.get_hydro_task(13) < tasks.size()) {
+  if (this_grid.get_hydro_task(13) != NO_TASK) {
     tasks[this_grid.get_hydro_task(13)].set_number_of_unfinished_parents(1);
   }
   if (tasks[this_grid.get_hydro_task(14)].get_type() ==
@@ -411,7 +452,7 @@ inline void reset_hydro_tasks(std::vector< Task > &tasks,
   } else {
     tasks[this_grid.get_hydro_task(14)].set_number_of_unfinished_parents(2);
   }
-  if (this_grid.get_hydro_task(15) < tasks.size()) {
+  if (this_grid.get_hydro_task(15) != NO_TASK) {
     tasks[this_grid.get_hydro_task(15)].set_number_of_unfinished_parents(1);
   }
 
@@ -430,7 +471,7 @@ inline void reset_hydro_tasks(std::vector< Task > &tasks,
  */
 inline void set_dependencies(const unsigned int igrid,
                              const std::vector< DensitySubGrid * > &gridvec,
-                             std::vector< Task > &tasks) {
+                             ThreadSafeVector< Task > &tasks) {
 
   const DensitySubGrid &this_grid = *gridvec[igrid];
 
@@ -438,19 +479,19 @@ inline void set_dependencies(const unsigned int igrid,
   const size_t igg = this_grid.get_hydro_task(0);
   const size_t igxp = this_grid.get_hydro_task(1);
   size_t igxn = this_grid.get_hydro_task(2);
-  if (igxn >= tasks.size()) {
+  if (igxn == NO_TASK) {
     igxn = gridvec[this_grid.get_neighbour(TRAVELDIRECTION_FACE_X_N)]
                ->get_hydro_task(1);
   }
   const size_t igyp = this_grid.get_hydro_task(3);
   size_t igyn = this_grid.get_hydro_task(4);
-  if (igyn >= tasks.size()) {
+  if (igyn == NO_TASK) {
     igyn = gridvec[this_grid.get_neighbour(TRAVELDIRECTION_FACE_Y_N)]
                ->get_hydro_task(3);
   }
   const size_t igzp = this_grid.get_hydro_task(5);
   size_t igzn = this_grid.get_hydro_task(6);
-  if (igzn >= tasks.size()) {
+  if (igzn == NO_TASK) {
     igzn = gridvec[this_grid.get_neighbour(TRAVELDIRECTION_FACE_Z_N)]
                ->get_hydro_task(5);
   }
@@ -478,7 +519,7 @@ inline void set_dependencies(const unsigned int igrid,
   // the negative one is only stored in this subgrid if it is a non-periodic
   // boundary
   size_t ifxn = this_grid.get_hydro_task(11);
-  if (ifxn >= tasks.size()) {
+  if (ifxn == NO_TASK) {
     ifxn = gridvec[this_grid.get_neighbour(TRAVELDIRECTION_FACE_X_N)]
                ->get_hydro_task(10);
   }
@@ -486,7 +527,7 @@ inline void set_dependencies(const unsigned int igrid,
   const size_t ifyp = this_grid.get_hydro_task(12);
   tasks[ipp].add_child(ifyp);
   size_t ifyn = this_grid.get_hydro_task(13);
-  if (ifyn >= tasks.size()) {
+  if (ifyn == NO_TASK) {
     ifyn = gridvec[this_grid.get_neighbour(TRAVELDIRECTION_FACE_Y_N)]
                ->get_hydro_task(12);
   }
@@ -494,7 +535,7 @@ inline void set_dependencies(const unsigned int igrid,
   const size_t ifzp = this_grid.get_hydro_task(14);
   tasks[ipp].add_child(ifzp);
   size_t ifzn = this_grid.get_hydro_task(15);
-  if (ifzn >= tasks.size()) {
+  if (ifzn == NO_TASK) {
     ifzn = gridvec[this_grid.get_neighbour(TRAVELDIRECTION_FACE_Z_N)]
                ->get_hydro_task(14);
   }
@@ -513,6 +554,64 @@ inline void set_dependencies(const unsigned int igrid,
   // the conserved variable update unlocks the primitive variable update
   const size_t ipu = this_grid.get_hydro_task(17);
   tasks[icu].add_child(ipu);
+}
+
+/**
+ * @brief Execute a task.
+ *
+ * @param itask Task index.
+ * @param gridvec Subgrids.
+ * @param tasks Tasks.
+ * @param timestep System time step (in s).
+ * @param hydro Hydro instance to use.
+ * @param boundary HydroBoundary to use.
+ */
+template < typename _boundary_ >
+inline void execute_task(const size_t itask,
+                         std::vector< DensitySubGrid * > gridvec,
+                         ThreadSafeVector< Task > &tasks, const double timestep,
+                         const Hydro &hydro, const _boundary_ &boundary) {
+
+  const Task &task = tasks[itask];
+  switch (task.get_type()) {
+  case TASKTYPE_GRADIENTSWEEP_INTERNAL:
+    gridvec[task.get_subgrid()]->inner_gradient_sweep(hydro);
+    break;
+  case TASKTYPE_GRADIENTSWEEP_EXTERNAL_NEIGHBOUR:
+    gridvec[task.get_subgrid()]->outer_gradient_sweep(
+        task.get_interaction_direction(), hydro, *gridvec[task.get_buffer()]);
+    break;
+  case TASKTYPE_GRADIENTSWEEP_EXTERNAL_BOUNDARY:
+    gridvec[task.get_subgrid()]->outer_ghost_gradient_sweep(
+        task.get_interaction_direction(), hydro, boundary);
+    break;
+  case TASKTYPE_SLOPE_LIMITER:
+    gridvec[task.get_subgrid()]->apply_slope_limiter(hydro);
+    break;
+  case TASKTYPE_PREDICT_PRIMITIVES:
+    gridvec[task.get_subgrid()]->predict_primitive_variables(hydro,
+                                                             0.5 * timestep);
+    break;
+  case TASKTYPE_FLUXSWEEP_INTERNAL:
+    gridvec[task.get_subgrid()]->inner_flux_sweep(hydro);
+    break;
+  case TASKTYPE_FLUXSWEEP_EXTERNAL_NEIGHBOUR:
+    gridvec[task.get_subgrid()]->outer_flux_sweep(
+        task.get_interaction_direction(), hydro, *gridvec[task.get_buffer()]);
+    break;
+  case TASKTYPE_FLUXSWEEP_EXTERNAL_BOUNDARY:
+    gridvec[task.get_subgrid()]->outer_ghost_flux_sweep(
+        task.get_interaction_direction(), hydro, boundary);
+    break;
+  case TASKTYPE_UPDATE_CONSERVED:
+    gridvec[task.get_subgrid()]->update_conserved_variables(timestep);
+    break;
+  case TASKTYPE_UPDATE_PRIMITIVES:
+    gridvec[task.get_subgrid()]->update_primitive_variables(hydro);
+    break;
+  default:
+    cmac_error("Unknown hydro task: %i", task.get_type());
+  }
 }
 
 /**
@@ -832,19 +931,61 @@ int main(int argc, char **argv) {
   const Hydro hydro;
   const InflowHydroBoundary inflow_boundary;
 
-  std::vector< Task > tasks(18 * tot_num_subgrid);
+  ThreadSafeVector< Task > tasks(18 * tot_num_subgrid);
 
-  size_t next_task = 0;
   for (unsigned int igrid = 0; igrid < tot_num_subgrid; ++igrid) {
     gridvec[igrid]->initialize_conserved_variables(hydro);
-    make_hydro_tasks(next_task, tasks, igrid, gridvec);
+    make_hydro_tasks(tasks, igrid, gridvec);
   }
+  // all hydro tasks have been made, link the dependencies
+  for (unsigned int igrid = 0; igrid < tot_num_subgrid; ++igrid) {
+    set_dependencies(igrid, gridvec, tasks);
+  }
+
+  Queue hydro_queue(18 * tot_num_subgrid);
 
   const double dt = 0.001;
   Timer hydro_loop_timer;
   hydro_loop_timer.start();
   for (unsigned int istep = 0; istep < 100; ++istep) {
 
+    logmessage("Step " << istep, 0);
+
+    myassert(hydro_queue.size() == 0, "Wrong queue size!");
+
+    // reset the hydro tasks and add them to the queue
+    for (unsigned int igrid = 0; igrid < tot_num_subgrid; ++igrid) {
+      reset_hydro_tasks(tasks, *gridvec[igrid]);
+      for (int i = 0; i < 18; ++i) {
+        const size_t itask = gridvec[igrid]->get_hydro_task(i);
+        if (itask != NO_TASK &&
+            tasks[itask].get_number_of_unfinished_parents() == 0) {
+          hydro_queue.add_task(itask);
+        }
+      }
+    }
+
+    size_t current_task = hydro_queue.get_task(tasks);
+    while (current_task != NO_TASK) {
+      execute_task(current_task, gridvec, tasks, dt, hydro, inflow_boundary);
+      tasks[current_task].unlock_dependency();
+      const unsigned char numchild =
+          tasks[current_task].get_number_of_children();
+      for (unsigned char i = 0; i < numchild; ++i) {
+        const size_t ichild = tasks[current_task].get_child(i);
+        myassert(ichild != NO_TASK, "Child task does not exist!");
+        // we need to make this thread safe...
+        tasks[ichild].decrement_number_of_unfinished_parents();
+        if (tasks[ichild].get_number_of_unfinished_parents() == 0) {
+          hydro_queue.add_task(ichild);
+        }
+      }
+      current_task = hydro_queue.get_task(tasks);
+    }
+
+    myassert(hydro_queue.size() == 0, "Queue not empty!");
+
+#ifdef NOTASKS
     // gradient computation and prediction
     for (unsigned int igrid = 0; igrid < tot_num_subgrid; ++igrid) {
       DensitySubGrid &this_grid = *gridvec[igrid];
@@ -955,6 +1096,7 @@ int main(int argc, char **argv) {
     for (unsigned int igrid = 0; igrid < tot_num_subgrid; ++igrid) {
       gridvec[igrid]->update_primitive_variables(hydro);
     }
+#endif
   }
   hydro_loop_timer.stop();
 
