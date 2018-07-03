@@ -43,6 +43,9 @@
 /*! @brief Uncomment this to enable run time assertions. */
 #define DO_ASSERTS
 
+/*! @brief Make task plots. */
+#define TASK_PLOT
+
 #include "Assert.hpp"
 #include "Atomic.hpp"
 #include "DensitySubGrid.hpp"
@@ -55,10 +58,83 @@
 #include "Timer.hpp"
 
 #include <fstream>
+#include <sstream>
 #include <vector>
 
 // global variables, as we need them in the log macro
 int MPI_rank, MPI_size;
+
+/**
+ * @brief Write a file with the start and end times of all tasks.
+ *
+ * @param iloop Iteration number (added to file name).
+ * @param tasks Tasks to print.
+ * @param iteration_start Start CPU cycle count of the iteration on this
+ * process.
+ * @param iteration_end End CPU cycle count of the iteration on this process.
+ */
+inline void output_tasks(const unsigned int iloop,
+                         ThreadSafeVector< Task > &tasks,
+                         const unsigned long iteration_start,
+                         const unsigned long iteration_end) {
+
+#ifdef TASK_PLOT
+  {
+    // compose the file name
+    std::stringstream filename;
+    filename << "hydro_tasks_";
+    filename.fill('0');
+    filename.width(2);
+    filename << iloop;
+    filename << ".txt";
+
+    // now output
+    // each process outputs its own tasks in turn, process 0 is responsible for
+    // creating the file and the other processes append to it
+    for (int irank = 0; irank < MPI_size; ++irank) {
+      // only the active process writes
+      if (irank == MPI_rank) {
+        // the file mode depends on the rank
+        std::ios_base::openmode mode;
+        if (irank == 0) {
+          // rank 0 creates (or overwrites) the file
+          mode = std::ofstream::trunc;
+        } else {
+          // all other ranks append to it
+          mode = std::ofstream::app;
+        }
+        // now open the file
+        std::ofstream ofile(filename.str(), mode);
+
+        // rank 0 writes the header
+        if (irank == 0) {
+          ofile << "# rank\tthread\tstart\tstop\ttype\n";
+        }
+
+        // write the start and end CPU cycle count
+        // this is a dummy task executed by thread 0 (so that the min or max
+        // thread count is not affected), but with non-existing type -1
+        ofile << MPI_rank << "\t0\t" << iteration_start << "\t" << iteration_end
+              << "\t-1\n";
+
+        // write the task info
+        const size_t tsize = tasks.size();
+        for (size_t i = 0; i < tsize; ++i) {
+          const Task &task = tasks[i];
+          myassert(task.done(), "Task was never executed!");
+          int type, thread_id;
+          unsigned long start, end;
+          task.get_timing_information(type, thread_id, start, end);
+          ofile << MPI_rank << "\t" << thread_id << "\t" << start << "\t" << end
+                << "\t" << type << "\n";
+        }
+      }
+      // only one process at a time is allowed to write
+      MPI_Barrier(MPI_COMM_WORLD);
+    }
+  }
+#endif
+}
 
 /**
  * @brief Output the subgrid values for inspection of the physical result.
@@ -611,6 +687,30 @@ inline void execute_task(const size_t itask,
 }
 
 /**
+ * @brief Initialize MPI.
+ *
+ * @param argc Number of command line arguments.
+ * @param argv Command line arguments.
+ * @param MPI_rank Variable to store the active MPI rank in.
+ * @param MPI_size Variable to store the total MPI size in.
+ */
+inline void initialize_MPI(int &argc, char **argv, int &MPI_rank,
+                           int &MPI_size) {
+
+  MPI_Init(&argc, &argv);
+  MPI_Comm_rank(MPI_COMM_WORLD, &MPI_rank);
+  MPI_Comm_size(MPI_COMM_WORLD, &MPI_size);
+
+  if (MPI_rank == 0) {
+    if (MPI_size > 1) {
+      logmessage("Running on " << MPI_size << " processes.", 0);
+    } else {
+      logmessage("Running on a single process.", 0);
+    }
+  }
+}
+
+/**
  * @brief Test for the hydro.
  *
  * @param argc Number of command line arguments.
@@ -618,6 +718,8 @@ inline void execute_task(const size_t itask,
  * @return Exit code: 0 on success.
  */
 int main(int argc, char **argv) {
+
+  initialize_MPI(argc, argv, MPI_rank, MPI_size);
 
 #ifdef DO_HYDRO_ONLY_TEST
   /// Hydro only
@@ -961,11 +1063,16 @@ int main(int argc, char **argv) {
       }
     }
 
+    unsigned long iteration_start, iteration_end;
+    cpucycle_tick(iteration_start);
 #pragma omp parallel default(shared)
     {
+      const int thread_id = omp_get_thread_num();
       size_t current_task = hydro_queue.get_task(tasks);
       while (current_task != NO_TASK) {
+        tasks[current_task].start(thread_id);
         execute_task(current_task, gridvec, tasks, dt, hydro, inflow_boundary);
+        tasks[current_task].stop();
         tasks[current_task].unlock_dependency();
         const unsigned char numchild =
             tasks[current_task].get_number_of_children();
@@ -979,6 +1086,9 @@ int main(int argc, char **argv) {
         current_task = hydro_queue.get_task(tasks);
       }
     }
+    cpucycle_tick(iteration_end);
+
+    output_tasks(istep, tasks, iteration_start, iteration_end);
 
     myassert(hydro_queue.size() == 0, "Queue not empty!");
   }
@@ -988,5 +1098,6 @@ int main(int argc, char **argv) {
 
   output_result(gridvec, tot_num_subgrid);
 
-  return 0;
+  const int MPI_exit_code = MPI_Finalize();
+  return MPI_exit_code;
 }
