@@ -29,6 +29,7 @@
 /*! @brief Activate this to record the start and end time of each task. */
 //#define TASK_PLOT
 
+#include "Atomic.hpp"
 #include "CPUCycle.hpp"
 #include "Lock.hpp"
 
@@ -88,7 +89,7 @@ private:
   int _interaction_direction;
 
   /*! @brief Number of unfinished parent tasks. */
-  unsigned char _number_of_unfinished_parents;
+  Atomic< unsigned char > _number_of_unfinished_parents;
 
   /*! @brief Number of child tasks. */
   unsigned char _number_of_children;
@@ -116,9 +117,7 @@ public:
    *
    * Used to flag unexecuted tasks and initialize the dependency.
    */
-  Task()
-      : _number_of_unfinished_parents(0), _number_of_children(0),
-        _dependency{nullptr, nullptr} {
+  Task() : _number_of_children(0), _dependency{nullptr, nullptr} {
 #ifdef TASK_PLOT
     _end_time = 0;
 #else
@@ -217,14 +216,16 @@ public:
    */
   inline void set_number_of_unfinished_parents(
       const unsigned char number_of_unfinished_parents) {
-    _number_of_unfinished_parents = number_of_unfinished_parents;
+    _number_of_unfinished_parents.set(number_of_unfinished_parents);
   }
 
   /**
    * @brief Decrement the number of unfinished parents by one.
+   *
+   * This has to be done atomically...
    */
-  inline void decrement_number_of_unfinished_parents() {
-    --_number_of_unfinished_parents;
+  inline unsigned char decrement_number_of_unfinished_parents() {
+    return _number_of_unfinished_parents.pre_decrement();
   }
 
   /**
@@ -233,7 +234,7 @@ public:
    * @return Number of unfinished parents.
    */
   inline unsigned char get_number_of_unfinished_parents() const {
-    return _number_of_unfinished_parents;
+    return _number_of_unfinished_parents.value();
   }
 
   /**

@@ -961,140 +961,26 @@ int main(int argc, char **argv) {
       }
     }
 
-    size_t current_task = hydro_queue.get_task(tasks);
-    while (current_task != NO_TASK) {
-      execute_task(current_task, gridvec, tasks, dt, hydro, inflow_boundary);
-      tasks[current_task].unlock_dependency();
-      const unsigned char numchild =
-          tasks[current_task].get_number_of_children();
-      for (unsigned char i = 0; i < numchild; ++i) {
-        const size_t ichild = tasks[current_task].get_child(i);
-        myassert(ichild != NO_TASK, "Child task does not exist!");
-        myassert(tasks[ichild].get_number_of_unfinished_parents() > 0,
-                 "Child task was already unlocked!");
-        // we need to make this thread safe...
-        tasks[ichild].decrement_number_of_unfinished_parents();
-        if (tasks[ichild].get_number_of_unfinished_parents() == 0) {
-          hydro_queue.add_task(ichild);
+#pragma omp parallel default(shared)
+    {
+      size_t current_task = hydro_queue.get_task(tasks);
+      while (current_task != NO_TASK) {
+        execute_task(current_task, gridvec, tasks, dt, hydro, inflow_boundary);
+        tasks[current_task].unlock_dependency();
+        const unsigned char numchild =
+            tasks[current_task].get_number_of_children();
+        for (unsigned char i = 0; i < numchild; ++i) {
+          const size_t ichild = tasks[current_task].get_child(i);
+          myassert(ichild != NO_TASK, "Child task does not exist!");
+          if (tasks[ichild].decrement_number_of_unfinished_parents() == 0) {
+            hydro_queue.add_task(ichild);
+          }
         }
+        current_task = hydro_queue.get_task(tasks);
       }
-      current_task = hydro_queue.get_task(tasks);
     }
 
     myassert(hydro_queue.size() == 0, "Queue not empty!");
-
-#ifdef NOTASKS
-    // gradient computation and prediction
-    for (unsigned int igrid = 0; igrid < tot_num_subgrid; ++igrid) {
-      DensitySubGrid &this_grid = *gridvec[igrid];
-      // inner sweep
-      this_grid.inner_gradient_sweep(hydro);
-      // outer sweeps
-      if (this_grid.get_neighbour(TRAVELDIRECTION_FACE_X_N) ==
-          NEIGHBOUR_OUTSIDE) {
-        this_grid.outer_ghost_gradient_sweep(TRAVELDIRECTION_FACE_X_N, hydro,
-                                             inflow_boundary);
-      }
-      const unsigned int ngbx =
-          this_grid.get_neighbour(TRAVELDIRECTION_FACE_X_P);
-      if (ngbx == NEIGHBOUR_OUTSIDE) {
-        this_grid.outer_ghost_gradient_sweep(TRAVELDIRECTION_FACE_X_P, hydro,
-                                             inflow_boundary);
-      } else {
-        this_grid.outer_gradient_sweep(TRAVELDIRECTION_FACE_X_P, hydro,
-                                       *gridvec[ngbx]);
-      }
-      if (this_grid.get_neighbour(TRAVELDIRECTION_FACE_Y_N) ==
-          NEIGHBOUR_OUTSIDE) {
-        this_grid.outer_ghost_gradient_sweep(TRAVELDIRECTION_FACE_Y_N, hydro,
-                                             inflow_boundary);
-      }
-      const unsigned int ngby =
-          this_grid.get_neighbour(TRAVELDIRECTION_FACE_Y_P);
-      if (ngby == NEIGHBOUR_OUTSIDE) {
-        this_grid.outer_ghost_gradient_sweep(TRAVELDIRECTION_FACE_Y_P, hydro,
-                                             inflow_boundary);
-      } else {
-        this_grid.outer_gradient_sweep(TRAVELDIRECTION_FACE_Y_P, hydro,
-                                       *gridvec[ngby]);
-      }
-      if (this_grid.get_neighbour(TRAVELDIRECTION_FACE_Z_N) ==
-          NEIGHBOUR_OUTSIDE) {
-        this_grid.outer_ghost_gradient_sweep(TRAVELDIRECTION_FACE_Z_N, hydro,
-                                             inflow_boundary);
-      }
-      const unsigned int ngbz =
-          this_grid.get_neighbour(TRAVELDIRECTION_FACE_Z_P);
-      if (ngbz == NEIGHBOUR_OUTSIDE) {
-        this_grid.outer_ghost_gradient_sweep(TRAVELDIRECTION_FACE_Z_P, hydro,
-                                             inflow_boundary);
-      } else {
-        this_grid.outer_gradient_sweep(TRAVELDIRECTION_FACE_Z_P, hydro,
-                                       *gridvec[ngbz]);
-      }
-    }
-    for (unsigned int igrid = 0; igrid < tot_num_subgrid; ++igrid) {
-      gridvec[igrid]->apply_slope_limiter(hydro);
-    }
-    for (unsigned int igrid = 0; igrid < tot_num_subgrid; ++igrid) {
-      gridvec[igrid]->predict_primitive_variables(hydro, 0.5 * dt);
-    }
-    // flux exchange
-    for (unsigned int igrid = 0; igrid < tot_num_subgrid; ++igrid) {
-      DensitySubGrid &this_grid = *gridvec[igrid];
-      // inner sweep
-      this_grid.inner_flux_sweep(hydro);
-      // outer sweeps
-      if (this_grid.get_neighbour(TRAVELDIRECTION_FACE_X_N) ==
-          NEIGHBOUR_OUTSIDE) {
-        this_grid.outer_ghost_flux_sweep(TRAVELDIRECTION_FACE_X_N, hydro,
-                                         inflow_boundary);
-      }
-      const unsigned int ngbx =
-          this_grid.get_neighbour(TRAVELDIRECTION_FACE_X_P);
-      if (ngbx == NEIGHBOUR_OUTSIDE) {
-        this_grid.outer_ghost_flux_sweep(TRAVELDIRECTION_FACE_X_P, hydro,
-                                         inflow_boundary);
-      } else {
-        this_grid.outer_flux_sweep(TRAVELDIRECTION_FACE_X_P, hydro,
-                                   *gridvec[ngbx]);
-      }
-      if (this_grid.get_neighbour(TRAVELDIRECTION_FACE_Y_N) ==
-          NEIGHBOUR_OUTSIDE) {
-        this_grid.outer_ghost_flux_sweep(TRAVELDIRECTION_FACE_Y_N, hydro,
-                                         inflow_boundary);
-      }
-      const unsigned int ngby =
-          this_grid.get_neighbour(TRAVELDIRECTION_FACE_Y_P);
-      if (ngby == NEIGHBOUR_OUTSIDE) {
-        this_grid.outer_ghost_flux_sweep(TRAVELDIRECTION_FACE_Y_P, hydro,
-                                         inflow_boundary);
-      } else {
-        this_grid.outer_flux_sweep(TRAVELDIRECTION_FACE_Y_P, hydro,
-                                   *gridvec[ngby]);
-      }
-      if (this_grid.get_neighbour(TRAVELDIRECTION_FACE_Z_N) ==
-          NEIGHBOUR_OUTSIDE) {
-        this_grid.outer_ghost_flux_sweep(TRAVELDIRECTION_FACE_Z_N, hydro,
-                                         inflow_boundary);
-      }
-      const unsigned int ngbz =
-          this_grid.get_neighbour(TRAVELDIRECTION_FACE_Z_P);
-      if (ngbz == NEIGHBOUR_OUTSIDE) {
-        this_grid.outer_ghost_flux_sweep(TRAVELDIRECTION_FACE_Z_P, hydro,
-                                         inflow_boundary);
-      } else {
-        this_grid.outer_flux_sweep(TRAVELDIRECTION_FACE_Z_P, hydro,
-                                   *gridvec[ngbz]);
-      }
-    }
-    for (unsigned int igrid = 0; igrid < tot_num_subgrid; ++igrid) {
-      gridvec[igrid]->update_conserved_variables(dt);
-    }
-    for (unsigned int igrid = 0; igrid < tot_num_subgrid; ++igrid) {
-      gridvec[igrid]->update_primitive_variables(hydro);
-    }
-#endif
   }
   hydro_loop_timer.stop();
 
