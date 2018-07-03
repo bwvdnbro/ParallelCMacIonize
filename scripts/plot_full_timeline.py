@@ -37,8 +37,11 @@ argparser = argparse.ArgumentParser(
   description = "Plot the full task plot timeline for the current directory")
 
 argparser.add_argument("-l", "--labels", action = "store_true")
+argparser.add_argument("-p", "--prefix", action = "store", default = "tasks")
 
 args = argparser.parse_args()
+
+prefix = args.prefix
 
 # change the default matplotlib settings for nicer plots
 pl.rcParams["text.usetex"] = True
@@ -47,9 +50,14 @@ pl.rcParams["font.size"] = 14
 
 # colours and labels for task types
 # change these if a new task type is created
-task_colors = ["b", "r", "c", "y", "g"]
 task_names = ["source photon", "photon traversal", "reemission", "send",
-              "receive"]
+              "receive", "gradsweep internal", "gradsweep neighbour",
+              "gradsweep boundary", "slope limiter", "predict primitives",
+              "fluxsweep internal", "fluxsweep neighbour", "fluxsweep boundary",
+              "update conserved", "update primitives"]
+task_colors = \
+  pl.cm.ScalarMappable(cmap = "gist_ncar").to_rgba(
+    np.linspace(0., 1., len(task_names)))
 
 # get the start and end CPU cycle count for each process to normalize the
 # time line
@@ -105,7 +113,7 @@ nthread = 0
 nproc = 0
 task_flags = np.zeros(len(task_colors), dtype = bool)
 # loop over the task files in the current working directory
-files = sorted(glob.glob("tasks_??.txt"))
+files = sorted(glob.glob(prefix + "_??.txt"))
 for name in files:
   # plot the file
   nproc_this, nthread_this, this_task_flags = plot_file(name)
@@ -147,7 +155,7 @@ for iproc in range(1, nproc):
                    color = "k")
 
 # add legend and clean up axes
-pl.legend(loc = "upper center", ncol = len(task_colors))
+pl.legend(loc = "upper center", ncol = min(3, len(task_colors)))
 pl.ylim(-1., nproc * nthread * 1.1)
 pl.gca().set_yticks([])
 pl.xlabel("Simulation time (s)")

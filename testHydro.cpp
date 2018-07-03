@@ -48,6 +48,7 @@
 
 #include "Assert.hpp"
 #include "Atomic.hpp"
+#include "CommandLineParser.hpp"
 #include "DensitySubGrid.hpp"
 #include "Hydro.hpp"
 #include "HydroIC.hpp"
@@ -711,6 +712,72 @@ inline void initialize_MPI(int &argc, char **argv, int &MPI_rank,
 }
 
 /**
+ * @brief Parse the command line options.
+ *
+ * @param argc Number of command line options.
+ * @param argv Command line options.
+ * @param num_threads_request Variable to store the requested number of threads
+ * in.
+ * @param paramfile_name Variable to store the parameter file name in.
+ */
+inline void parse_command_line(int argc, char **argv, int &num_threads_request,
+                               std::string &paramfile_name) {
+
+  CommandLineParser commandlineparser("testDensitySubGrid");
+  commandlineparser.add_required_option< int_fast32_t >(
+      "threads", 't', "Number of shared memory threads to use.");
+  commandlineparser.add_required_option< std::string >(
+      "params", 'p', "Name of the parameter file.");
+  commandlineparser.parse_arguments(argc, argv);
+
+  num_threads_request = commandlineparser.get_value< int_fast32_t >("threads");
+  paramfile_name = commandlineparser.get_value< std::string >("params");
+}
+
+/**
+ * @brief Set the number of threads to use during the simulation.
+ *
+ * We first determine the number of threads available (either by system default,
+ * or because the user has set the OMP_NUM_THREADS environment variable). We
+ * then check if a number of threads was specified on the command line. We don't
+ * allow setting the number of threads to a value larger than available, and use
+ * the available number as default if no value was given on the command line. If
+ * the requested number of threads is larger than what is available, we display
+ * a message.
+ *
+ * @param num_threads_request Requested number of threads.
+ * @param num_threads Variable to store the actual number of threads that will
+ * be used in.
+ */
+inline void set_number_of_threads(int num_threads_request, int &num_threads) {
+
+  // check how many threads are available
+  int num_threads_available;
+#pragma omp parallel
+  {
+#pragma omp single
+    num_threads_available = omp_get_num_threads();
+  }
+
+  // now check if this is compatible with what was requested
+  if (num_threads_request > num_threads_available) {
+    // NO: warn the user
+    logmessage("More threads requested ("
+                   << num_threads_request << ") than available ("
+                   << num_threads_available
+                   << "). Resetting to maximum available number of threads.",
+               0);
+    num_threads_request = num_threads_available;
+  }
+
+  // set the number of threads to the requested/maximal allowed value
+  omp_set_num_threads(num_threads_request);
+  num_threads = num_threads_request;
+
+  logmessage("Running with " << num_threads << " threads.", 0);
+}
+
+/**
  * @brief Test for the hydro.
  *
  * @param argc Number of command line arguments.
@@ -720,6 +787,22 @@ inline void initialize_MPI(int &argc, char **argv, int &MPI_rank,
 int main(int argc, char **argv) {
 
   initialize_MPI(argc, argv, MPI_rank, MPI_size);
+
+  MPI_Barrier(MPI_COMM_WORLD);
+  // start timing when all processes are at the same point (to make sure the
+  // timelines are compatible)
+  Timer program_timer;
+  program_timer.start();
+
+  unsigned long program_start, program_end;
+  cpucycle_tick(program_start);
+
+  int num_threads_request;
+  std::string paramfile_name;
+  parse_command_line(argc, argv, num_threads_request, paramfile_name);
+
+  int num_threads;
+  set_number_of_threads(num_threads_request, num_threads);
 
 #ifdef DO_HYDRO_ONLY_TEST
   /// Hydro only
@@ -945,7 +1028,7 @@ int main(int argc, char **argv) {
 
   const SodShockHydroIC sodshock_ic;
   const double box[6] = {-0.5, -0.5, -0.5, 1., 1., 1.};
-  const int ncell[3] = {64, 64, 64};
+  const int ncell[3] = {128, 128, 128};
   const int num_subgrid[3] = {8, 8, 8};
   const unsigned int tot_num_subgrid =
       num_subgrid[0] * num_subgrid[1] * num_subgrid[2];
@@ -1093,6 +1176,42 @@ int main(int argc, char **argv) {
     myassert(hydro_queue.size() == 0, "Queue not empty!");
   }
   hydro_loop_timer.stop();
+
+  // stop the timers (after all processes synchronize)
+  MPI_Barrier(MPI_COMM_WORLD);
+  program_timer.stop();
+  cpucycle_tick(program_end);
+
+  // write the start and end CPU cycle count for each process, and the total
+  // program time (for tick to time conversion)
+  {
+    std::string filename = "program_time.txt";
+    for (int irank = 0; irank < MPI_size; ++irank) {
+      // only the active process writes
+      if (irank == MPI_rank) {
+        // the file mode depends on the rank
+        std::ios_base::openmode mode;
+        if (irank == 0) {
+          // rank 0 creates (or overwrites) the file
+          mode = std::ofstream::trunc;
+        } else {
+          // all other ranks append to it
+          mode = std::ofstream::app;
+        }
+        // now open the file
+        std::ofstream ofile(filename, mode);
+
+        // rank 0 writes the header
+        if (irank == 0) {
+          ofile << "# rank\tstart\tstop\ttime\n";
+        }
+        ofile << MPI_rank << "\t" << program_start << "\t" << program_end
+              << "\t" << program_timer.value() << "\n";
+      }
+      // only one process at a time is allowed to write
+      MPI_Barrier(MPI_COMM_WORLD);
+    }
+  }
 
   cmac_status("Total hydro loop time: %g s", hydro_loop_timer.value());
 

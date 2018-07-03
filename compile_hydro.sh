@@ -28,9 +28,10 @@ fi
 # library dependencies
 libs="-lmetis"
 
-for f in testHydro.cpp
+for f in testHydro.cpp CommandLineParser.cpp CommandLineOption.cpp
 do
   mpic++ $flags $cflags -c $f
 done
 
-mpic++ $flags $cflags -o testHydro testHydro.o $libs
+mpic++ $flags $cflags -o testHydro testHydro.o CommandLineParser.o \
+  CommandLineOption.o $libs

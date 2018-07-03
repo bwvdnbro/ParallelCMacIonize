@@ -57,7 +57,9 @@ task_names = ["source photon", "photon traversal", "reemission", "send",
               "gradsweep boundary", "slope limiter", "predict primitives",
               "fluxsweep internal", "fluxsweep neighbour", "fluxsweep boundary",
               "update conserved", "update primitives"]
-task_colors = pl.cm.rainbow(np.linspace(0., 1., len(task_names)))
+task_colors = \
+  pl.cm.ScalarMappable(cmap = "gist_ncar").to_rgba(
+    np.linspace(0., 1., len(task_names)))
 
 # load the program time data
 ptime = np.loadtxt("program_time.txt")
@@ -215,7 +217,7 @@ for i in range(len(task_colors)):
     ax.plot([], [], color = task_colors[i], label = task_names[i])
 
 # add the legend and clean up the axes
-ax.legend(loc = "upper center", ncol = len(task_colors))
+ax.legend(loc = "upper center", ncol = min(3, len(task_colors)))
 ax.set_ylim(-1., nproc * nthread * 1.1)
 ax.set_yticks([])
 
