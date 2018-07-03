@@ -778,6 +778,47 @@ inline void set_number_of_threads(int num_threads_request, int &num_threads) {
 }
 
 /**
+ * @brief Steal a task from another queue.
+ *
+ * @param thread_id Id of the active thread.
+ * @param num_threads Total number of threads.
+ * @param new_queues Thread queues.
+ * @param tasks Task space.
+ * @param gridvec Grid.
+ * @return Index of an available task, or NO_TASK if no tasks are available.
+ */
+inline unsigned int steal_task(const int thread_id, const int num_threads,
+                               std::vector< Queue * > &new_queues,
+                               ThreadSafeVector< Task > &tasks,
+                               std::vector< DensitySubGrid * > &gridvec) {
+
+  // sort the queues by size
+  std::vector< unsigned int > queue_sizes(new_queues.size(), 0);
+  for (unsigned int i = 0; i < new_queues.size(); ++i) {
+    queue_sizes[i] = new_queues[i]->size();
+  }
+  std::vector< size_t > sorti = Utilities::argsort(queue_sizes);
+
+  // now try to steal from the largest queue first
+  unsigned int current_index = NO_TASK;
+  unsigned int i = 0;
+  while (current_index == NO_TASK && i < queue_sizes.size() &&
+         queue_sizes[sorti[queue_sizes.size() - i - 1]] > 0) {
+    current_index =
+        new_queues[sorti[queue_sizes.size() - i - 1]]->try_get_task(tasks);
+    ++i;
+  }
+  if (current_index != NO_TASK) {
+    // stealing means transferring ownership...
+    if (tasks[current_index].get_type() == TASKTYPE_PHOTON_TRAVERSAL) {
+      gridvec[tasks[current_index].get_subgrid()]->set_owning_thread(thread_id);
+    }
+  }
+
+  return current_index;
+}
+
+/**
  * @brief Test for the hydro.
  *
  * @param argc Number of command line arguments.
@@ -1123,7 +1164,10 @@ int main(int argc, char **argv) {
     set_dependencies(igrid, gridvec, tasks);
   }
 
-  Queue hydro_queue(18 * tot_num_subgrid);
+  std::vector< Queue * > hydro_queue(num_threads, nullptr);
+  for (int i = 0; i < num_threads; ++i) {
+    hydro_queue[i] = new Queue(18 * tot_num_subgrid);
+  }
 
   const double dt = 0.001;
   Timer hydro_loop_timer;
@@ -1132,16 +1176,16 @@ int main(int argc, char **argv) {
 
     logmessage("Step " << istep, 0);
 
-    myassert(hydro_queue.size() == 0, "Wrong queue size!");
-
     // reset the hydro tasks and add them to the queue
+    Atomic< unsigned int > number_of_tasks;
     for (unsigned int igrid = 0; igrid < tot_num_subgrid; ++igrid) {
       reset_hydro_tasks(tasks, *gridvec[igrid]);
       for (int i = 0; i < 18; ++i) {
         const size_t itask = gridvec[igrid]->get_hydro_task(i);
         if (itask != NO_TASK &&
             tasks[itask].get_number_of_unfinished_parents() == 0) {
-          hydro_queue.add_task(itask);
+          hydro_queue[gridvec[igrid]->get_owning_thread()]->add_task(itask);
+          number_of_tasks.pre_increment();
         }
       }
     }
@@ -1151,29 +1195,39 @@ int main(int argc, char **argv) {
 #pragma omp parallel default(shared)
     {
       const int thread_id = omp_get_thread_num();
-      size_t current_task = hydro_queue.get_task(tasks);
-      while (current_task != NO_TASK) {
-        tasks[current_task].start(thread_id);
-        execute_task(current_task, gridvec, tasks, dt, hydro, inflow_boundary);
-        tasks[current_task].stop();
-        tasks[current_task].unlock_dependency();
-        const unsigned char numchild =
-            tasks[current_task].get_number_of_children();
-        for (unsigned char i = 0; i < numchild; ++i) {
-          const size_t ichild = tasks[current_task].get_child(i);
-          myassert(ichild != NO_TASK, "Child task does not exist!");
-          if (tasks[ichild].decrement_number_of_unfinished_parents() == 0) {
-            hydro_queue.add_task(ichild);
-          }
+      while (number_of_tasks.value() > 0) {
+        size_t current_task = hydro_queue[thread_id]->get_task(tasks);
+        if (current_task == NO_TASK) {
+          current_task =
+              steal_task(thread_id, num_threads, hydro_queue, tasks, gridvec);
         }
-        current_task = hydro_queue.get_task(tasks);
+        if (current_task != NO_TASK) {
+          tasks[current_task].start(thread_id);
+          execute_task(current_task, gridvec, tasks, dt, hydro,
+                       inflow_boundary);
+          tasks[current_task].stop();
+          tasks[current_task].unlock_dependency();
+          const unsigned char numchild =
+              tasks[current_task].get_number_of_children();
+          for (unsigned char i = 0; i < numchild; ++i) {
+            const size_t ichild = tasks[current_task].get_child(i);
+            myassert(ichild != NO_TASK, "Child task does not exist!");
+            if (tasks[ichild].decrement_number_of_unfinished_parents() == 0) {
+              hydro_queue[gridvec[tasks[ichild].get_subgrid()]
+                              ->get_owning_thread()]
+                  ->add_task(ichild);
+              number_of_tasks.pre_increment();
+            }
+          }
+          number_of_tasks.pre_decrement();
+        }
       }
+
+      myassert(hydro_queue[thread_id]->size() == 0, "Queue not empty!");
     }
     cpucycle_tick(iteration_end);
 
     output_tasks(istep, tasks, iteration_start, iteration_end);
-
-    myassert(hydro_queue.size() == 0, "Queue not empty!");
   }
   hydro_loop_timer.stop();
 
@@ -1216,6 +1270,14 @@ int main(int argc, char **argv) {
   cmac_status("Total hydro loop time: %g s", hydro_loop_timer.value());
 
   output_result(gridvec, tot_num_subgrid);
+
+  for (int i = 0; i < num_threads; ++i) {
+    delete hydro_queue[i];
+  }
+
+  for (unsigned int i = 0; i < tot_num_subgrid; ++i) {
+    delete gridvec[i];
+  }
 
   const int MPI_exit_code = MPI_Finalize();
   return MPI_exit_code;
