@@ -1270,6 +1270,287 @@ public:
   }
 
   /**
+   * @brief Let the given Photon travel through the density grid without
+   * interacting with the grid.
+   *
+   * @param photon Photon.
+   * @param input_direction Direction from which the photon enters the grid.
+   * @return TravelDirection of the photon after it has traversed this grid.
+   */
+  inline int propagate(Photon &photon, const int input_direction) {
+
+    myassert(input_direction >= 0 && input_direction < TRAVELDIRECTION_NUMBER,
+             "input_direction: " << input_direction);
+
+    // get some photon variables
+    const double *direction = photon.get_direction();
+
+    myassert(TravelDirections::is_compatible_input_direction(direction,
+                                                             input_direction),
+             "direction: " << direction[0] << " " << direction[1] << " "
+                           << direction[2]
+                           << ", input_direction: " << input_direction);
+
+    const double inverse_direction[3] = {1. / direction[0], 1. / direction[1],
+                                         1. / direction[2]};
+    // NOTE: position is relative w.r.t. _anchor!!!
+    double position[3] = {photon.get_position()[0] - _anchor[0],
+                          photon.get_position()[1] - _anchor[1],
+                          photon.get_position()[2] - _anchor[2]};
+    double tau_done = 0.;
+    const double tau_target = photon.get_target_optical_depth();
+
+    myassert(tau_done < tau_target, "tau_done: " << tau_done
+                                                 << ", target: " << tau_target);
+
+    const double cross_section = photon.get_photoionization_cross_section();
+    // get the indices of the first cell on the photon's path
+    int three_index[3];
+    int active_cell = get_start_index(position, input_direction, three_index);
+
+    myassert(active_cell >= 0 &&
+                 active_cell < _number_of_cells[0] * _number_of_cells[3],
+             "active_cell: " << active_cell << ", size: "
+                             << _number_of_cells[0] * _number_of_cells[3]);
+
+    // enter photon traversal loop
+    // double condition:
+    //  - target optical depth not reached (tau_done < tau_target)
+    //  - photon still in subgrid: is_inside(three_index)
+    while (tau_done < tau_target && is_inside(three_index)) {
+      // get cell boundaries
+      const double cell_low[3] = {three_index[0] * _cell_size[0],
+                                  three_index[1] * _cell_size[1],
+                                  three_index[2] * _cell_size[2]};
+      const double cell_high[3] = {(three_index[0] + 1.) * _cell_size[0],
+                                   (three_index[1] + 1.) * _cell_size[1],
+                                   (three_index[2] + 1.) * _cell_size[2]};
+
+      myassert(cell_low[0] <= position[0] && cell_high[0] >= position[0] &&
+                   cell_low[1] <= position[1] && cell_high[1] >= position[1] &&
+                   cell_low[2] <= position[2] && cell_high[2] >= position[2],
+               "position: "
+                   << position[0] << " " << position[1] << " " << position[2]
+                   << "\ncell_low: " << cell_low[0] << " " << cell_low[1] << " "
+                   << cell_low[2] << "\ncell_high: " << cell_high[0] << " "
+                   << cell_high[1] << " " << cell_high[2]
+                   << "\ndirection: " << direction[0] << " " << direction[1]
+                   << " " << direction[2] << "\nthree_index: " << three_index[0]
+                   << " " << three_index[1] << " " << three_index[2]);
+
+      // compute cell distances
+      double l[3];
+      for (unsigned char idim = 0; idim < 3; ++idim) {
+        if (direction[idim] > 0.) {
+          l[idim] =
+              (cell_high[idim] - position[idim]) * inverse_direction[idim];
+        } else if (direction[idim] < 0.) {
+          l[idim] = (cell_low[idim] - position[idim]) * inverse_direction[idim];
+        } else {
+          l[idim] = DBL_MAX;
+        }
+      }
+
+      // find the minimum
+      double lmin = std::min(l[0], std::min(l[1], l[2]));
+
+      myassert(lmin >= 0.,
+               "lmin: " << lmin << "\nl: " << l[0] << " " << l[1] << " " << l[2]
+                        << "\ncell: " << cell_low[0] << " " << cell_low[1]
+                        << " " << cell_low[2] << ", " << cell_high[0] << " "
+                        << cell_high[1] << " " << cell_high[2]
+                        << "\nposition: " << position[0] << " " << position[1]
+                        << " " << position[2] << "\ndirection: " << direction[0]
+                        << " " << direction[1] << " " << direction[2]);
+
+      double lminsigma = lmin * cross_section;
+      // compute the corresponding optical depth
+      const double tau = lminsigma * _number_density[active_cell] *
+                         _neutral_fraction[active_cell];
+      tau_done += tau;
+      // check if the target optical depth was reached
+      if (tau_done >= tau_target) {
+        // if so: subtract the surplus from the path
+        const double correction = (tau_done - tau_target) / tau;
+        lmin *= (1. - correction);
+        lminsigma = lmin * cross_section;
+      } else {
+        // if not: photon leaves cell
+        // update three_index
+        for (unsigned char idim = 0; idim < 3; ++idim) {
+          if (l[idim] == lmin) {
+            three_index[idim] += (direction[idim] > 0.) ? 1 : -1;
+          }
+        }
+      }
+
+      // update the photon position
+      // we use the complicated syntax below to make sure the positions we
+      // know are 100% accurate (only important for our assertions)
+      position[0] = (l[0] == lmin)
+                        ? ((direction[0] > 0.) ? cell_high[0] : cell_low[0])
+                        : position[0] + lmin * direction[0];
+      position[1] = (l[1] == lmin)
+                        ? ((direction[1] > 0.) ? cell_high[1] : cell_low[1])
+                        : position[1] + lmin * direction[1];
+      position[2] = (l[2] == lmin)
+                        ? ((direction[2] > 0.) ? cell_high[2] : cell_low[2])
+                        : position[2] + lmin * direction[2];
+      // update the cell index
+      active_cell = get_one_index(three_index);
+    }
+    // update photon quantities
+    photon.set_target_optical_depth(tau_target - tau_done);
+    photon.set_position(position[0] + _anchor[0], position[1] + _anchor[1],
+                        position[2] + _anchor[2]);
+    // get the outgoing direction
+    int output_direction;
+    if (tau_done >= tau_target) {
+      output_direction = TRAVELDIRECTION_INSIDE;
+    } else {
+      output_direction = get_output_direction(three_index);
+    }
+
+    myassert(TravelDirections::is_compatible_output_direction(direction,
+                                                              output_direction),
+             "wrong output direction!");
+
+    return output_direction;
+  }
+
+  /**
+   * @brief Add the optical depth contribution for traversing this subgrid to
+   * the total optical depth of the given photon.
+   *
+   * @param photon Photon.
+   * @param input_direction Direction from which the photon enters the grid.
+   * @return TravelDirection of the photon after it has traversed this grid.
+   */
+  inline int compute_optical_depth(Photon &photon, const int input_direction) {
+
+    myassert(input_direction >= 0 && input_direction < TRAVELDIRECTION_NUMBER,
+             "input_direction: " << input_direction);
+
+    // get some photon variables
+    const double *direction = photon.get_direction();
+
+    myassert(TravelDirections::is_compatible_input_direction(direction,
+                                                             input_direction),
+             "direction: " << direction[0] << " " << direction[1] << " "
+                           << direction[2]
+                           << ", input_direction: " << input_direction);
+
+    const double inverse_direction[3] = {1. / direction[0], 1. / direction[1],
+                                         1. / direction[2]};
+    // NOTE: position is relative w.r.t. _anchor!!!
+    double position[3] = {photon.get_position()[0] - _anchor[0],
+                          photon.get_position()[1] - _anchor[1],
+                          photon.get_position()[2] - _anchor[2]};
+    double tau_done = 0.;
+
+    const double cross_section = photon.get_photoionization_cross_section();
+    // get the indices of the first cell on the photon's path
+    int three_index[3];
+    int active_cell = get_start_index(position, input_direction, three_index);
+
+    myassert(active_cell >= 0 &&
+                 active_cell < _number_of_cells[0] * _number_of_cells[3],
+             "active_cell: " << active_cell << ", size: "
+                             << _number_of_cells[0] * _number_of_cells[3]);
+
+    // enter photon traversal loop
+    // double condition:
+    //  - photon still in subgrid: is_inside(three_index)
+    while (is_inside(three_index)) {
+      // get cell boundaries
+      const double cell_low[3] = {three_index[0] * _cell_size[0],
+                                  three_index[1] * _cell_size[1],
+                                  three_index[2] * _cell_size[2]};
+      const double cell_high[3] = {(three_index[0] + 1.) * _cell_size[0],
+                                   (three_index[1] + 1.) * _cell_size[1],
+                                   (three_index[2] + 1.) * _cell_size[2]};
+
+      myassert(cell_low[0] <= position[0] && cell_high[0] >= position[0] &&
+                   cell_low[1] <= position[1] && cell_high[1] >= position[1] &&
+                   cell_low[2] <= position[2] && cell_high[2] >= position[2],
+               "position: "
+                   << position[0] << " " << position[1] << " " << position[2]
+                   << "\ncell_low: " << cell_low[0] << " " << cell_low[1] << " "
+                   << cell_low[2] << "\ncell_high: " << cell_high[0] << " "
+                   << cell_high[1] << " " << cell_high[2]
+                   << "\ndirection: " << direction[0] << " " << direction[1]
+                   << " " << direction[2] << "\nthree_index: " << three_index[0]
+                   << " " << three_index[1] << " " << three_index[2]);
+
+      // compute cell distances
+      double l[3];
+      for (unsigned char idim = 0; idim < 3; ++idim) {
+        if (direction[idim] > 0.) {
+          l[idim] =
+              (cell_high[idim] - position[idim]) * inverse_direction[idim];
+        } else if (direction[idim] < 0.) {
+          l[idim] = (cell_low[idim] - position[idim]) * inverse_direction[idim];
+        } else {
+          l[idim] = DBL_MAX;
+        }
+      }
+
+      // find the minimum
+      double lmin = std::min(l[0], std::min(l[1], l[2]));
+
+      myassert(lmin >= 0.,
+               "lmin: " << lmin << "\nl: " << l[0] << " " << l[1] << " " << l[2]
+                        << "\ncell: " << cell_low[0] << " " << cell_low[1]
+                        << " " << cell_low[2] << ", " << cell_high[0] << " "
+                        << cell_high[1] << " " << cell_high[2]
+                        << "\nposition: " << position[0] << " " << position[1]
+                        << " " << position[2] << "\ndirection: " << direction[0]
+                        << " " << direction[1] << " " << direction[2]);
+
+      double lminsigma = lmin * cross_section;
+      // compute the corresponding optical depth
+      const double tau = lminsigma * _number_density[active_cell] *
+                         _neutral_fraction[active_cell];
+      tau_done += tau;
+      // photon leaves cell
+      // update three_index
+      for (unsigned char idim = 0; idim < 3; ++idim) {
+        if (l[idim] == lmin) {
+          three_index[idim] += (direction[idim] > 0.) ? 1 : -1;
+        }
+      }
+
+      // update the photon position
+      // we use the complicated syntax below to make sure the positions we
+      // know are 100% accurate (only important for our assertions)
+      position[0] = (l[0] == lmin)
+                        ? ((direction[0] > 0.) ? cell_high[0] : cell_low[0])
+                        : position[0] + lmin * direction[0];
+      position[1] = (l[1] == lmin)
+                        ? ((direction[1] > 0.) ? cell_high[1] : cell_low[1])
+                        : position[1] + lmin * direction[1];
+      position[2] = (l[2] == lmin)
+                        ? ((direction[2] > 0.) ? cell_high[2] : cell_low[2])
+                        : position[2] + lmin * direction[2];
+      // update the cell index
+      active_cell = get_one_index(three_index);
+    }
+    // update photon quantities
+    photon.set_target_optical_depth(photon.get_target_optical_depth() +
+                                    tau_done);
+    photon.set_position(position[0] + _anchor[0], position[1] + _anchor[1],
+                        position[2] + _anchor[2]);
+    // get the outgoing direction
+    int output_direction = get_output_direction(three_index);
+
+    myassert(TravelDirections::is_compatible_output_direction(direction,
+                                                              output_direction),
+             "wrong output direction!");
+
+    return output_direction;
+  }
+
+  /**
    * @brief Get the intensity integral for the cell with the given indices.
    *
    * @param ix X index of the cell.
@@ -1369,6 +1650,21 @@ public:
                        sizeof(double));
           stream.write(reinterpret_cast< char * >(&_number_density[index]),
                        sizeof(double));
+          stream.write(
+              reinterpret_cast< char * >(&_primitive_variables[5 * index]),
+              sizeof(double));
+          stream.write(
+              reinterpret_cast< char * >(&_primitive_variables[5 * index + 1]),
+              sizeof(double));
+          stream.write(
+              reinterpret_cast< char * >(&_primitive_variables[5 * index + 2]),
+              sizeof(double));
+          stream.write(
+              reinterpret_cast< char * >(&_primitive_variables[5 * index + 3]),
+              sizeof(double));
+          stream.write(
+              reinterpret_cast< char * >(&_primitive_variables[5 * index + 4]),
+              sizeof(double));
         }
       }
     }
