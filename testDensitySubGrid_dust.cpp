@@ -254,6 +254,10 @@ int main(int argc, char **argv) {
   Atomic< unsigned int > iglobal(0);
   double source_photon_weight;
   // compute source photon weight
+  // this is the optical extinction for a photon that starts from the source
+  // and is scattered towards the observer
+  // this weight is used to add direct emission to the image for every photon
+  // packet. It is the same for all source photons.
   {
     Photon photon;
     photon.set_position(0., 0., 0.);
@@ -265,6 +269,14 @@ int main(int argc, char **argv) {
   {
     // id of this specific thread
     const int thread_id = omp_get_thread_num();
+
+    double local_image[100][100];
+    for (int ix = 0; ix < 100; ++ix) {
+      for (int iy = 0; iy < 100; ++iy) {
+        local_image[ix][iy] = 0.;
+      }
+    }
+
     unsigned int i = iglobal.post_increment();
     while (i < num_photon) {
 
@@ -272,7 +284,10 @@ int main(int argc, char **argv) {
 
       // initial position: we currently assume a single source at the origin
       photon.set_position(0., 0., 0.);
-      image[50][50] += source_photon_weight;
+      // note that we do not include the normalization factor for the assumed
+      // isotropic emission phase function; it contributes a constant factor
+      // to our pixels
+      local_image[50][50] += source_photon_weight;
 
       // initial direction: isotropic distribution
       get_random_direction(random_generator[thread_id], photon.get_direction());
@@ -286,16 +301,28 @@ int main(int argc, char **argv) {
 
       if (grid.propagate(photon, TRAVELDIRECTION_INSIDE) ==
           TRAVELDIRECTION_INSIDE) {
+        // if the photon packet is still inside, we add its contribution to the
+        // image using forced scattering
         photon.set_direction(0., 0., 1.);
         grid.compute_optical_depth(photon, TRAVELDIRECTION_INSIDE);
         const double *position = photon.get_position();
         const unsigned int ix = 0.5 * (position[0] + 1.) * 100;
         const unsigned int iy = 0.5 * (position[1] + 1.) * 100;
-        image[ix][iy] +=
-            0.25 * M_1_PI * std::exp(-photon.get_target_optical_depth());
+        // again, we omit the normalization factor for isotropic scattering
+        local_image[ix][iy] += std::exp(-photon.get_target_optical_depth());
       }
 
       i = iglobal.post_increment();
+    }
+
+#pragma omp critical
+    {
+      // add image contribution from this thread
+      for (int ix = 0; ix < 100; ++ix) {
+        for (int iy = 0; iy < 100; ++iy) {
+          image[ix][iy] += local_image[ix][iy];
+        }
+      }
     }
   }
 
