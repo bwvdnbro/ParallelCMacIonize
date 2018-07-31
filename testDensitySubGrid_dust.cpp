@@ -48,6 +48,9 @@
 /*! @brief Activate this to unit test the CostVector. */
 //#define TEST_COSTVECTOR
 
+/*! @brief Activate this to add direct photons from the source to the image. */
+//#define ADD_DIRECT_LIGHT
+
 /**
  * @brief Write a message to the log with the given log level.
  *
@@ -227,11 +230,22 @@ int main(int argc, char **argv) {
   const double box[6] = {-1., -1., -1., 2., 2., 2.};
   const int ncell[3] = {64, 64, 64};
   DensitySubGrid grid(box, ncell);
-  const unsigned int num_photon = 1e7;
+  const unsigned int num_photon = 1e8;
 
   for (int icell = 0; icell < ncell[0] * ncell[1] * ncell[2]; ++icell) {
-    grid.set_number_density(icell, 1.);
-    grid.set_neutral_fraction(icell, 10.);
+    double cell_midpoint[3];
+    grid.get_cell_midpoint(icell, cell_midpoint);
+    const double cell_radius = std::sqrt(cell_midpoint[0] * cell_midpoint[0] +
+                                         cell_midpoint[1] * cell_midpoint[1] +
+                                         cell_midpoint[2] * cell_midpoint[2]);
+
+    if (cell_radius < 1.) {
+      grid.set_number_density(icell, 1.);
+      grid.set_neutral_fraction(icell, 10.);
+    } else {
+      grid.set_number_density(icell, 0.);
+      grid.set_neutral_fraction(icell, 10.);
+    }
   }
 
   Timer program_timer;
@@ -252,6 +266,7 @@ int main(int argc, char **argv) {
   }
 
   Atomic< unsigned int > iglobal(0);
+#ifdef ADD_DIRECT_LIGHT
   double source_photon_weight;
   // compute source photon weight
   // this is the optical extinction for a photon that starts from the source
@@ -265,6 +280,7 @@ int main(int argc, char **argv) {
     grid.compute_optical_depth(photon, TRAVELDIRECTION_INSIDE);
     source_photon_weight = std::exp(-photon.get_target_optical_depth());
   }
+#endif
 #pragma omp parallel default(shared)
   {
     // id of this specific thread
@@ -284,10 +300,12 @@ int main(int argc, char **argv) {
 
       // initial position: we currently assume a single source at the origin
       photon.set_position(0., 0., 0.);
-      // note that we do not include the normalization factor for the assumed
-      // isotropic emission phase function; it contributes a constant factor
-      // to our pixels
+// note that we do not include the normalization factor for the assumed
+// isotropic emission phase function; it contributes a constant factor
+// to our pixels
+#ifdef ADD_DIRECT_LIGHT
       local_image[50][50] += source_photon_weight;
+#endif
 
       // initial direction: isotropic distribution
       get_random_direction(random_generator[thread_id], photon.get_direction());
