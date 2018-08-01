@@ -1,9 +1,9 @@
 import numpy as np
 import pylab as pl
-import scipy.special as special
 import scipy.integrate as integ
 import argparse
 
+# parse command line arguments
 argparser = argparse.ArgumentParser("Plot the scattering image.")
 argparser.add_argument("-f", "--file", action = "store", required = True)
 argparser.add_argument("-d", "--direct_light", action = "store_true")
@@ -13,6 +13,7 @@ argparser.add_argument("-y", "--ny", action = "store", type = int,
                        default = 101)
 args = argparser.parse_args()
 
+# helper functions
 def integrand(z, kapparho, x2y2):
   return np.exp(-kapparho * (np.sqrt(x2y2 + z**2) - z)) / (x2y2 + z**2)
 
@@ -29,32 +30,64 @@ def analytic(kapparho, x, y, R, dx, dy):
     else:
       return 0.
 
-pl.rcParams["figure.figsize"] = (8, 6)
-
+# open the image file
 data = np.memmap(args.file, dtype = np.float64, shape = (args.nx, args.ny),
                  mode = "r")
+
+profile_data = data.reshape(-1)
+xy = np.array(np.meshgrid(np.linspace(-1., 1., args.nx),
+                          np.linspace(-1., 1., args.ny))).transpose()
+xy = xy.reshape((-1,2))
+profile_radius = np.sqrt(xy[:,0]**2 + xy[:,1]**2)
+
+image_xy = xy.reshape((args.nx, args.ny, 2))
+image_data = data.reshape((args.nx, args.ny))
+
+dx = 2. / args.nx
+dy = 2. / args.ny
+
+profile_analytic = np.array([analytic(0.1, xyval[0], xyval[1], 1., dx, dy)
+                             for xyval in xy])
+image_analytic = profile_analytic.reshape((args.nx, args.ny))
+
+# make the plot
+
+pl.rcParams["figure.figsize"] = (7, 6)
+pl.rcParams["text.usetex"] = True
 
 dataax = pl.subplot2grid((2, 2), (0, 0))
 simax = pl.subplot2grid((2, 2), (1, 0))
 profax = pl.subplot2grid((2, 2), (0, 1), rowspan = 2)
 
-dataax.imshow(np.log10(data))
+data_min = profile_data[profile_data > 0.].min()
+data_max = profile_data[profile_data > 0.].max()
+analytic_min = profile_analytic[profile_analytic > 0.].min()
+analytic_max = profile_analytic[profile_analytic > 0.].max()
 
-data = data.reshape(-1)
-xy = np.array(np.meshgrid(np.linspace(-1., 1., args.nx),
-                          np.linspace(-1., 1., args.ny))).transpose()
-xy = xy.reshape((-1,2))
-radius = np.sqrt(xy[:,0]**2 + xy[:,1]**2)
+vmin = np.log10(min(data_min, analytic_min))
+vmax = np.log10(max(data_max, analytic_max))
 
-dx = 2. / args.nx
-dy = 2. / args.ny
+dataax.contourf(image_xy[:,:,0], image_xy[:,:,1], np.log10(image_data), 500,
+                vmin = vmin, vmax = vmax, extend = "both")
 
-analytic_solution = np.array([analytic(0.1, xyval[0], xyval[1], 1., dx, dy)
-                              for xyval in xy])
+simax.contourf(image_xy[:,:,0], image_xy[:,:,1], np.log10(image_analytic), 500,
+               vmin = vmin, vmax = vmax, extend = "both")
 
-simax.imshow(np.log10(analytic_solution.reshape((args.nx, args.ny))))
+profax.semilogy(profile_radius, profile_data, ".", label = "MC")
+profax.semilogy(profile_radius, profile_analytic, "-", label = "analytic")
 
-profax.semilogy(radius, data, ".")
-profax.semilogy(radius, analytic_solution, "-")
+dataax.set_title("MC")
+simax.set_title("analytic")
+profax.legend(loc = "best")
 
+dataax.set_aspect("equal")
+simax.set_aspect("equal")
+
+dataax.set_ylabel("$y$")
+simax.set_xlabel("$x$")
+simax.set_ylabel("$y$")
+profax.set_xlabel("$\sqrt{x^2+y^2}$")
+profax.set_ylabel("pixel count")
+
+pl.tight_layout()
 pl.savefig("image.png")
