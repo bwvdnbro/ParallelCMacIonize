@@ -51,6 +51,11 @@
 /*! @brief Activate this to add direct photons from the source to the image. */
 //#define ADD_DIRECT_LIGHT
 
+/*! @brief Number of horizontal pixels in the result image. */
+#define NPIXELX 101
+/*! @brief Number of vertical pixels in the result image. */
+#define NPIXELY 101
+
 /**
  * @brief Write a message to the log with the given log level.
  *
@@ -241,10 +246,10 @@ int main(int argc, char **argv) {
 
     if (cell_radius < 1.) {
       grid.set_number_density(icell, 1.);
-      grid.set_neutral_fraction(icell, 10.);
+      grid.set_neutral_fraction(icell, 0.1);
     } else {
       grid.set_number_density(icell, 0.);
-      grid.set_neutral_fraction(icell, 10.);
+      grid.set_neutral_fraction(icell, 0.1);
     }
   }
 
@@ -258,9 +263,9 @@ int main(int argc, char **argv) {
     random_generator[i].set_seed(42 + i);
   }
 
-  double image[100][100];
-  for (int ix = 0; ix < 100; ++ix) {
-    for (int iy = 0; iy < 100; ++iy) {
+  double image[NPIXELX][NPIXELY];
+  for (int ix = 0; ix < NPIXELX; ++ix) {
+    for (int iy = 0; iy < NPIXELY; ++iy) {
       image[ix][iy] = 0.;
     }
   }
@@ -281,14 +286,15 @@ int main(int argc, char **argv) {
     source_photon_weight = std::exp(-photon.get_target_optical_depth());
   }
 #endif
+  const double scatter_weight = 0.25 * M_1_PI;
 #pragma omp parallel default(shared)
   {
     // id of this specific thread
     const int thread_id = omp_get_thread_num();
 
-    double local_image[100][100];
-    for (int ix = 0; ix < 100; ++ix) {
-      for (int iy = 0; iy < 100; ++iy) {
+    double local_image[NPIXELX][NPIXELY];
+    for (int ix = 0; ix < NPIXELX; ++ix) {
+      for (int iy = 0; iy < NPIXELY; ++iy) {
         local_image[ix][iy] = 0.;
       }
     }
@@ -300,11 +306,9 @@ int main(int argc, char **argv) {
 
       // initial position: we currently assume a single source at the origin
       photon.set_position(0., 0., 0.);
-// note that we do not include the normalization factor for the assumed
-// isotropic emission phase function; it contributes a constant factor
-// to our pixels
 #ifdef ADD_DIRECT_LIGHT
-      local_image[50][50] += source_photon_weight;
+      local_image[NPIXELX / 2][NPIXELY / 2] +=
+          scatter_weight * source_photon_weight;
 #endif
 
       // initial direction: isotropic distribution
@@ -317,17 +321,29 @@ int main(int argc, char **argv) {
       // this is the fixed cross section we use for the moment
       photon.set_photoionization_cross_section(1.);
 
-      if (grid.propagate(photon, TRAVELDIRECTION_INSIDE) ==
-          TRAVELDIRECTION_INSIDE) {
+      double weight = 1.;
+      while (grid.propagate(photon, TRAVELDIRECTION_INSIDE) ==
+             TRAVELDIRECTION_INSIDE) {
+
+        weight *= scatter_weight;
         // if the photon packet is still inside, we add its contribution to the
-        // image using forced scattering
+        // image using peel off
         photon.set_direction(0., 0., 1.);
         grid.compute_optical_depth(photon, TRAVELDIRECTION_INSIDE);
         const double *position = photon.get_position();
-        const unsigned int ix = 0.5 * (position[0] + 1.) * 100;
-        const unsigned int iy = 0.5 * (position[1] + 1.) * 100;
-        // again, we omit the normalization factor for isotropic scattering
-        local_image[ix][iy] += std::exp(-photon.get_target_optical_depth());
+        const unsigned int ix = 0.5 * (position[0] + 1.) * NPIXELX;
+        const unsigned int iy = 0.5 * (position[1] + 1.) * NPIXELY;
+        local_image[ix][iy] +=
+            weight * std::exp(-photon.get_target_optical_depth());
+
+        // now scatter the photon
+        // initial direction: isotropic distribution
+        get_random_direction(random_generator[thread_id],
+                             photon.get_direction());
+
+        // target optical depth (exponential distribution)
+        photon.set_target_optical_depth(
+            -std::log(random_generator[thread_id].get_uniform_random_double()));
       }
 
       i = iglobal.post_increment();
@@ -336,8 +352,8 @@ int main(int argc, char **argv) {
 #pragma omp critical
     {
       // add image contribution from this thread
-      for (int ix = 0; ix < 100; ++ix) {
-        for (int iy = 0; iy < 100; ++iy) {
+      for (int ix = 0; ix < NPIXELX; ++ix) {
+        for (int iy = 0; iy < NPIXELY; ++iy) {
           image[ix][iy] += local_image[ix][iy];
         }
       }
@@ -345,8 +361,10 @@ int main(int argc, char **argv) {
   }
 
   std::ofstream ifile("image.dat");
-  for (int ix = 0; ix < 100; ++ix) {
-    for (int iy = 0; iy < 100; ++iy) {
+  for (int ix = 0; ix < NPIXELX; ++ix) {
+    for (int iy = 0; iy < NPIXELY; ++iy) {
+      // normalize
+      image[ix][iy] /= num_photon;
       ifile.write(reinterpret_cast< char * >(&image[ix][iy]), sizeof(double));
     }
   }
