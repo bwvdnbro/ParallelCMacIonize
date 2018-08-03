@@ -115,6 +115,8 @@ public:
    */
   inline void get_free_elements(const size_t size) {
 
+    myassert(size < _size, "Not enough elements available!");
+
     for (size_t i = 0; i < size; ++i) {
       _locks[i].lock();
     }

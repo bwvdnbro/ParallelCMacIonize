@@ -104,6 +104,9 @@ public:
    * @param task_end Last task to add.
    */
   inline void add_tasks(const size_t task_start, const size_t task_end) {
+
+    myassert(task_end <= _size, "Too many tasks for queue!");
+
     _queue_lock.lock();
 #pragma omp parallel for
     for (size_t itask = 0; itask < (task_end - task_start); ++itask) {

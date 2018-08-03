@@ -263,10 +263,10 @@ int main(int argc, char **argv) {
     random_generator[i].set_seed(42 + i);
   }
 
-  double image[NPIXELX][NPIXELY];
+  double *image = new double[NPIXELX * NPIXELY];
   for (int ix = 0; ix < NPIXELX; ++ix) {
     for (int iy = 0; iy < NPIXELY; ++iy) {
-      image[ix][iy] = 0.;
+      image[ix * NPIXELY + iy] = 0.;
     }
   }
 
@@ -292,10 +292,10 @@ int main(int argc, char **argv) {
     // id of this specific thread
     const int thread_id = omp_get_thread_num();
 
-    double local_image[NPIXELX][NPIXELY];
+    double *local_image = new double[NPIXELX * NPIXELY];
     for (int ix = 0; ix < NPIXELX; ++ix) {
       for (int iy = 0; iy < NPIXELY; ++iy) {
-        local_image[ix][iy] = 0.;
+        local_image[ix * NPIXELY + iy] = 0.;
       }
     }
 
@@ -307,7 +307,7 @@ int main(int argc, char **argv) {
       // initial position: we currently assume a single source at the origin
       photon.set_position(0., 0., 0.);
 #ifdef ADD_DIRECT_LIGHT
-      local_image[NPIXELX / 2][NPIXELY / 2] +=
+      local_image[NPIXELX * NPIXELY / 2 + NPIXELY / 2] +=
           scatter_weight * source_photon_weight;
 #endif
 
@@ -333,7 +333,7 @@ int main(int argc, char **argv) {
         const double *position = photon.get_position();
         const unsigned int ix = 0.5 * (position[0] + 1.) * NPIXELX;
         const unsigned int iy = 0.5 * (position[1] + 1.) * NPIXELY;
-        local_image[ix][iy] +=
+        local_image[ix * NPIXELY + iy] +=
             weight * std::exp(-photon.get_target_optical_depth());
 
         // now scatter the photon
@@ -354,21 +354,26 @@ int main(int argc, char **argv) {
       // add image contribution from this thread
       for (int ix = 0; ix < NPIXELX; ++ix) {
         for (int iy = 0; iy < NPIXELY; ++iy) {
-          image[ix][iy] += local_image[ix][iy];
+          image[ix * NPIXELY + iy] += local_image[ix * NPIXELY + iy];
         }
       }
     }
+
+    delete[] local_image;
   }
 
   std::ofstream ifile("image.dat");
   for (int ix = 0; ix < NPIXELX; ++ix) {
     for (int iy = 0; iy < NPIXELY; ++iy) {
       // normalize
-      image[ix][iy] /= num_photon;
-      ifile.write(reinterpret_cast< char * >(&image[ix][iy]), sizeof(double));
+      image[ix * NPIXELY + iy] /= num_photon;
+      ifile.write(reinterpret_cast< char * >(&image[ix * NPIXELY + iy]),
+                  sizeof(double));
     }
   }
   ifile.close();
+
+  delete[] image;
 
   program_timer.stop();
   logmessage("Total program time: " << program_timer.value() << " s.", 0);

@@ -17,8 +17,8 @@ args = argparser.parse_args()
 def integrand(z, kapparho, x2y2):
   return np.exp(-kapparho * (np.sqrt(x2y2 + z**2) - z)) / (x2y2 + z**2)
 
-def analytic(kapparho, x, y, R, dx, dy):
-  x2y2 = x**2 + y**2
+def analytic(kapparho, r, R, dx, dy):
+  x2y2 = r**2
   if x2y2 < R**2 and x2y2 > 0.:
     weight = (0.25 / np.pi)**2
     zlim = np.sqrt(R**2 - x2y2)
@@ -43,12 +43,17 @@ profile_radius = np.sqrt(xy[:,0]**2 + xy[:,1]**2)
 image_xy = xy.reshape((args.nx, args.ny, 2))
 image_data = data.reshape((args.nx, args.ny))
 
+ra = np.linspace(0., 1., 100)
 dx = 2. / args.nx
 dy = 2. / args.ny
-
-profile_analytic = np.array([analytic(0.1, xyval[0], xyval[1], 1., dx, dy)
-                             for xyval in xy])
-image_analytic = profile_analytic.reshape((args.nx, args.ny))
+profile_analytic = np.array([analytic(0.1, r, 1., dx, dy) for r in ra])
+image_analytic = np.repeat(profile_analytic.reshape((1, -1)), 100, axis = 0)
+phia = np.linspace(0., 2. * np.pi, 100)
+analytic_xy = np.zeros((100, 100, 3))
+for i in range(100):
+  for j in range(100):
+    analytic_xy[i,j,0] = ra[j] * np.cos(phia[i])
+    analytic_xy[i,j,1] = ra[j] * np.sin(phia[i])
 
 # make the plot
 
@@ -70,11 +75,12 @@ vmax = np.log10(max(data_max, analytic_max))
 dataax.contourf(image_xy[:,:,0], image_xy[:,:,1], np.log10(image_data), 500,
                 vmin = vmin, vmax = vmax, extend = "both")
 
-simax.contourf(image_xy[:,:,0], image_xy[:,:,1], np.log10(image_analytic), 500,
+simax.contourf(analytic_xy[:,:,0], analytic_xy[:,:,1], np.log10(image_analytic), 500,
                vmin = vmin, vmax = vmax, extend = "both")
+simax.contourf
 
 profax.semilogy(profile_radius, profile_data, ".", label = "MC")
-profax.semilogy(profile_radius, profile_analytic, "-", label = "analytic")
+profax.semilogy(ra, profile_analytic, "-", label = "analytic")
 
 dataax.set_title("MC")
 simax.set_title("analytic")
