@@ -248,6 +248,7 @@ int MPI_rank, MPI_size;
 #include "CommandLineParser.hpp"
 #include "CostVector.hpp"
 #include "DensitySubGrid.hpp"
+#include "DistributedDensityGrid.hpp"
 #include "Log.hpp"
 #include "MPIBuffer.hpp"
 #include "MPIMessage.hpp"
