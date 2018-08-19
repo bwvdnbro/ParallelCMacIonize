@@ -1171,11 +1171,11 @@ int main(int argc, char **argv) {
 
   const double dt = 0.001;
   Timer hydro_loop_timer;
-  hydro_loop_timer.start();
   for (unsigned int istep = 0; istep < 100; ++istep) {
 
     logmessage("Step " << istep, 0);
 
+    hydro_loop_timer.start();
     // reset the hydro tasks and add them to the queue
     Atomic< unsigned int > number_of_tasks;
     for (unsigned int igrid = 0; igrid < tot_num_subgrid; ++igrid) {
@@ -1226,10 +1226,10 @@ int main(int argc, char **argv) {
       myassert(hydro_queue[thread_id]->size() == 0, "Queue not empty!");
     }
     cpucycle_tick(iteration_end);
+    hydro_loop_timer.stop();
 
     output_tasks(istep, tasks, iteration_start, iteration_end);
   }
-  hydro_loop_timer.stop();
 
   // stop the timers (after all processes synchronize)
   MPI_Barrier(MPI_COMM_WORLD);

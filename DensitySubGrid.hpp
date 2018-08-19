@@ -49,6 +49,10 @@
 /*! @brief Special neighbour index marking a neighbour that does not exist. */
 #define NEIGHBOUR_OUTSIDE 0xffffffff
 
+/*! @brief Enable this to disable hydro variables (decreases memory footprint
+ *  of code). */
+#define NO_HYDRO
+
 /*! @brief Enable this to activate cell locking. */
 //#define SUBGRID_CELL_LOCK
 
@@ -543,6 +547,7 @@ public:
       _intensity_integral[i] = 0.;
     }
 
+#ifndef NO_HYDRO
     _conserved_variables = new double[tot_ncell * 5];
     _delta_conserved_variables = new double[tot_ncell * 5];
     _primitive_variables = new double[tot_ncell * 5];
@@ -595,6 +600,7 @@ public:
       _primitive_variable_limiters[10 * i + 8] = DBL_MAX;
       _primitive_variable_limiters[10 * i + 9] = -DBL_MAX;
     }
+#endif // NO_HYDRO
   }
 
   /**
@@ -640,6 +646,7 @@ public:
       _intensity_integral[i] = 0.;
     }
 
+#ifndef NO_HYDRO
     _conserved_variables = new double[tot_ncell * 5];
     _delta_conserved_variables = new double[tot_ncell * 5];
     _primitive_variables = new double[tot_ncell * 5];
@@ -730,6 +737,7 @@ public:
       _primitive_variable_limiters[10 * i + 9] =
           original._primitive_variable_limiters[10 * i + 9];
     }
+#endif // NO_HYDRO
   }
 
   /**
@@ -741,11 +749,13 @@ public:
     delete[] _neutral_fraction;
     delete[] _intensity_integral;
     subgrid_cell_lock_destroy();
+#ifndef NO_HYDRO
     delete[] _conserved_variables;
     delete[] _delta_conserved_variables;
     delete[] _primitive_variables;
     delete[] _primitive_variable_gradients;
     delete[] _primitive_variable_limiters;
+#endif // NO_HYDRO
   }
 
   /**
@@ -1698,6 +1708,18 @@ public:
           cell_offset += sizeof(double);
           file.write(offset + cell_offset, _number_density[index]);
           cell_offset += sizeof(double);
+#ifdef NO_HYDRO
+          file.write(offset + cell_offset, 0.);
+          cell_offset += sizeof(double);
+          file.write(offset + cell_offset, 0.);
+          cell_offset += sizeof(double);
+          file.write(offset + cell_offset, 0.);
+          cell_offset += sizeof(double);
+          file.write(offset + cell_offset, 0.);
+          cell_offset += sizeof(double);
+          file.write(offset + cell_offset, 0.);
+          cell_offset += sizeof(double);
+#else  // NO_HYDRO
           file.write(offset + cell_offset, _primitive_variables[5 * index]);
           cell_offset += sizeof(double);
           file.write(offset + cell_offset, _primitive_variables[5 * index + 1]);
@@ -1708,6 +1730,7 @@ public:
           cell_offset += sizeof(double);
           file.write(offset + cell_offset, _primitive_variables[5 * index + 4]);
           cell_offset += sizeof(double);
+#endif // NO_HYDRO
         }
       }
     }
