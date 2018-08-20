@@ -264,6 +264,7 @@ int MPI_rank, MPI_size;
 // standard library includes
 #include <cmath>
 #include <fstream>
+#include <hdf5.h>
 #include <iostream>
 #include <mpi.h>
 #include <omp.h>
@@ -523,7 +524,7 @@ inline void output_costs(const unsigned int iloop, const unsigned int ngrid,
  * @brief Write files with communication cost information for an iteration.
  *
  * @param iloop Iteration number (added to file names).
- * @oaran costs CostVector.
+ * @param costs CostVector.
  * @param gridvec Subgrids.
  * @param tot_num_subgrid Total number of original subgrids.
  */
@@ -782,7 +783,7 @@ inline void output_mpibuffer(const unsigned int iloop, MPIBuffer &MPI_buffer) {
 /**
  * @brief Output the neutral fractions for inspection of the physical result.
  *
- * @oaran costs CostVector.
+ * @param costs CostVector.
  * @param gridvec Subgrids.
  * @param tot_num_subgrid Total number of original subgrids.
  */
@@ -860,6 +861,83 @@ output_neutral_fractions(const CostVector &costs,
   }
 
   memory_tracking_unlog_size(file.get_memory_size());
+}
+
+/**
+ * @brief Output the neutral fractions for inspection of the physical result.
+ *
+ * This version uses HDF5.
+ *
+ * @param costs CostVector.
+ * @param gridvec Subgrids.
+ * @param tot_num_subgrid Total number of original subgrids.
+ * @return Total size that was written (in bytes).
+ */
+inline size_t
+output_neutral_fractions_hdf5(const CostVector &costs,
+                              const std::vector< DensitySubGrid * > &gridvec,
+                              const unsigned int tot_num_subgrid) {
+
+  const hid_t file = H5Fcreate("neutral_fractions.hdf5", H5F_ACC_TRUNC,
+                               H5P_DEFAULT, H5P_DEFAULT);
+
+  const hid_t group =
+      H5Gcreate(file, "/PartType0", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
+
+  const hid_t space = H5Screate(H5S_SIMPLE);
+
+  size_t blocksize = 0;
+  for (unsigned int igrid = 0; igrid < tot_num_subgrid; ++igrid) {
+    if (costs.get_process(igrid) == MPI_rank) {
+      blocksize = gridvec[igrid]->get_number_of_cells();
+      break;
+    }
+  }
+
+  const int rank = 1;
+  const hsize_t shape[1] = {tot_num_subgrid * blocksize};
+  const hsize_t chunk_shape[1] = {blocksize / 4};
+
+  H5Sset_extent_simple(space, rank, shape, shape);
+
+  const hid_t prop = H5Pcreate(H5P_DATASET_CREATE);
+
+  H5Pset_chunk(prop, rank, chunk_shape);
+
+  H5Pset_fletcher32(prop);
+
+  H5Pset_shuffle(prop);
+
+  H5Pset_deflate(prop, 9);
+
+  const hid_t data = H5Dcreate(group, "NeutralFractionH", H5T_NATIVE_DOUBLE,
+                               space, H5P_DEFAULT, prop, H5P_DEFAULT);
+
+  H5Pclose(prop);
+
+  size_t output_size = 0;
+  for (unsigned int igrid = 0; igrid < tot_num_subgrid; ++igrid) {
+    // only write local subgrids
+    if (costs.get_process(igrid) == MPI_rank) {
+      const hsize_t offset[1] = {igrid * blocksize};
+      const hsize_t slab_shape[1] = {blocksize};
+      const hid_t memspace = H5Screate(H5S_SIMPLE);
+      H5Sset_extent_simple(memspace, rank, slab_shape, nullptr);
+      H5Sselect_hyperslab(space, H5S_SELECT_SET, offset, nullptr, slab_shape,
+                          nullptr);
+      H5Dwrite(data, H5T_NATIVE_DOUBLE, memspace, space, H5P_DEFAULT,
+               gridvec[igrid]->get_neutral_fraction());
+      output_size += blocksize * sizeof(double);
+      H5Sclose(memspace);
+    }
+  }
+
+  H5Dclose(data);
+  H5Sclose(space);
+  H5Gclose(group);
+  H5Fclose(file);
+
+  return output_size;
 }
 
 /**
@@ -3429,7 +3507,16 @@ int main(int argc, char **argv) {
   // Output final result
   //////////////////////
 
-  output_neutral_fractions(costs, gridvec, tot_num_subgrid);
+  //  output_neutral_fractions(costs, gridvec, tot_num_subgrid);
+
+  Timer hdf5_timer;
+  hdf5_timer.start();
+  size_t hdf5_size =
+      output_neutral_fractions_hdf5(costs, gridvec, tot_num_subgrid);
+  hdf5_timer.stop();
+  logmessage("Writing HDF5 file took " << hdf5_timer.value() << " s.", 0);
+  double hdf5_speed = hdf5_size / hdf5_timer.value() / (1024. * 1024.);
+  logmessage("Writing speed: " << hdf5_speed << " MB/s.", 0);
 
   //////////////////////
 

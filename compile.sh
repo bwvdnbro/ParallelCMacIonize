@@ -26,11 +26,12 @@ else
 fi
 
 # library dependencies
-libs="-lmetis"
+incs="-I/usr/include/hdf5/serial"
+libs="-lmetis -L/usr/lib/x86_64-linux-gnu/hdf5/serial -lhdf5"
 
 for f in testDensitySubGrid.cpp CommandLineOption.cpp CommandLineParser.cpp
 do
-  mpic++ $flags $cflags -c $f
+  mpic++ $flags $cflags $incs -c $f
 done
 
 mpic++ $flags $cflags -o testDensitySubGrid \

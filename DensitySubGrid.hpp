@@ -759,6 +759,25 @@ public:
   }
 
   /**
+   * @brief Get the number of cells in a single subgrid.
+   *
+   * @return Number of cells in the subgrid.
+   */
+  inline size_t get_number_of_cells() const {
+    return _number_of_cells[0] * _number_of_cells[3];
+  }
+
+  /**
+   * @brief Get a read-only access pointer to the neutral fractions stored in
+   * this subgrid.
+   *
+   * @return Read-only pointer to the neutral fractions.
+   */
+  inline const double *get_neutral_fraction() const {
+    return _neutral_fraction;
+  }
+
+  /**
    * @brief Get the midpoint of the subgrid box for domain decomposition
    * plotting.
    *
