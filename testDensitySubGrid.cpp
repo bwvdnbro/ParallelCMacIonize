@@ -908,17 +908,21 @@ output_neutral_fractions_hdf5(const CostVector &costs,
 
   H5Pset_shuffle(prop);
 
-  H5Pset_deflate(prop, 9);
+  H5Pset_deflate(prop, 0);
 
   const hid_t data = H5Dcreate(group, "NeutralFractionH", H5T_NATIVE_DOUBLE,
                                space, H5P_DEFAULT, prop, H5P_DEFAULT);
 
   H5Pclose(prop);
+  H5Dclose(data);
+  H5Sclose(space);
 
   size_t output_size = 0;
   for (unsigned int igrid = 0; igrid < tot_num_subgrid; ++igrid) {
     // only write local subgrids
     if (costs.get_process(igrid) == MPI_rank) {
+      const hid_t data = H5Dopen(group, "NeutralFractionH", H5P_DEFAULT);
+      const hid_t space = H5Dget_space(data);
       const hsize_t offset[1] = {igrid * blocksize};
       const hsize_t slab_shape[1] = {blocksize};
       const hid_t memspace = H5Screate(H5S_SIMPLE);
@@ -929,11 +933,11 @@ output_neutral_fractions_hdf5(const CostVector &costs,
                gridvec[igrid]->get_neutral_fraction());
       output_size += blocksize * sizeof(double);
       H5Sclose(memspace);
+      H5Dclose(data);
+      H5Sclose(space);
     }
   }
 
-  H5Dclose(data);
-  H5Sclose(space);
   H5Gclose(group);
   H5Fclose(file);
 

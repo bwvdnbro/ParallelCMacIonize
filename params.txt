@@ -4,11 +4,11 @@ box:
   anchor: [-5. pc, -5. pc, -5. pc]
   sides: [10. pc, 10. pc, 10. pc]
 # grid resolution
-ncell: [64, 64, 64]
+ncell: [512, 512, 512]
 # number of photon packets
 num_photon: 1e6
 # number of iterations
-number_of_iterations: 10
+number_of_iterations: 1
 # reemission probability (realistic value: 0.364)
 reemission_probability: 0.
 
@@ -21,14 +21,14 @@ reemission_probability: 0.
 # resolution
 # for good performance, the total number of subgrids should be significantly
 # larger than the number of threads used for the run
-num_subgrid: [8, 8, 8]
+num_subgrid: [16, 16, 16]
 # number of tasks that can be stored in the queue for a single thread
 # the code will crash if more tasks are assigned to a thread at any given
 # moment
 queue_size_per_thread: 100
 # number of photon buffers that can be stored simultaneously
 # the code will crash if more photon buffers are needed at any given moment
-memoryspace_size: 5000
+memoryspace_size: 50000
 # total number of tasks that can be performed by all threads together during
 # a single iteration of the algorithm
 # the code will crash if the total number of tasks exceeds this number
