@@ -26,6 +26,12 @@
 #ifndef ASSERT_HPP
 #define ASSERT_HPP
 
+#ifdef WITH_MPI
+#define MPILABEL "[rank " << MPI_rank << "]: "
+#else
+#define MPILABEL ""
+#endif
+
 #include <cstdlib>
 #include <iostream>
 
@@ -38,8 +44,8 @@
 #ifdef DO_ASSERTS
 #define myassert(condition, message)                                           \
   if (!(condition)) {                                                          \
-    std::cerr << "[rank " << MPI_rank << "]:" << __FILE__ << ":"               \
-              << __FUNCTION__ << "():" << __LINE__ << ":" << std::endl;        \
+    std::cerr << MPILABEL << __FILE__ << ":" << __FUNCTION__                   \
+              << "():" << __LINE__ << ":" << std::endl;                        \
     std::cerr << "Assertion failed: " #condition << std::endl;                 \
     std::cerr << message << std::endl;                                         \
     abort();                                                                   \

@@ -30,7 +30,9 @@
 #include <cstdio>
 #include <cstdlib>
 
+#ifdef WITH_MPI
 extern int MPI_rank;
+#endif
 
 /**
  * @brief Macro that prints the given formatted string (with arguments) to the
@@ -98,6 +100,7 @@ extern int MPI_rank;
  * @brief Error macro. Prints the given error message (with C style formatting)
  * and aborts the code.
  */
+#ifdef WITH_MPI
 #define cmac_error(s, ...)                                                     \
   {                                                                            \
     fprintf(stderr, "[rank %i]:%s:%s():%i: Error:\n", MPI_rank, __FILE__,      \
@@ -105,17 +108,34 @@ extern int MPI_rank;
     print_indent(stderr, s, ##__VA_ARGS__);                                    \
     abort();                                                                   \
   }
+#else
+#define cmac_error(s, ...)                                                     \
+  {                                                                            \
+    fprintf(stderr, "%s:%s():%i: Error:\n", __FILE__, __FUNCTION__, __LINE__); \
+    print_indent(stderr, s, ##__VA_ARGS__);                                    \
+    abort();                                                                   \
+  }
+#endif
 
 /**
  * @brief Warning macro. Prints the given warning message (with C style
  * formatting) to the stderr.
  */
+#ifdef WITH_MPI
 #define cmac_warning(s, ...)                                                   \
   {                                                                            \
-    fprintf(stderr, "[rank %i];%s:%s():%i: Warning:\n", MPI_rank, __FILE__,    \
+    fprintf(stderr, "[rank %i]:%s:%s():%i: Warning:\n", MPI_rank, __FILE__,    \
             __FUNCTION__, __LINE__);                                           \
     print_indent(stderr, s, ##__VA_ARGS__);                                    \
   }
+#else
+#define cmac_warning(s, ...)                                                   \
+  {                                                                            \
+    fprintf(stderr, "%s:%s():%i: Warning:\n", __FILE__, __FUNCTION__,          \
+            __LINE__);                                                         \
+    print_indent(stderr, s, ##__VA_ARGS__);                                    \
+  }
+#endif
 
 /**
  * @brief Message macro. Prints the given message (with C style formatting) to

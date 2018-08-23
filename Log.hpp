@@ -26,6 +26,18 @@
 #ifndef LOG_HPP
 #define LOG_HPP
 
+#ifdef WITH_MPI
+#define MPIFLAG (MPI_rank == 0)
+#else
+#define MPIFLAG true
+#endif
+
+#ifdef WITH_MPI
+#define MPILABEL "[rank " << MPI_rank << "]: "
+#else
+#define MPILABEL ""
+#endif
+
 /**
  * @brief Write a message to the log with the given log level.
  *
@@ -35,7 +47,7 @@
  */
 #ifdef LOG_OUTPUT
 #define logmessage(message, loglevel)                                          \
-  if (MPI_rank == 0 && loglevel < LOG_OUTPUT) {                                \
+  if (MPIFLAG && loglevel < LOG_OUTPUT) {                                      \
     _Pragma("omp single") { std::cerr << message << std::endl; }               \
   }
 #else
@@ -53,9 +65,7 @@
 #ifdef LOG_OUTPUT
 #define logmessage_always(message, loglevel)                                   \
   if (loglevel < LOG_OUTPUT) {                                                 \
-    _Pragma("omp single") {                                                    \
-      std::cerr << "[rank " << MPI_rank << "]: " << message << std::endl;      \
-    }                                                                          \
+    _Pragma("omp single") { std::cerr << MPILABEL << message << std::endl; }   \
   }
 #else
 #define logmessage_always(message, loglevel) (void)
@@ -91,12 +101,12 @@
  * @param loglevel Log level. The message is only written if the LOG_OUTPUT
  * defined is higher than this value.
  */
-#ifdef LOG_OUTPUT
+#if defined(LOG_OUTPUT) && defined(WITH_MPI)
 #define logmessage_all(message, loglevel)                                      \
   if (loglevel < LOG_OUTPUT) {                                                 \
     for (int irank = 0; irank < MPI_size; ++irank) {                           \
       if (irank == MPI_rank) {                                                 \
-        std::cerr << "[rank " << irank << "]: " << message << std::endl;       \
+        std::cerr << MPILABEL << message << std::endl;                         \
       }                                                                        \
       MPI_Barrier(MPI_COMM_WORLD);                                             \
     }                                                                          \

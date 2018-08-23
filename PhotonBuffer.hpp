@@ -34,7 +34,9 @@
 #include "Photon.hpp"
 
 // standard library includes
+#ifdef WITH_MPI
 #include <mpi.h>
+#endif
 
 /*! @brief Number of photons that can be stored in a single buffer. */
 #define PHOTONBUFFER_SIZE 200u
@@ -68,6 +70,7 @@ public:
    */
   PhotonBuffer() : _actual_size(0) {}
 
+#ifdef WITH_MPI
   /**
    * @brief Store the contents of the PhotonBuffer in the given MPI
    * communication buffer.
@@ -109,6 +112,7 @@ public:
       buffer_position += PHOTON_MPI_SIZE;
     }
   }
+#endif
 
   /**
    * @brief Check that the given PhotonBuffer is equal to this one.

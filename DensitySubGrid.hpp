@@ -42,9 +42,12 @@
 #include <cfloat>
 #include <cmath>
 #include <iostream>
-#include <mpi.h>
 #include <omp.h>
 #include <ostream>
+
+#ifdef WITH_MPI
+#include <mpi.h>
+#endif
 
 /*! @brief Special neighbour index marking a neighbour that does not exist. */
 #define NEIGHBOUR_OUTSIDE 0xffffffff
@@ -921,6 +924,7 @@ public:
                _number_of_cells[3];
   }
 
+#ifdef WITH_MPI
   /**
    * @brief Pack the DensitySubGrid into the given MPI buffer for communication.
    *
@@ -1050,6 +1054,7 @@ public:
                _primitive_variable_limiters, 10 * tot_num_cells, MPI_DOUBLE,
                MPI_COMM_WORLD);
   }
+#endif
 
   /**
    * @brief Sync the neutral fractions with the given subgrid.

@@ -41,7 +41,6 @@
 #include <cfloat>
 #include <cmath>
 #include <iostream>
-#include <mpi.h>
 #include <omp.h>
 #include <ostream>
 

@@ -29,7 +29,9 @@
 /*! @brief Size of the MPI buffer necessary to store a single Photon. */
 #define PHOTON_MPI_SIZE (9 * sizeof(double))
 
+#ifdef WITH_MPI
 #include <mpi.h>
+#endif
 
 /**
  * @brief Photon packet.
@@ -55,6 +57,7 @@ private:
   double _weight;
 
 public:
+#ifdef WITH_MPI
   /**
    * @brief Store the contents of the Photon in the given MPI communication
    * buffer.
@@ -96,6 +99,7 @@ public:
     MPI_Unpack(buffer, PHOTON_MPI_SIZE, &buffer_position, &_weight, 1,
                MPI_DOUBLE, MPI_COMM_WORLD);
   }
+#endif
 
   /**
    * @brief Check that the given Photon is equal to this one.
