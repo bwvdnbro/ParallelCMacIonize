@@ -1654,11 +1654,15 @@ public:
           const int index = get_one_index(three_index);
           stream << pos_x << "\t" << pos_y << "\t" << pos_z << "\t"
                  << _neutral_fraction[index] << "\t" << _number_density[index]
+#ifdef NO_HYDRO
+                 << "\n";
+#else
                  << "\t" << _primitive_variables[5 * index] << "\t"
                  << _primitive_variables[5 * index + 1] << "\t"
                  << _primitive_variables[5 * index + 2] << "\t"
                  << _primitive_variables[5 * index + 3] << "\t"
                  << _primitive_variables[5 * index + 4] << "\n";
+#endif
         }
       }
     }

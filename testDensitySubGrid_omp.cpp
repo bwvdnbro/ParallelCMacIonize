@@ -77,7 +77,7 @@
 //#define SINGLE_ITERATION
 
 /*! @brief Enable this to output an ASCII file with the result. */
-//#define OUTPUT_ASCII_RESULT
+#define OUTPUT_ASCII_RESULT
 
 /*! @brief Enable this to output task statistics. */
 #define TASK_STATS
@@ -1630,6 +1630,46 @@ inline unsigned int steal_task(const int thread_id, const int num_threads,
 }
 
 /**
+ * @brief Randomly distribute the given integer number over the given total
+ * number of array elements so that on average every array element is equally
+ * likely to receive a contribution.
+ *
+ * @param total_number Total number of array elements.
+ * @param distribute_number Number to distribute.
+ * @param random_generator RandomGenerator to use.
+ * @return Vector of length total_number with elements that are randomly either
+ * 0 or 1, but so that the total sum of all elements equals distribute_number.
+ */
+inline std::vector< unsigned int >
+distribute(const unsigned int total_number,
+           const unsigned int distribute_number,
+           RandomGenerator &random_generator) {
+
+  // create a vector of length total_number and fill it with random values
+  std::vector< double > random_array(total_number);
+  std::vector< unsigned int > index_array(total_number);
+  std::vector< unsigned int > result_array(total_number, 0);
+  for (unsigned int i = 0; i < total_number; ++i) {
+    random_array[i] = random_generator.get_uniform_random_double();
+    index_array[i] = i;
+  }
+
+  // index sort the random vector
+  std::sort(index_array.begin(), index_array.end(),
+            [random_array](unsigned int i0, unsigned int i1) {
+              return random_array[i0] < random_array[i1];
+            });
+
+  // now set the elements corresponding to the first distribute_number elements
+  // in index_array to 1
+  for (unsigned int i = 0; i < distribute_number; ++i) {
+    result_array[index_array[i]] = 1;
+  }
+
+  return result_array;
+}
+
+/**
  * @brief Unit test for the DensitySubGrid class.
  *
  * Runs a simple Stromgren sphere test with a homogeneous density field, a
@@ -1838,22 +1878,40 @@ int main(int argc, char **argv) {
 
   std::vector< Source > sources;
   double total_luminosity = 0.;
-  for (size_t isrc = 0; isrc < 1; ++isrc) {
-    const double position[3] = {0., 0., 0.};
+  logmessage("Box anchor: " << box[0] << " " << box[1] << " " << box[2], 2);
+  logmessage("Box sides: " << box[3] << " " << box[4] << " " << box[5], 2);
+  for (size_t isrc = 0; isrc < 5; ++isrc) {
+    double position[3];
+    position[0] =
+        box[0] + random_generator[0].get_uniform_random_double() * box[3];
+    position[1] =
+        box[1] + random_generator[0].get_uniform_random_double() * box[4];
+    position[2] =
+        box[2] + random_generator[0].get_uniform_random_double() * box[5];
+
+    logmessage("position: " << position[0] << " " << position[1] << " "
+                            << position[2],
+               2);
 
     const unsigned int source_indices[3] = {
-        static_cast< unsigned int >((position[0] - box[0] / box[3]) *
+        static_cast< unsigned int >((position[0] - box[0]) / box[3] *
                                     num_subgrid[0]),
-        static_cast< unsigned int >((position[1] - box[1] / box[4]) *
+        static_cast< unsigned int >((position[1] - box[1]) / box[4] *
                                     num_subgrid[1]),
-        static_cast< unsigned int >((position[2] - box[2] / box[5]) *
+        static_cast< unsigned int >((position[2] - box[2]) / box[5] *
                                     num_subgrid[2])};
 
     const unsigned int source_index =
         source_indices[0] * num_subgrid[1] * num_subgrid[2] +
         source_indices[1] * num_subgrid[2] + source_indices[2];
 
-    sources.push_back(Source(position, 4.26e49));
+    logmessage("source_indices: " << source_indices[0] << " "
+                                  << source_indices[1] << " "
+                                  << source_indices[2],
+               2);
+    logmessage("source index: " << source_index, 2);
+
+    sources.push_back(Source(position, 4.26e48));
     sources[isrc].add_subgrid_index(source_index);
 
     total_luminosity += sources[isrc].get_luminosity();
@@ -2038,6 +2096,17 @@ int main(int argc, char **argv) {
 
   Timer MCtimer;
 
+  std::vector< unsigned int > source_numbers(sources.size());
+  unsigned int num_photon_add = 0;
+  for (unsigned int isrc = 0; isrc < sources.size(); ++isrc) {
+    source_numbers[isrc] = static_cast< unsigned int >(
+        sources[isrc].get_luminosity() / total_luminosity * num_photon);
+    num_photon_add += source_numbers[isrc];
+  }
+  const unsigned int num_photon_rem = num_photon - num_photon_add;
+  myassert(num_photon_rem >= 0, "Negative remaining photon number");
+  myassert(num_photon_rem < sources.size(), "Wrong remaining photon number");
+
   // now for the main loop. This loop
   //  - shoots num_photon photons through the grid to get intensity estimates
   //  - computes the ionization equilibrium
@@ -2067,19 +2136,39 @@ int main(int argc, char **argv) {
     Atomic< unsigned int > num_active_buffers(0);
     // global control variable
     Atomic< unsigned int > num_photon_done_since_last(0);
-    // preallocate photon creation tasks for a faster iteration start
-    const size_t num_photon_tasks =
-        num_photon / PHOTONBUFFER_SIZE + (num_photon % PHOTONBUFFER_SIZE > 0);
-    tasks.get_free_elements(num_photon_tasks);
-#pragma omp parallel for
-    for (size_t i = 0; i < num_photon_tasks; ++i) {
-      tasks[i].set_type(TASKTYPE_SOURCE_PHOTON);
-      tasks[i].set_buffer(PHOTONBUFFER_SIZE);
-      tasks[i].set_subgrid(0);
+
+    // distribute the photon packets over the sources
+    // first randomly distributed the remainder
+    std::vector< unsigned int > remdist =
+        distribute(sources.size(), num_photon_rem, random_generator[0]);
+    // now obtain the number of buffers and photon size per source
+    std::vector< unsigned int > actual_source_numbers(sources.size());
+    std::vector< unsigned int > number_of_source_tasks(sources.size());
+    size_t num_photon_tasks = 0;
+    for (unsigned int isrc = 0; isrc < sources.size(); ++isrc) {
+      actual_source_numbers[isrc] = source_numbers[isrc] + remdist[isrc];
+      number_of_source_tasks[isrc] =
+          actual_source_numbers[isrc] / PHOTONBUFFER_SIZE +
+          (actual_source_numbers[isrc] % PHOTONBUFFER_SIZE > 0);
+      num_photon_tasks += number_of_source_tasks[isrc];
     }
-    if (num_photon % PHOTONBUFFER_SIZE > 0) {
-      tasks[num_photon_tasks - 1].set_buffer(PHOTONBUFFER_SIZE -
-                                             (num_photon % PHOTONBUFFER_SIZE));
+
+    // preallocate photon creation tasks for a faster iteration start
+    tasks.get_free_elements(num_photon_tasks);
+    size_t task_offset = 0;
+    for (unsigned int isrc = 0; isrc < sources.size(); ++isrc) {
+#pragma omp parallel for
+      for (size_t i = 0; i < number_of_source_tasks[isrc]; ++i) {
+        tasks[task_offset + i].set_type(TASKTYPE_SOURCE_PHOTON);
+        tasks[task_offset + i].set_buffer(PHOTONBUFFER_SIZE);
+        tasks[task_offset + i].set_subgrid(isrc);
+      }
+      if (actual_source_numbers[isrc] % PHOTONBUFFER_SIZE > 0) {
+        tasks[task_offset + number_of_source_tasks[isrc] - 1].set_buffer(
+            PHOTONBUFFER_SIZE -
+            (actual_source_numbers[isrc] % PHOTONBUFFER_SIZE));
+      }
+      task_offset += number_of_source_tasks[isrc];
     }
     general_queue.add_tasks(0, num_photon_tasks);
 #pragma omp parallel default(shared)
