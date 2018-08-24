@@ -11,6 +11,11 @@ num_photon: 1e6
 number_of_iterations: 10
 # reemission probability (realistic value: 0.364)
 reemission_probability: 0.
+# number of sources (a single source is always placed at the origin and has a
+# 10 times higher luminosity)
+number_of_sources: 1
+# generate a random density field (if false, a uniform density is used)
+random_density: true
 
 ## Algorithm parameters
 # number of subgrids

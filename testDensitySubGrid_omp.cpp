@@ -932,6 +932,8 @@ inline void parse_command_line(int argc, char **argv, int &num_threads_request,
  * @param num_subgrid Variable to store the total number of subgrids in.
  * @param num_photon Variable to store the number of photon packets in.
  * @param number_of_iterations Variable to store the number of iterations in.
+ * @param number_of_sources Number of photon sources.
+ * @param random_density Generate a random density field?
  * @param queue_size_per_thread Variable to store the size of the queue for
  * each thread in.
  * @param memoryspace_size Variable to store the size of the memory space in.
@@ -944,7 +946,8 @@ inline void parse_command_line(int argc, char **argv, int &num_threads_request,
 inline void read_parameters(
     std::string paramfile_name, double box[6], double &reemission_probability,
     int ncell[3], int num_subgrid[3], unsigned int &num_photon,
-    unsigned int &number_of_iterations, unsigned int &queue_size_per_thread,
+    unsigned int &number_of_iterations, unsigned int &number_of_sources,
+    bool &random_density, unsigned int &queue_size_per_thread,
     unsigned int &memoryspace_size, unsigned int &number_of_tasks,
     unsigned int &MPI_buffer_size, double &cost_copy_factor,
     double &edge_copy_factor, unsigned int &general_queue_size) {
@@ -988,6 +991,8 @@ inline void read_parameters(
   num_photon = parameters.get_value< unsigned int >("num_photon");
   number_of_iterations =
       parameters.get_value< unsigned int >("number_of_iterations");
+  number_of_sources = parameters.get_value< unsigned int >("number_of_sources");
+  random_density = parameters.get_value< bool >("random_density");
 
   queue_size_per_thread =
       parameters.get_value< unsigned int >("queue_size_per_thread");
@@ -1725,7 +1730,8 @@ int main(int argc, char **argv) {
 
   double box[6], reemission_probability;
   int ncell[3], num_subgrid[3];
-  unsigned int num_photon, number_of_iterations;
+  unsigned int num_photon, number_of_iterations, number_of_sources;
+  bool random_density;
 
   unsigned int queue_size_per_thread, memoryspace_size, number_of_tasks,
       MPI_buffer_size, general_queue_size;
@@ -1733,9 +1739,9 @@ int main(int argc, char **argv) {
 
   read_parameters(paramfile_name, box, reemission_probability, ncell,
                   num_subgrid, num_photon, number_of_iterations,
-                  queue_size_per_thread, memoryspace_size, number_of_tasks,
-                  MPI_buffer_size, cost_copy_factor, edge_copy_factor,
-                  general_queue_size);
+                  number_of_sources, random_density, queue_size_per_thread,
+                  memoryspace_size, number_of_tasks, MPI_buffer_size,
+                  cost_copy_factor, edge_copy_factor, general_queue_size);
 
   //////////////////////////
 
@@ -1870,57 +1876,60 @@ int main(int argc, char **argv) {
 
   memory_tracking_log_size(grid_memory.value());
 
-  // generate random k-modes for the random density distribution
-  const unsigned int nk = 10;
-  std::vector< double > k(3 * nk);
-  std::vector< double > phase(3 * nk);
-  for (unsigned int i = 0; i < nk; ++i) {
-    const double u[4] = {random_generator[0].get_uniform_random_double(),
-                         random_generator[0].get_uniform_random_double(),
-                         random_generator[0].get_uniform_random_double(),
-                         random_generator[0].get_uniform_random_double()};
+  if (random_density) {
+    // generate random k-modes for the random density distribution
+    const unsigned int nk = 10;
+    std::vector< double > k(3 * nk);
+    std::vector< double > phase(3 * nk);
+    for (unsigned int i = 0; i < nk; ++i) {
+      const double u[4] = {random_generator[0].get_uniform_random_double(),
+                           random_generator[0].get_uniform_random_double(),
+                           random_generator[0].get_uniform_random_double(),
+                           random_generator[0].get_uniform_random_double()};
 
-    const double kx =
-        std::sqrt(-2. * std::log(u[0])) * std::cos(2. * M_PI * u[1]);
-    const double ky =
-        std::sqrt(-2. * std::log(u[0])) * std::sin(2. * M_PI * u[1]);
-    const double kz =
-        std::sqrt(-2. * std::log(u[2])) * std::cos(2. * M_PI * u[3]);
+      const double kx =
+          std::sqrt(-2. * std::log(u[0])) * std::cos(2. * M_PI * u[1]);
+      const double ky =
+          std::sqrt(-2. * std::log(u[0])) * std::sin(2. * M_PI * u[1]);
+      const double kz =
+          std::sqrt(-2. * std::log(u[2])) * std::cos(2. * M_PI * u[3]);
 
-    k[3 * i] = 2. * M_PI * kx / box[3];
-    k[3 * i + 1] = 2. * M_PI * ky / box[4];
-    k[3 * i + 2] = 2. * M_PI * kz / box[5];
+      k[3 * i] = 4. * M_PI * kx / box[3];
+      k[3 * i + 1] = 4. * M_PI * ky / box[4];
+      k[3 * i + 2] = 4. * M_PI * kz / box[5];
 
-    phase[3 * i] = 2. * M_PI * random_generator[0].get_uniform_random_double();
-    phase[3 * i + 1] =
-        2. * M_PI * random_generator[0].get_uniform_random_double();
-    phase[3 * i + 2] =
-        2. * M_PI * random_generator[0].get_uniform_random_double();
-  }
+      phase[3 * i] =
+          2. * M_PI * random_generator[0].get_uniform_random_double();
+      phase[3 * i + 1] =
+          2. * M_PI * random_generator[0].get_uniform_random_double();
+      phase[3 * i + 2] =
+          2. * M_PI * random_generator[0].get_uniform_random_double();
+    }
 
 // initialize the density field
 #pragma omp parallel for default(shared)
-  for (unsigned int igrid = 0; igrid < tot_num_subgrid; ++igrid) {
-    const unsigned int ncell = gridvec[igrid]->get_number_of_cells();
-    for (unsigned int icell = 0; icell < ncell; ++icell) {
-      double midpoint[3];
-      gridvec[igrid]->get_cell_midpoint(icell, midpoint);
+    for (unsigned int igrid = 0; igrid < tot_num_subgrid; ++igrid) {
+      const unsigned int ncell = gridvec[igrid]->get_number_of_cells();
+      for (unsigned int icell = 0; icell < ncell; ++icell) {
+        double midpoint[3];
+        gridvec[igrid]->get_cell_midpoint(icell, midpoint);
 
-      // get the density
-      double ndens = 0.;
-      for (unsigned int ik = 0; ik < nk; ++ik) {
-        const double kx = k[3 * ik];
-        const double ky = k[3 * ik + 1];
-        const double kz = k[3 * ik + 2];
+        // get the density
+        double ndens = 0.;
+        for (unsigned int ik = 0; ik < nk; ++ik) {
+          const double kx = k[3 * ik];
+          const double ky = k[3 * ik + 1];
+          const double kz = k[3 * ik + 2];
 
-        ndens += 1.e8 * (std::cos(kx * midpoint[0] + phase[3 * ik]) *
-                             std::cos(ky * midpoint[1] + phase[3 * ik + 1]) *
-                             std::cos(kz * midpoint[2] + phase[3 * ik + 2]) +
-                         1.);
+          ndens += 1.e8 * (std::cos(kx * midpoint[0] + phase[3 * ik]) *
+                               std::cos(ky * midpoint[1] + phase[3 * ik + 1]) *
+                               std::cos(kz * midpoint[2] + phase[3 * ik + 2]) +
+                           1.);
+        }
+        ndens /= nk;
+
+        gridvec[igrid]->set_number_density(icell, ndens);
       }
-      ndens /= nk;
-
-      gridvec[igrid]->set_number_density(icell, ndens);
     }
   }
 
@@ -1934,41 +1943,74 @@ int main(int argc, char **argv) {
   double total_luminosity = 0.;
   logmessage("Box anchor: " << box[0] << " " << box[1] << " " << box[2], 2);
   logmessage("Box sides: " << box[3] << " " << box[4] << " " << box[5], 2);
-  for (size_t isrc = 0; isrc < 5; ++isrc) {
-    double position[3];
-    position[0] =
-        box[0] + random_generator[0].get_uniform_random_double() * box[3];
-    position[1] =
-        box[1] + random_generator[0].get_uniform_random_double() * box[4];
-    position[2] =
-        box[2] + random_generator[0].get_uniform_random_double() * box[5];
+  if (number_of_sources > 1) {
+    for (size_t isrc = 0; isrc < number_of_sources; ++isrc) {
+      double position[3];
+      position[0] =
+          box[0] + random_generator[0].get_uniform_random_double() * box[3];
+      position[1] =
+          box[1] + random_generator[0].get_uniform_random_double() * box[4];
+      position[2] =
+          box[2] + random_generator[0].get_uniform_random_double() * box[5];
 
-    logmessage("position: " << position[0] << " " << position[1] << " "
-                            << position[2],
-               2);
+      logmessage("position: " << position[0] << " " << position[1] << " "
+                              << position[2],
+                 2);
 
-    const unsigned int source_indices[3] = {
-        static_cast< unsigned int >((position[0] - box[0]) / box[3] *
-                                    num_subgrid[0]),
-        static_cast< unsigned int >((position[1] - box[1]) / box[4] *
-                                    num_subgrid[1]),
-        static_cast< unsigned int >((position[2] - box[2]) / box[5] *
-                                    num_subgrid[2])};
+      const unsigned int source_indices[3] = {
+          static_cast< unsigned int >((position[0] - box[0]) / box[3] *
+                                      num_subgrid[0]),
+          static_cast< unsigned int >((position[1] - box[1]) / box[4] *
+                                      num_subgrid[1]),
+          static_cast< unsigned int >((position[2] - box[2]) / box[5] *
+                                      num_subgrid[2])};
 
-    const unsigned int source_index =
-        source_indices[0] * num_subgrid[1] * num_subgrid[2] +
-        source_indices[1] * num_subgrid[2] + source_indices[2];
+      const unsigned int source_index =
+          source_indices[0] * num_subgrid[1] * num_subgrid[2] +
+          source_indices[1] * num_subgrid[2] + source_indices[2];
 
-    logmessage("source_indices: " << source_indices[0] << " "
-                                  << source_indices[1] << " "
-                                  << source_indices[2],
-               2);
-    logmessage("source index: " << source_index, 2);
+      logmessage("source_indices: " << source_indices[0] << " "
+                                    << source_indices[1] << " "
+                                    << source_indices[2],
+                 2);
+      logmessage("source index: " << source_index, 2);
 
-    sources.push_back(Source(position, 4.26e48));
-    sources[isrc].add_subgrid_index(source_index);
+      sources.push_back(Source(position, 4.26e48));
+      sources[isrc].add_subgrid_index(source_index);
 
-    total_luminosity += sources[isrc].get_luminosity();
+      total_luminosity += sources[isrc].get_luminosity();
+    }
+  } else {
+    for (size_t isrc = 0; isrc < 1; ++isrc) {
+      const double position[3] = {0., 0., 0.};
+
+      logmessage("position: " << position[0] << " " << position[1] << " "
+                              << position[2],
+                 2);
+
+      const unsigned int source_indices[3] = {
+          static_cast< unsigned int >((position[0] - box[0]) / box[3] *
+                                      num_subgrid[0]),
+          static_cast< unsigned int >((position[1] - box[1]) / box[4] *
+                                      num_subgrid[1]),
+          static_cast< unsigned int >((position[2] - box[2]) / box[5] *
+                                      num_subgrid[2])};
+
+      const unsigned int source_index =
+          source_indices[0] * num_subgrid[1] * num_subgrid[2] +
+          source_indices[1] * num_subgrid[2] + source_indices[2];
+
+      logmessage("source_indices: " << source_indices[0] << " "
+                                    << source_indices[1] << " "
+                                    << source_indices[2],
+                 2);
+      logmessage("source index: " << source_index, 2);
+
+      sources.push_back(Source(position, 4.26e49));
+      sources[isrc].add_subgrid_index(source_index);
+
+      total_luminosity += sources[isrc].get_luminosity();
+    }
   }
 
   ///////////////////////////////////////////
