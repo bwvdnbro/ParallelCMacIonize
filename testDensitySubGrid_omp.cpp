@@ -53,12 +53,12 @@
 
 /*! @brief Enable this to disable all run time assertions and output that could
  *  slow down the algorithm. */
-//#define MEANING_OF_HASTE
+#define MEANING_OF_HASTE
 
 /*! @brief Output. Select at least one of the below. */
-#define MM_FILE
+//#define MM_FILE
 //#define BIN_FILE
-//#define HDF5_FILE
+#define HDF5_FILE
 
 /*! @brief Uncomment this to enable run time assertions. */
 #define DO_ASSERTS
@@ -77,7 +77,7 @@
 //#define SINGLE_ITERATION
 
 /*! @brief Enable this to output an ASCII file with the result. */
-#define OUTPUT_ASCII_RESULT
+//#define OUTPUT_ASCII_RESULT
 
 /*! @brief Enable this to output task statistics. */
 #define TASK_STATS

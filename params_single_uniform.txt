@@ -15,7 +15,7 @@ reemission_probability: 0.
 # 10 times higher luminosity)
 number_of_sources: 1
 # generate a random density field (if false, a uniform density is used)
-random_density: true
+random_density: false
 
 ## Algorithm parameters
 # number of subgrids
