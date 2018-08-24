@@ -1870,6 +1870,60 @@ int main(int argc, char **argv) {
 
   memory_tracking_log_size(grid_memory.value());
 
+  // generate random k-modes for the random density distribution
+  const unsigned int nk = 10;
+  std::vector< double > k(3 * nk);
+  std::vector< double > phase(3 * nk);
+  for (unsigned int i = 0; i < nk; ++i) {
+    const double u[4] = {random_generator[0].get_uniform_random_double(),
+                         random_generator[0].get_uniform_random_double(),
+                         random_generator[0].get_uniform_random_double(),
+                         random_generator[0].get_uniform_random_double()};
+
+    const double kx =
+        std::sqrt(-2. * std::log(u[0])) * std::cos(2. * M_PI * u[1]);
+    const double ky =
+        std::sqrt(-2. * std::log(u[0])) * std::sin(2. * M_PI * u[1]);
+    const double kz =
+        std::sqrt(-2. * std::log(u[2])) * std::cos(2. * M_PI * u[3]);
+
+    k[3 * i] = 2. * M_PI * kx / box[3];
+    k[3 * i + 1] = 2. * M_PI * ky / box[4];
+    k[3 * i + 2] = 2. * M_PI * kz / box[5];
+
+    phase[3 * i] = 2. * M_PI * random_generator[0].get_uniform_random_double();
+    phase[3 * i + 1] =
+        2. * M_PI * random_generator[0].get_uniform_random_double();
+    phase[3 * i + 2] =
+        2. * M_PI * random_generator[0].get_uniform_random_double();
+  }
+
+// initialize the density field
+#pragma omp parallel for default(shared)
+  for (unsigned int igrid = 0; igrid < tot_num_subgrid; ++igrid) {
+    const unsigned int ncell = gridvec[igrid]->get_number_of_cells();
+    for (unsigned int icell = 0; icell < ncell; ++icell) {
+      double midpoint[3];
+      gridvec[igrid]->get_cell_midpoint(icell, midpoint);
+
+      // get the density
+      double ndens = 0.;
+      for (unsigned int ik = 0; ik < nk; ++ik) {
+        const double kx = k[3 * ik];
+        const double ky = k[3 * ik + 1];
+        const double kz = k[3 * ik + 2];
+
+        ndens += 1.e8 * (std::cos(kx * midpoint[0] + phase[3 * ik]) *
+                             std::cos(ky * midpoint[1] + phase[3 * ik + 1]) *
+                             std::cos(kz * midpoint[2] + phase[3 * ik + 2]) +
+                         1.);
+      }
+      ndens /= nk;
+
+      gridvec[igrid]->set_number_density(icell, ndens);
+    }
+  }
+
   //////////////////
 
   ////////////////////////////////////////////

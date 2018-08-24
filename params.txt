@@ -4,7 +4,7 @@ box:
   anchor: [-5. pc, -5. pc, -5. pc]
   sides: [10. pc, 10. pc, 10. pc]
 # grid resolution
-ncell: [64, 64, 64]
+ncell: [128, 128, 128]
 # number of photon packets
 num_photon: 1e6
 # number of iterations
