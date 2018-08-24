@@ -439,13 +439,11 @@ output_neutral_fractions(const std::vector< DensitySubGrid * > &gridvec,
  *
  * @param gridvec Subgrids.
  * @param tot_num_subgrid Total number of original subgrids.
- * @param chunk_size Size of a single chunk (in bytes).
  * @return Total size that was written (in bytes).
  */
 inline size_t
 output_neutral_fractions_hdf5(const std::vector< DensitySubGrid * > &gridvec,
-                              const unsigned int tot_num_subgrid,
-                              const size_t chunk_size) {
+                              const unsigned int tot_num_subgrid) {
 
   const hid_t file = H5Fcreate("neutral_fractions.hdf5", H5F_ACC_TRUNC,
                                H5P_DEFAULT, H5P_DEFAULT);
@@ -459,58 +457,59 @@ output_neutral_fractions_hdf5(const std::vector< DensitySubGrid * > &gridvec,
 
   const int rank = 1;
   const hsize_t shape[1] = {tot_num_subgrid * blocksize};
-  hsize_t chunk_shape[1] = {chunk_size};
-
-  if (chunk_shape[0] > shape[0]) {
-    chunk_shape[0] = shape[0];
-  }
 
   H5Sset_extent_simple(space, rank, shape, shape);
 
-  const hid_t prop = H5Pcreate(H5P_DATASET_CREATE);
-
-  H5Pset_chunk(prop, rank, chunk_shape);
-
-  H5Pset_fletcher32(prop);
-
-  H5Pset_shuffle(prop);
-
-  H5Pset_deflate(prop, 9);
-
   const hid_t data = H5Dcreate(group, "NeutralFractionH", H5T_NATIVE_DOUBLE,
-                               space, H5P_DEFAULT, prop, H5P_DEFAULT);
+                               space, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
 
-  H5Pclose(prop);
-  H5Dclose(data);
-  H5Sclose(space);
-
-  const size_t chunk_cache_size = 2 * chunk_shape[0] * sizeof(double);
-  const hid_t data_access = H5Pcreate(H5P_DATASET_ACCESS);
-  H5Pset_chunk_cache(data_access, H5D_CHUNK_CACHE_NSLOTS_DEFAULT,
-                     chunk_cache_size, H5D_CHUNK_CACHE_W0_DEFAULT);
+  const hsize_t slab_shape[1] = {blocksize};
+  const hid_t memspace = H5Screate(H5S_SIMPLE);
+  H5Sset_extent_simple(memspace, rank, slab_shape, slab_shape);
 
   size_t output_size = 0;
   for (unsigned int igrid = 0; igrid < tot_num_subgrid; ++igrid) {
-    const hid_t data = H5Dopen(group, "NeutralFractionH", data_access);
-    const hid_t space = H5Dget_space(data);
     const hsize_t offset[1] = {igrid * blocksize};
-    const hsize_t slab_shape[1] = {blocksize};
-    const hid_t memspace = H5Screate(H5S_SIMPLE);
-    H5Sset_extent_simple(memspace, rank, slab_shape, nullptr);
     H5Sselect_hyperslab(space, H5S_SELECT_SET, offset, nullptr, slab_shape,
                         nullptr);
     H5Dwrite(data, H5T_NATIVE_DOUBLE, memspace, space, H5P_DEFAULT,
              gridvec[igrid]->get_neutral_fraction());
     output_size += blocksize * sizeof(double);
-    H5Sclose(memspace);
-    H5Dclose(data);
-    H5Sclose(space);
   }
 
+  H5Sclose(memspace);
+  H5Dclose(data);
+  H5Sclose(space);
   H5Gclose(group);
   H5Fclose(file);
 
   return output_size;
+}
+
+/**
+ * @brief Output the neutral fractions for inspection of the physical result.
+ *
+ * This version uses a simple binary file.
+ *
+ * @param gridvec Subgrids.
+ * @param tot_num_subgrid Total number of original subgrids.
+ * @return Total size that was written (in bytes).
+ */
+inline size_t
+output_neutral_fractions_binary(const std::vector< DensitySubGrid * > &gridvec,
+                                const unsigned int tot_num_subgrid) {
+
+  std::ofstream bfile("neutral_fractions.bin", std::ios::binary);
+
+  const size_t blocksize = gridvec[0]->get_number_of_cells();
+
+  for (unsigned int igrid = 0; igrid < tot_num_subgrid; ++igrid) {
+    bfile.write(reinterpret_cast< const char * >(
+                    gridvec[igrid]->get_neutral_fraction()),
+                blocksize * sizeof(double));
+  }
+
+  return blocksize * tot_num_subgrid * sizeof(double);
 }
 
 /**
@@ -896,24 +895,19 @@ inline void create_copies(std::vector< DensitySubGrid * > &gridvec,
  * @param num_threads_request Variable to store the requested number of threads
  * in.
  * @param paramfile_name Variable to store the parameter file name in.
- * @param chunk_size Variable to store the HDF5 chunk size in.
  */
 inline void parse_command_line(int argc, char **argv, int &num_threads_request,
-                               std::string &paramfile_name,
-                               size_t &chunk_size) {
+                               std::string &paramfile_name) {
 
   CommandLineParser commandlineparser("testDensitySubGrid");
   commandlineparser.add_required_option< int_fast32_t >(
       "threads", 't', "Number of shared memory threads to use.");
   commandlineparser.add_required_option< std::string >(
       "params", 'p', "Name of the parameter file.");
-  commandlineparser.add_option< int_fast32_t >(
-      "chunk-size", 'c', "Size of a single HDF5 chunk (in bytes).", 1024);
   commandlineparser.parse_arguments(argc, argv);
 
   num_threads_request = commandlineparser.get_value< int_fast32_t >("threads");
   paramfile_name = commandlineparser.get_value< std::string >("params");
-  chunk_size = commandlineparser.get_value< int_fast32_t >("chunk-size");
 }
 
 /**
@@ -1672,9 +1666,7 @@ int main(int argc, char **argv) {
 
   int num_threads_request;
   std::string paramfile_name;
-  size_t chunk_size;
-  parse_command_line(argc, argv, num_threads_request, paramfile_name,
-                     chunk_size);
+  parse_command_line(argc, argv, num_threads_request, paramfile_name);
 
   /////////////////////////////////
 
@@ -2306,10 +2298,19 @@ int main(int argc, char **argv) {
   logmessage("Writing speed: " << mm_speed << " MB/s.", 0);
 #endif
 
+#ifdef BIN_FILE
+  Timer bin_timer;
+  bin_timer.start();
+  size_t bin_size = output_neutral_fractions_binary(gridvec, tot_num_subgrid);
+  bin_timer.stop();
+  logmessage("Writing binary file took " << bin_timer.value() << " s.", 0);
+  double bin_speed = bin_size / bin_timer.value() / (1024. * 1024.);
+  logmessage("Writing speed: " << bin_speed << " MB/s.", 0);
+#endif
+
   Timer hdf5_timer;
   hdf5_timer.start();
-  size_t hdf5_size =
-      output_neutral_fractions_hdf5(gridvec, tot_num_subgrid, chunk_size);
+  size_t hdf5_size = output_neutral_fractions_hdf5(gridvec, tot_num_subgrid);
   hdf5_timer.stop();
   logmessage("Writing HDF5 file took " << hdf5_timer.value() << " s.", 0);
   double hdf5_speed = hdf5_size / hdf5_timer.value() / (1024. * 1024.);
