@@ -55,6 +55,11 @@
  *  slow down the algorithm. */
 //#define MEANING_OF_HASTE
 
+/*! @brief Output. Select at least one of the below. */
+#define MM_FILE
+//#define BIN_FILE
+//#define HDF5_FILE
+
 /*! @brief Uncomment this to enable run time assertions. */
 #define DO_ASSERTS
 
@@ -225,6 +230,7 @@ unsigned long current_memory_size, max_memory_size;
 #include "PhotonBuffer.hpp"
 #include "Queue.hpp"
 #include "RandomGenerator.hpp"
+#include "Source.hpp"
 #include "Task.hpp"
 #include "Timer.hpp"
 #include "Utilities.hpp"
@@ -543,16 +549,21 @@ inline static void get_random_direction(RandomGenerator &random_generator,
  * @param number_of_photons Number of photons to draw randomly.
  * @param random_generator RandomGenerator used to generate random numbers.
  * @param source_index Index of the subgrid that contains the source.
+ * @param source Actual source.
  */
 inline static void fill_buffer(PhotonBuffer &buffer,
                                const unsigned int number_of_photons,
                                RandomGenerator &random_generator,
-                               const unsigned int source_index) {
+                               const unsigned int source_index,
+                               const Source &source) {
 
   // set general buffer information
   buffer.grow(number_of_photons);
   buffer.set_subgrid_index(source_index);
   buffer.set_direction(TRAVELDIRECTION_INSIDE);
+
+  double position[3];
+  source.get_position(position);
 
   // draw random photons and store them in the buffer
   for (unsigned int i = 0; i < number_of_photons; ++i) {
@@ -560,7 +571,7 @@ inline static void fill_buffer(PhotonBuffer &buffer,
     Photon &photon = buffer[i];
 
     // initial position: we currently assume a single source at the origin
-    photon.set_position(0., 0., 0.);
+    photon.set_position(position[0], position[1], position[2]);
 
     // initial direction: isotropic distribution
     get_random_direction(random_generator, photon.get_direction());
@@ -1048,24 +1059,21 @@ inline void set_number_of_threads(int num_threads_request, int &num_threads) {
  * @param new_queues Task queues for individual threads.
  * @param new_buffers PhotonBuffer memory space.
  * @param random_generator Random_generator for the active thread.
- * @param central_index List of subgrids that contain the source position.
  * @param gridvec List of all subgrids.
- * @param central_queue List with the corresponding thread number for each entry
- * in central_index.
  * @param num_active_buffers Number of active photon buffers on this process.
  * @param num_tasks_to_add Counter for the number of newly created tasks.
  * @param tasks_to_add List of tasks to add after this tasks finishes.
  * @param queues_to_add Queues to add new tasks to.
+ * @param sources Photon sources.
  */
 inline void execute_source_photon_task(
     Task &task, const int thread_id, const unsigned int num_photon_local,
     ThreadSafeVector< Task > &tasks, std::vector< Queue * > &new_queues,
     MemorySpace &new_buffers, RandomGenerator &random_generator,
-    const std::vector< unsigned int > &central_index,
     std::vector< DensitySubGrid * > &gridvec,
-    const std::vector< int > &central_queue,
     Atomic< unsigned int > &num_active_buffers, unsigned int &num_tasks_to_add,
-    unsigned int *tasks_to_add, int *queues_to_add) {
+    unsigned int *tasks_to_add, int *queues_to_add,
+    const std::vector< Source > &sources) {
 
   // log the start time of the task (if task output is enabled)
   task.start(thread_id);
@@ -1074,23 +1082,18 @@ inline void execute_source_photon_task(
   num_active_buffers.pre_increment();
 
   unsigned int num_photon_this_loop = task.get_buffer();
+  unsigned int source_index = task.get_subgrid();
+  const Source &source = sources[source_index];
 
   // get a free photon buffer in the central queue
   unsigned int buffer_index = new_buffers.get_free_buffer();
   PhotonBuffer &input_buffer = new_buffers[buffer_index];
-  // assign the buffer to a random thread that has a copy of the
-  // subgrid that contains the source position. This should ensure
-  // a balanced load for these threads.
-  unsigned int which_central_index =
-      random_generator.get_uniform_random_double() * central_index.size();
-  myassert(which_central_index >= 0 &&
-               which_central_index < central_index.size(),
-           "Invalid source subgrid thread index!");
-  unsigned int this_central_index = central_index[which_central_index];
+  const unsigned int this_central_index =
+      source.get_subgrid_index(random_generator);
 
   // now actually fill the buffer with random photon packets
   fill_buffer(input_buffer, num_photon_this_loop, random_generator,
-              this_central_index);
+              this_central_index, source);
 
   // add to the queue of the corresponding thread
   DensitySubGrid &subgrid = *gridvec[this_central_index];
@@ -1105,7 +1108,7 @@ inline void execute_source_photon_task(
   // (the output buffers belong to the subgrid and do not count as a dependency)
   new_task.set_dependency(subgrid.get_dependency());
 
-  queues_to_add[num_tasks_to_add] = central_queue[which_central_index];
+  queues_to_add[num_tasks_to_add] = subgrid.get_owning_thread();
   tasks_to_add[num_tasks_to_add] = task_index;
   ++num_tasks_to_add;
 
@@ -1396,10 +1399,7 @@ inline void execute_photon_reemit_task(
  * @param general_queue General queue shared by all threads.
  * @param new_buffers PhotonBuffer memory space.
  * @param random_generator Random_generator for the active thread.
- * @param central_index List of subgrids that contain the source position.
  * @param gridvec List of all subgrids.
- * @param central_queue List with the corresponding thread number for each entry
- * in central_index.
  * @param local_buffers Temporary buffers used in photon packet propagation
  * tasks on this thread.
  * @param local_buffer_flags Temporary flags used in photon packet propagation
@@ -1416,19 +1416,19 @@ inline void execute_photon_reemit_task(
  * @param num_tasks_to_add Counter for the number of newly created tasks.
  * @param tasks_to_add List of tasks to add after this tasks finishes.
  * @param queues_to_add Queues to add new tasks to.
+ * @param sources Photon sources.
  */
 inline void execute_task(
     const unsigned int task_index, const int thread_id,
     const unsigned int num_photon_local, ThreadSafeVector< Task > &tasks,
     std::vector< Queue * > &new_queues, Queue &general_queue,
     MemorySpace &new_buffers, RandomGenerator &random_generator,
-    const std::vector< unsigned int > &central_index,
-    std::vector< DensitySubGrid * > &gridvec,
-    const std::vector< int > &central_queue, PhotonBuffer *local_buffers,
+    std::vector< DensitySubGrid * > &gridvec, PhotonBuffer *local_buffers,
     bool *local_buffer_flags, const double reemission_probability,
     Atomic< unsigned int > &num_photon_done, Atomic< unsigned int > &num_empty,
     Atomic< unsigned int > &num_active_buffers, unsigned int &num_tasks_to_add,
-    unsigned int *tasks_to_add, int *queues_to_add) {
+    unsigned int *tasks_to_add, int *queues_to_add,
+    const std::vector< Source > &sources) {
 
   Task &task = tasks[task_index];
 
@@ -1440,10 +1440,10 @@ inline void execute_task(
 
     /// generate random photon packets from the source
 
-    execute_source_photon_task(
-        task, thread_id, num_photon_local, tasks, new_queues, new_buffers,
-        random_generator, central_index, gridvec, central_queue,
-        num_active_buffers, num_tasks_to_add, tasks_to_add, queues_to_add);
+    execute_source_photon_task(task, thread_id, num_photon_local, tasks,
+                               new_queues, new_buffers, random_generator,
+                               gridvec, num_active_buffers, num_tasks_to_add,
+                               tasks_to_add, queues_to_add, sources);
     break;
 
   case TASKTYPE_PHOTON_TRAVERSAL:
@@ -1833,18 +1833,31 @@ int main(int argc, char **argv) {
   //////////////////
 
   ////////////////////////////////////////////
-  // Initialize the photon source information
+  // Initialize the photon source(s)
   ///////////////////////////////////////////
 
-  // Get the index of the (one) subgrid that contains the source position
-  const unsigned int source_indices[3] = {
-      (unsigned int)((-box[0] / box[3]) * num_subgrid[0]),
-      (unsigned int)((-box[1] / box[4]) * num_subgrid[1]),
-      (unsigned int)((-box[2] / box[5]) * num_subgrid[2])};
+  std::vector< Source > sources;
+  double total_luminosity = 0.;
+  for (size_t isrc = 0; isrc < 1; ++isrc) {
+    const double position[3] = {0., 0., 0.};
 
-  const unsigned int central_index =
-      source_indices[0] * num_subgrid[1] * num_subgrid[2] +
-      source_indices[1] * num_subgrid[2] + source_indices[2];
+    const unsigned int source_indices[3] = {
+        static_cast< unsigned int >((position[0] - box[0] / box[3]) *
+                                    num_subgrid[0]),
+        static_cast< unsigned int >((position[1] - box[1] / box[4]) *
+                                    num_subgrid[1]),
+        static_cast< unsigned int >((position[2] - box[2] / box[5]) *
+                                    num_subgrid[2])};
+
+    const unsigned int source_index =
+        source_indices[0] * num_subgrid[1] * num_subgrid[2] +
+        source_indices[1] * num_subgrid[2] + source_indices[2];
+
+    sources.push_back(Source(position, 4.26e49));
+    sources[isrc].add_subgrid_index(source_index);
+
+    total_luminosity += sources[isrc].get_luminosity();
+  }
 
   ///////////////////////////////////////////
 
@@ -1870,16 +1883,18 @@ int main(int argc, char **argv) {
   RandomGenerator coarse_rg(42);
   for (unsigned int iloop = 0; iloop < number_of_iterations; ++iloop) {
     for (unsigned int i = 0; i < 10; ++i) {
-      PhotonBuffer buffer;
-      fill_buffer(buffer, PHOTONBUFFER_SIZE, coarse_rg, 0);
-      // now loop over the buffer photons and traverse them one by one
-      for (unsigned int j = 0; j < buffer.size(); ++j) {
+      for (unsigned int isrc = 0; isrc < sources.size(); ++isrc) {
+        PhotonBuffer buffer;
+        fill_buffer(buffer, PHOTONBUFFER_SIZE, coarse_rg, 0, sources[isrc]);
+        // now loop over the buffer photons and traverse them one by one
+        for (unsigned int j = 0; j < buffer.size(); ++j) {
 
-        // active photon
-        Photon &photon = buffer[j];
+          // active photon
+          Photon &photon = buffer[j];
 
-        // traverse the photon through the active subgrid
-        coarse_grid.interact(photon);
+          // traverse the photon through the active subgrid
+          coarse_grid.interact(photon);
+        }
       }
     }
 
@@ -1916,7 +1931,8 @@ int main(int argc, char **argv) {
       }
     }
 
-    coarse_grid.compute_neutral_fraction(10 * PHOTONBUFFER_SIZE);
+    coarse_grid.compute_neutral_fraction(
+        total_luminosity, 10 * sources.size() * PHOTONBUFFER_SIZE);
   }
 
   std::fill(initial_cost_vector.begin(), initial_cost_vector.end(), 1);
@@ -1949,16 +1965,14 @@ int main(int argc, char **argv) {
   avg_cost_per_thread /= num_threads;
   // now set the levels accordingly
   for (unsigned int i = 0; i < tot_num_subgrid; ++i) {
-    if (cost_copy_factor * initial_photon_cost[i] > avg_cost_per_thread ||
-        i == central_index) {
+    if (cost_copy_factor * initial_photon_cost[i] > avg_cost_per_thread) {
       // note that this in principle should be 1 higher. However, we do not
       // count the original.
       unsigned int number_of_copies = std::ceil(
           (cost_copy_factor * initial_photon_cost[i]) / avg_cost_per_thread);
       // make sure the number of copies of the source subgrid is at least
       // equal to the number of cores
-      if (i == central_index &&
-          number_of_copies < static_cast< unsigned int >(num_threads)) {
+      if (number_of_copies < static_cast< unsigned int >(num_threads)) {
         number_of_copies = num_threads;
       }
       // get the highest bit
@@ -1987,14 +2001,14 @@ int main(int argc, char **argv) {
   // now create the copies
   create_copies(gridvec, levels, new_buffers, originals, copies);
 
-  // add copy cost data: divide original cost by number of copies
-  for (unsigned int igrid = 0; igrid < tot_num_subgrid; ++igrid) {
-    std::vector< unsigned int > this_copies;
-    unsigned int copy = copies[igrid];
+  // add copies of sources
+  for (unsigned int isrc = 0; isrc < sources.size(); ++isrc) {
+    const unsigned int original = sources[isrc].get_original_subgrid_index();
+    unsigned int copy = copies[original];
     if (copy < 0xffffffff) {
       while (copy < gridvec.size() &&
-             originals[copy - tot_num_subgrid] == igrid) {
-        this_copies.push_back(copy);
+             originals[copy - tot_num_subgrid] == original) {
+        sources[isrc].add_subgrid_index(copy);
         ++copy;
       }
     }
@@ -2034,41 +2048,6 @@ int main(int argc, char **argv) {
     cpucycle_tick(iteration_start);
     MCtimer.start();
 
-    // make a global list of all subgrids (on this process) that contain the
-    // (single) photon source position, we will distribute the initial
-    // propagation tasks evenly across these subgrids
-    std::vector< unsigned int > central_index;
-    central_index.push_back(
-        source_indices[0] * num_subgrid[1] * num_subgrid[2] +
-        source_indices[1] * num_subgrid[2] + source_indices[2]);
-    unsigned int copy = copies[central_index[0]];
-    if (copy < 0xffffffff) {
-      while (copy < gridvec.size() &&
-             originals[copy - tot_num_subgrid] == central_index[0]) {
-        central_index.push_back(copy);
-        ++copy;
-      }
-    }
-    logmessage("Number of central subgrid copies: " << central_index.size(), 0);
-    const unsigned int tot_num_copies = central_index.size();
-
-    // divide the total number of photons over the processes, weighted with
-    // the number of copies each process holds
-    const unsigned int num_photon_per_copy = num_photon / tot_num_copies;
-    // for now just assume the total number of copies is a divisor of the total
-    // number of photons, and crash if it isn't
-    myassert(num_photon_per_copy * tot_num_copies == num_photon,
-             "Photon number not conserved!");
-    const unsigned int num_photon_local =
-        num_photon_per_copy * central_index.size();
-
-    // get the corresponding thread ranks
-    std::vector< int > central_queue(central_index.size());
-    for (unsigned int i = 0; i < central_index.size(); ++i) {
-      central_queue[i] = gridvec[central_index[i]]->get_owning_thread();
-      myassert(central_queue[i] >= 0, "Invalid queue index!");
-    }
-
     // STEP 0: log output
     logmessage("Loop " << iloop + 1, 0);
 
@@ -2089,17 +2068,18 @@ int main(int argc, char **argv) {
     // global control variable
     Atomic< unsigned int > num_photon_done_since_last(0);
     // preallocate photon creation tasks for a faster iteration start
-    const size_t num_photon_tasks = num_photon_local / PHOTONBUFFER_SIZE +
-                                    (num_photon_local % PHOTONBUFFER_SIZE > 0);
+    const size_t num_photon_tasks =
+        num_photon / PHOTONBUFFER_SIZE + (num_photon % PHOTONBUFFER_SIZE > 0);
     tasks.get_free_elements(num_photon_tasks);
 #pragma omp parallel for
     for (size_t i = 0; i < num_photon_tasks; ++i) {
       tasks[i].set_type(TASKTYPE_SOURCE_PHOTON);
       tasks[i].set_buffer(PHOTONBUFFER_SIZE);
+      tasks[i].set_subgrid(0);
     }
-    if (num_photon_local % PHOTONBUFFER_SIZE > 0) {
-      tasks[num_photon_tasks - 1].set_buffer(
-          PHOTONBUFFER_SIZE - (num_photon_local % PHOTONBUFFER_SIZE));
+    if (num_photon % PHOTONBUFFER_SIZE > 0) {
+      tasks[num_photon_tasks - 1].set_buffer(PHOTONBUFFER_SIZE -
+                                             (num_photon % PHOTONBUFFER_SIZE));
     }
     general_queue.add_tasks(0, num_photon_tasks);
 #pragma omp parallel default(shared)
@@ -2117,7 +2097,7 @@ int main(int argc, char **argv) {
 
       // this loop is repeated until all local photons have been propagated
       // note that this condition automatically covers the condition
-      //  num_photon_sourced < num_photon_local
+      //  num_photon_sourced < num_photon
       // as unsourced photons cannot contribute to num_photon_done
       // this condition definitely needs to change for MPI...
       while (global_run_flag) {
@@ -2161,13 +2141,12 @@ int main(int argc, char **argv) {
           unsigned int tasks_to_add[TRAVELDIRECTION_NUMBER];
           int queues_to_add[TRAVELDIRECTION_NUMBER];
 
-          execute_task(current_index, thread_id, num_photon_local, tasks,
-                       new_queues, general_queue, new_buffers,
-                       random_generator[thread_id], central_index, gridvec,
-                       central_queue, local_buffers, local_buffer_flags,
+          execute_task(current_index, thread_id, num_photon, tasks, new_queues,
+                       general_queue, new_buffers, random_generator[thread_id],
+                       gridvec, local_buffers, local_buffer_flags,
                        reemission_probability, num_photon_done_since_last,
                        num_empty, num_active_buffers, num_tasks_to_add,
-                       tasks_to_add, queues_to_add);
+                       tasks_to_add, queues_to_add, sources);
 
           // add new tasks to their respective queues
           for (unsigned int itask = 0; itask < num_tasks_to_add; ++itask) {
@@ -2247,7 +2226,8 @@ int main(int argc, char **argv) {
       while (igrid.value() < tot_num_subgrid) {
         const unsigned int current_igrid = igrid.post_increment();
         if (current_igrid < tot_num_subgrid) {
-          gridvec[current_igrid]->compute_neutral_fraction(num_photon);
+          gridvec[current_igrid]->compute_neutral_fraction(total_luminosity,
+                                                           num_photon);
         }
       }
     }
@@ -2308,6 +2288,7 @@ int main(int argc, char **argv) {
   logmessage("Writing speed: " << bin_speed << " MB/s.", 0);
 #endif
 
+#ifdef HDF5_FILE
   Timer hdf5_timer;
   hdf5_timer.start();
   size_t hdf5_size = output_neutral_fractions_hdf5(gridvec, tot_num_subgrid);
@@ -2315,6 +2296,7 @@ int main(int argc, char **argv) {
   logmessage("Writing HDF5 file took " << hdf5_timer.value() << " s.", 0);
   double hdf5_speed = hdf5_size / hdf5_timer.value() / (1024. * 1024.);
   logmessage("Writing speed: " << hdf5_speed << " MB/s.", 0);
+#endif
 
   //////////////////////
 

@@ -35,8 +35,6 @@
 
 /**
  * @brief Photon packet.
- *
- * All members are public for now.
  */
 class Photon {
 private:

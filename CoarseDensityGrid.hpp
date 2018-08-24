@@ -490,15 +490,17 @@ public:
   /**
    * @brief Update the ionization state for all the cells in this subgrid.
    *
+   * @param luminosity Total ionising luminosity of all sources (in s^-1).
    * @param num_photon Total number of photon packets that was used, used to
    * normalize the intensity estimates.
    */
-  inline void compute_neutral_fraction(const unsigned int num_photon) {
+  inline void compute_neutral_fraction(const double luminosity,
+                                       const unsigned int num_photon) {
     // compute the normalization factor:
     // constant source luminosity / number of packets / cell volume
     // if we multiply this with the intensity estimates (unit: m^3), we get a
     // quantity in s^-1
-    const double jfac = 4.26e49 / num_photon * _inv_cell_size[0] *
+    const double jfac = luminosity / num_photon * _inv_cell_size[0] *
                         _inv_cell_size[1] * _inv_cell_size[2];
     // constant recombination rate
     const double alphaH = 4.e-19;

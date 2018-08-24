@@ -2674,7 +2674,7 @@ int main(int argc, char **argv) {
       }
     }
 
-    coarse_grid.compute_neutral_fraction(10 * PHOTONBUFFER_SIZE);
+    coarse_grid.compute_neutral_fraction(4.26e49, 10 * PHOTONBUFFER_SIZE);
   }
 
   std::fill(initial_cost_vector.begin(), initial_cost_vector.end(), 1);
@@ -3390,7 +3390,8 @@ int main(int argc, char **argv) {
         if (current_igrid < tot_num_subgrid) {
           // only subgrids on this process are done
           if (costs.get_process(current_igrid) == MPI_rank) {
-            gridvec[current_igrid]->compute_neutral_fraction(num_photon);
+            gridvec[current_igrid]->compute_neutral_fraction(4.26e49,
+                                                             num_photon);
           }
         }
       }
