@@ -1078,7 +1078,7 @@ inline void execute_source_photon_task(
     std::vector< DensitySubGrid * > &gridvec,
     Atomic< unsigned int > &num_active_buffers, unsigned int &num_tasks_to_add,
     unsigned int *tasks_to_add, int *queues_to_add,
-    const std::vector< Source > &sources) {
+    const std::vector< Source * > &sources) {
 
   // log the start time of the task (if task output is enabled)
   task.start(thread_id);
@@ -1088,7 +1088,7 @@ inline void execute_source_photon_task(
 
   unsigned int num_photon_this_loop = task.get_buffer();
   unsigned int source_index = task.get_subgrid();
-  const Source &source = sources[source_index];
+  const Source &source = *sources[source_index];
 
   // get a free photon buffer in the central queue
   unsigned int buffer_index = new_buffers.get_free_buffer();
@@ -1433,7 +1433,7 @@ inline void execute_task(
     Atomic< unsigned int > &num_photon_done, Atomic< unsigned int > &num_empty,
     Atomic< unsigned int > &num_active_buffers, unsigned int &num_tasks_to_add,
     unsigned int *tasks_to_add, int *queues_to_add,
-    const std::vector< Source > &sources) {
+    const std::vector< Source * > &sources) {
 
   Task &task = tasks[task_index];
 
@@ -1939,7 +1939,7 @@ int main(int argc, char **argv) {
   // Initialize the photon source(s)
   ///////////////////////////////////////////
 
-  std::vector< Source > sources;
+  std::vector< Source * > sources;
   double total_luminosity = 0.;
   logmessage("Box anchor: " << box[0] << " " << box[1] << " " << box[2], 2);
   logmessage("Box sides: " << box[3] << " " << box[4] << " " << box[5], 2);
@@ -1975,10 +1975,10 @@ int main(int argc, char **argv) {
                  2);
       logmessage("source index: " << source_index, 2);
 
-      sources.push_back(Source(position, 4.26e48));
-      sources[isrc].add_subgrid_index(source_index);
+      sources.push_back(new Source(position, 4.26e48));
+      sources[isrc]->add_subgrid_index(source_index);
 
-      total_luminosity += sources[isrc].get_luminosity();
+      total_luminosity += sources[isrc]->get_luminosity();
     }
   } else {
     for (size_t isrc = 0; isrc < 1; ++isrc) {
@@ -2006,10 +2006,10 @@ int main(int argc, char **argv) {
                  2);
       logmessage("source index: " << source_index, 2);
 
-      sources.push_back(Source(position, 4.26e49));
-      sources[isrc].add_subgrid_index(source_index);
+      sources.push_back(new Source(position, 4.26e49));
+      sources[isrc]->add_subgrid_index(source_index);
 
-      total_luminosity += sources[isrc].get_luminosity();
+      total_luminosity += sources[isrc]->get_luminosity();
     }
   }
 
@@ -2039,7 +2039,7 @@ int main(int argc, char **argv) {
     for (unsigned int i = 0; i < 10; ++i) {
       for (unsigned int isrc = 0; isrc < sources.size(); ++isrc) {
         PhotonBuffer buffer;
-        fill_buffer(buffer, PHOTONBUFFER_SIZE, coarse_rg, 0, sources[isrc]);
+        fill_buffer(buffer, PHOTONBUFFER_SIZE, coarse_rg, 0, *sources[isrc]);
         // now loop over the buffer photons and traverse them one by one
         for (unsigned int j = 0; j < buffer.size(); ++j) {
 
@@ -2157,12 +2157,12 @@ int main(int argc, char **argv) {
 
   // add copies of sources
   for (unsigned int isrc = 0; isrc < sources.size(); ++isrc) {
-    const unsigned int original = sources[isrc].get_original_subgrid_index();
+    const unsigned int original = sources[isrc]->get_original_subgrid_index();
     unsigned int copy = copies[original];
     if (copy < 0xffffffff) {
       while (copy < gridvec.size() &&
              originals[copy - tot_num_subgrid] == original) {
-        sources[isrc].add_subgrid_index(copy);
+        sources[isrc]->add_subgrid_index(copy);
         ++copy;
       }
     }
@@ -2196,7 +2196,7 @@ int main(int argc, char **argv) {
   unsigned int num_photon_add = 0;
   for (unsigned int isrc = 0; isrc < sources.size(); ++isrc) {
     source_numbers[isrc] = static_cast< unsigned int >(
-        sources[isrc].get_luminosity() / total_luminosity * num_photon);
+        sources[isrc]->get_luminosity() / total_luminosity * num_photon);
     num_photon_add += source_numbers[isrc];
   }
   const unsigned int num_photon_rem = num_photon - num_photon_add;
@@ -2527,6 +2527,10 @@ int main(int argc, char **argv) {
   // queues
   for (int i = 0; i < num_threads; ++i) {
     delete new_queues[i];
+  }
+
+  for (unsigned int isrc = 0; isrc < sources.size(); ++isrc) {
+    delete sources[isrc];
   }
 
   /////////////////////
