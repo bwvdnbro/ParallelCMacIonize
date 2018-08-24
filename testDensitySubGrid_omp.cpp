@@ -222,7 +222,6 @@ unsigned long current_memory_size, max_memory_size;
 // Project includes
 #include "CoarseDensityGrid.hpp"
 #include "CommandLineParser.hpp"
-#include "CostVector.hpp"
 #include "DensitySubGrid.hpp"
 #include "DistributedDensityGrid.hpp"
 #include "Log.hpp"
