@@ -6,7 +6,7 @@ box:
 # grid resolution
 ncell: [128, 128, 128]
 # number of photon packets
-num_photon: 1e7
+num_photon: 1e6
 # number of iterations
 number_of_iterations: 10
 # reemission probability (realistic value: 0.364)

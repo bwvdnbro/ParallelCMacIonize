@@ -2191,6 +2191,8 @@ int main(int argc, char **argv) {
 
   Timer MCtimer;
 
+  Lock decision_lock;
+
   std::vector< unsigned int > source_numbers(sources.size());
   unsigned int num_photon_add = 0;
   for (unsigned int isrc = 0; isrc < sources.size(); ++isrc) {
@@ -2367,23 +2369,27 @@ int main(int argc, char **argv) {
 
           logmessage_lockfree("thread " << thread_id << " thinks we're ready!",
                               1);
-          // we use the MPI lock so that we know for sure we are the only
-          // thread that has access to num_photon_done_since_last:
-          // other threads cannot do anything as long as there is no incoming
-          // communication, and an incoming communication can only be received
-          // by a thread that holds the MPI lock
-          if (num_empty.value() == num_empty_target &&
-              num_active_buffers.value() == 0 &&
-              num_photon_done_since_last.value() > 0) {
-            num_photon_done += num_photon_done_since_last.value();
-            num_photon_done_since_last.set(0);
-            logmessage_lockfree("num_photon_done = " << num_photon_done << " ("
-                                                     << num_photon << ")",
-                                1);
-            if (num_photon_done == num_photon) {
-              // make sure the master process also stops
-              global_run_flag = false;
+          // we use a decision lock so that we know for sure we are the only
+          // thread that has access to num_photon_done_since_last
+          // note that for a pure shared memory run we could slightly alter
+          // the decision making compared to the hybrid algorithm and not use
+          // a lock at all
+          if (decision_lock.try_lock()) {
+            if (num_empty.value() == num_empty_target &&
+                num_active_buffers.value() == 0 &&
+                num_photon_done_since_last.value() > 0) {
+              num_photon_done += num_photon_done_since_last.value();
+              num_photon_done_since_last.set(0);
+              logmessage_lockfree("num_photon_done = " << num_photon_done
+                                                       << " (" << num_photon
+                                                       << ")",
+                                  1);
+              if (num_photon_done == num_photon) {
+                // make sure the master process also stops
+                global_run_flag = false;
+              }
             }
+            decision_lock.unlock();
           }
         }
 
