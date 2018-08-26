@@ -5,6 +5,8 @@ box:
   sides: [1. m, 1. m, 1. m]
 # grid resolution
 ncell: [128, 128, 128]
+# system time step
+timestep: 0.001 s
 
 ## Algorithm parameters
 # number of subgrids

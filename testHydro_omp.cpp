@@ -835,9 +835,11 @@ inline unsigned int steal_task(const int thread_id, const int num_threads,
  * @param box Variable to store the box anchor and size in.
  * @param ncell Variable to store the total number of cells in.
  * @param num_subgrid Variable to store the total number of subgrids in.
+ * @param timestep Variable to store the system time step in.
  */
 inline void read_parameters(std::string paramfile_name, double box[6],
-                            int ncell[3], int num_subgrid[3]) {
+                            int ncell[3], int num_subgrid[3],
+                            double &timestep) {
 
   std::ifstream paramfile(paramfile_name);
   if (!paramfile) {
@@ -871,6 +873,8 @@ inline void read_parameters(std::string paramfile_name, double box[6],
   num_subgrid[0] = param_num_subgrid.x();
   num_subgrid[1] = param_num_subgrid.y();
   num_subgrid[2] = param_num_subgrid.z();
+
+  timestep = parameters.get_physical_value< QUANTITY_TIME >("timestep");
 
   logmessage("\n##\n# Parameters:\n##", 0);
   parameters.print_contents(std::cerr, true);
@@ -1127,7 +1131,8 @@ int main(int argc, char **argv) {
 
   double box[6];
   int ncell[3], num_subgrid[3];
-  read_parameters(paramfile_name, box, ncell, num_subgrid);
+  double timestep;
+  read_parameters(paramfile_name, box, ncell, num_subgrid, timestep);
 
   const unsigned int tot_num_subgrid =
       num_subgrid[0] * num_subgrid[1] * num_subgrid[2];
@@ -1227,7 +1232,7 @@ int main(int argc, char **argv) {
     hydro_queue[i] = new Queue(18 * tot_num_subgrid);
   }
 
-  const double dt = 0.001;
+  const double dt = timestep;
   Timer hydro_loop_timer;
   for (unsigned int istep = 0; istep < 100; ++istep) {
 
