@@ -54,7 +54,7 @@
 
 /*! @brief Enable this to disable hydro variables (decreases memory footprint
  *  of code). */
-#define NO_HYDRO
+//#define NO_HYDRO
 
 /*! @brief Enable this to activate cell locking. */
 //#define SUBGRID_CELL_LOCK
@@ -779,6 +779,14 @@ public:
   inline const double *get_neutral_fraction() const {
     return _neutral_fraction;
   }
+
+  /**
+   * @brief Get a read-only access pointer to the primitive variables stored in
+   * this subgrid.
+   *
+   * @return Read-only pointer to the primitive fractions.
+   */
+  inline const double *get_primitives() const { return _primitive_variables; }
 
   /**
    * @brief Get the midpoint of the subgrid box for domain decomposition

@@ -1,0 +1,18 @@
+## Physical parameters
+# simulation box dimensions
+box:
+  anchor: [-0.5 m, -0.5 m, -0.5 m]
+  sides: [1. m, 1. m, 1. m]
+# grid resolution
+ncell: [128, 128, 128]
+
+## Algorithm parameters
+# number of subgrids
+# this is a coarser version of the total grid and determines the way the grid is
+# split across different threads and processes
+# in the current implementation, the coarse grid resolution numbers should be
+# factors of the total grid resolution, to make sure all subgrids have the same
+# resolution
+# for good performance, the total number of subgrids should be significantly
+# larger than the number of threads used for the run
+num_subgrid: [8, 8, 8]

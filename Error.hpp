@@ -141,10 +141,16 @@ extern int MPI_rank;
  * @brief Message macro. Prints the given message (with C style formatting) to
  * the stdout.
  */
+#ifdef WITH_MPI
 #define cmac_status(s, ...)                                                    \
   if (MPI_rank == 0) {                                                         \
     fprintf(stdout, "%s:%s():%i:\n", __FILE__, __FUNCTION__, __LINE__);        \
     print_indent(stdout, s, ##__VA_ARGS__);                                    \
   }
+#else
+#define cmac_status(s, ...)                                                    \
+  fprintf(stdout, "%s:%s():%i:\n", __FILE__, __FUNCTION__, __LINE__);          \
+  print_indent(stdout, s, ##__VA_ARGS__);
+#endif
 
 #endif // ERROR_HPP

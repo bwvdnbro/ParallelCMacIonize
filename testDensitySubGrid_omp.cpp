@@ -91,6 +91,9 @@
 /*! @brief Enable this to track memory usage manually. */
 #define MEMORY_TRACKING
 
+/*! @brief Disable hydro variables to decrease memory footprint of grid. */
+#define NO_HYDRO
+
 ////////////////////////////////////////////////////////////////////////////////
 
 #ifdef MEANING_OF_HASTE
