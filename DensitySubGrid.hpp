@@ -171,23 +171,23 @@ private:
 
   /*! @brief Conserved variables (mass - kg, momentum - kg m s^-1, energy -
    *  kg m^2 s^-2). */
-  double *_conserved_variables;
+  float *_conserved_variables;
 
   /*! @brief Change in conserved variables (mass - kg s^-1, momentum - kg m
    *  s^-2, energy - kg m^2 s^-3). */
-  double *_delta_conserved_variables;
+  float *_delta_conserved_variables;
 
   /*! @brief Primitive variables (density - kg m^-3, velocity - m s^-1,
    *  pressure - kg m^-1 s^-2). */
-  double *_primitive_variables;
+  float *_primitive_variables;
 
   /*! @brief Primitive variable gradients (density - kg m^-4, velocity - s^-1,
    *  pressure - kg m^-2 s^-2). */
-  double *_primitive_variable_gradients;
+  float *_primitive_variable_gradients;
 
   /*! @brief Minimum and maximum neighbouring values used by the slope limiter
    *  (density - kg m^-3, velocity - m s^-1, pressure - kg m^-1 s^-2). */
-  double *_primitive_variable_limiters;
+  float *_primitive_variable_limiters;
 
   /*! @brief Indices of the hydro tasks associated with this subgrid. */
   size_t _hydro_tasks[18];
@@ -551,12 +551,12 @@ public:
     }
 
 #ifndef NO_HYDRO
-    _conserved_variables = new double[tot_ncell * 5];
-    _delta_conserved_variables = new double[tot_ncell * 5];
-    _primitive_variables = new double[tot_ncell * 5];
+    _conserved_variables = new float[tot_ncell * 5];
+    _delta_conserved_variables = new float[tot_ncell * 5];
+    _primitive_variables = new float[tot_ncell * 5];
 #ifdef SECOND_ORDER
-    _primitive_variable_gradients = new double[tot_ncell * 15];
-    _primitive_variable_limiters = new double[tot_ncell * 10];
+    _primitive_variable_gradients = new float[tot_ncell * 15];
+    _primitive_variable_limiters = new float[tot_ncell * 10];
 #endif
 
     for (int i = 0; i < tot_ncell; ++i) {
@@ -654,12 +654,12 @@ public:
     }
 
 #ifndef NO_HYDRO
-    _conserved_variables = new double[tot_ncell * 5];
-    _delta_conserved_variables = new double[tot_ncell * 5];
-    _primitive_variables = new double[tot_ncell * 5];
+    _conserved_variables = new float[tot_ncell * 5];
+    _delta_conserved_variables = new float[tot_ncell * 5];
+    _primitive_variables = new float[tot_ncell * 5];
 #ifdef SECOND_ORDER
-    _primitive_variable_gradients = new double[tot_ncell * 15];
-    _primitive_variable_limiters = new double[10 * tot_ncell];
+    _primitive_variable_gradients = new float[tot_ncell * 15];
+    _primitive_variable_limiters = new float[10 * tot_ncell];
 #endif
 
     for (int i = 0; i < tot_ncell; ++i) {
@@ -796,7 +796,7 @@ public:
    *
    * @return Read-only pointer to the primitive fractions.
    */
-  inline const double *get_primitives() const { return _primitive_variables; }
+  inline const float *get_primitives() const { return _primitive_variables; }
 
   /**
    * @brief Get the midpoint of the subgrid box for domain decomposition
@@ -1710,19 +1710,19 @@ public:
                        sizeof(double));
           stream.write(
               reinterpret_cast< char * >(&_primitive_variables[5 * index]),
-              sizeof(double));
+              sizeof(float));
           stream.write(
               reinterpret_cast< char * >(&_primitive_variables[5 * index + 1]),
-              sizeof(double));
+              sizeof(float));
           stream.write(
               reinterpret_cast< char * >(&_primitive_variables[5 * index + 2]),
-              sizeof(double));
+              sizeof(float));
           stream.write(
               reinterpret_cast< char * >(&_primitive_variables[5 * index + 3]),
-              sizeof(double));
+              sizeof(float));
           stream.write(
               reinterpret_cast< char * >(&_primitive_variables[5 * index + 4]),
-              sizeof(double));
+              sizeof(float));
         }
       }
     }
@@ -1758,26 +1758,26 @@ public:
           cell_offset += sizeof(double);
 #ifdef NO_HYDRO
           file.write(offset + cell_offset, 0.);
-          cell_offset += sizeof(double);
+          cell_offset += sizeof(float);
           file.write(offset + cell_offset, 0.);
-          cell_offset += sizeof(double);
+          cell_offset += sizeof(float);
           file.write(offset + cell_offset, 0.);
-          cell_offset += sizeof(double);
+          cell_offset += sizeof(float);
           file.write(offset + cell_offset, 0.);
-          cell_offset += sizeof(double);
+          cell_offset += sizeof(float);
           file.write(offset + cell_offset, 0.);
-          cell_offset += sizeof(double);
+          cell_offset += sizeof(float);
 #else  // NO_HYDRO
           file.write(offset + cell_offset, _primitive_variables[5 * index]);
-          cell_offset += sizeof(double);
+          cell_offset += sizeof(float);
           file.write(offset + cell_offset, _primitive_variables[5 * index + 1]);
-          cell_offset += sizeof(double);
+          cell_offset += sizeof(float);
           file.write(offset + cell_offset, _primitive_variables[5 * index + 2]);
-          cell_offset += sizeof(double);
+          cell_offset += sizeof(float);
           file.write(offset + cell_offset, _primitive_variables[5 * index + 3]);
-          cell_offset += sizeof(double);
+          cell_offset += sizeof(float);
           file.write(offset + cell_offset, _primitive_variables[5 * index + 4]);
-          cell_offset += sizeof(double);
+          cell_offset += sizeof(float);
 #endif // NO_HYDRO
         }
       }
@@ -1791,7 +1791,7 @@ public:
    */
   inline size_t get_output_size() const {
     return _number_of_cells[0] * _number_of_cells[1] * _number_of_cells[2] *
-           10 * sizeof(double);
+           (5 * sizeof(double) + 5 * sizeof(float));
   }
 
   /**
@@ -2104,11 +2104,11 @@ public:
           const unsigned int index100 =
               (ix + 1) * _number_of_cells[3] + iy * _number_of_cells[2] + iz;
 #ifdef SECOND_ORDER
-          const double *gradL = &_primitive_variable_gradients[15 * index000];
-          const double *gradR = &_primitive_variable_gradients[15 * index100];
+          const float *gradL = &_primitive_variable_gradients[15 * index000];
+          const float *gradR = &_primitive_variable_gradients[15 * index100];
 #else
-          const double *gradL = nullptr;
-          const double *gradR = nullptr;
+          const float *gradL = nullptr;
+          const float *gradR = nullptr;
 #endif
           // x direction
           hydro.do_flux_calculation(0, &_primitive_variables[5 * index000],
@@ -2127,11 +2127,11 @@ public:
           const unsigned int index010 =
               ix * _number_of_cells[3] + (iy + 1) * _number_of_cells[2] + iz;
 #ifdef SECOND_ORDER
-          const double *gradL = &_primitive_variable_gradients[15 * index000];
-          const double *gradR = &_primitive_variable_gradients[15 * index010];
+          const float *gradL = &_primitive_variable_gradients[15 * index000];
+          const float *gradR = &_primitive_variable_gradients[15 * index010];
 #else
-          const double *gradL = nullptr;
-          const double *gradR = nullptr;
+          const float *gradL = nullptr;
+          const float *gradR = nullptr;
 #endif
           // y direction
           hydro.do_flux_calculation(1, &_primitive_variables[5 * index000],
@@ -2150,11 +2150,11 @@ public:
           const unsigned int index001 =
               ix * _number_of_cells[3] + iy * _number_of_cells[2] + iz + 1;
 #ifdef SECOND_ORDER
-          const double *gradL = &_primitive_variable_gradients[15 * index000];
-          const double *gradR = &_primitive_variable_gradients[15 * index001];
+          const float *gradL = &_primitive_variable_gradients[15 * index000];
+          const float *gradR = &_primitive_variable_gradients[15 * index001];
 #else
-          const double *gradL = nullptr;
-          const double *gradR = nullptr;
+          const float *gradL = nullptr;
+          const float *gradR = nullptr;
 #endif
           // z direction
           hydro.do_flux_calculation(2, &_primitive_variables[5 * index000],
@@ -2275,13 +2275,13 @@ public:
         const unsigned int index_right =
             start_index_right + ic * column_increment + ir * row_increment;
 #ifdef SECOND_ORDER
-        const double *gradL =
+        const float *gradL =
             &left_grid->_primitive_variable_gradients[15 * index_left];
-        const double *gradR =
+        const float *gradR =
             &right_grid_primitive_variable_gradients[15 * index_right];
 #else
-        const double *gradL = nullptr;
-        const double *gradR = nullptr;
+        const float *gradL = nullptr;
+        const float *gradR = nullptr;
 #endif
         hydro.do_flux_calculation(
             i, &left_grid->_primitive_variables[5 * index_left], gradL,
@@ -2381,9 +2381,9 @@ public:
         const unsigned int index_left =
             start_index_left + ic * column_increment + ir * row_increment;
 #ifdef SECOND_ORDER
-        const double *gradL = &_primitive_variable_gradients[15 * index_left];
+        const float *gradL = &_primitive_variable_gradients[15 * index_left];
 #else
-        const double *gradL = nullptr;
+        const float *gradL = nullptr;
 #endif
         hydro.do_ghost_flux_calculation(
             i, &_primitive_variables[5 * index_left], gradL, boundary, dx, A,

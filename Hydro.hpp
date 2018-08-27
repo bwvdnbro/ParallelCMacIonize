@@ -83,12 +83,11 @@ public:
    * @param velocity Output velocity (in m s^-1).
    * @param pressure Output pressure (in kg m^-1 s^-2).
    */
-  inline void get_primitive_variables(const double mass,
-                                      const double momentum[3],
-                                      const double total_energy,
+  inline void get_primitive_variables(const float mass, const float momentum[3],
+                                      const float total_energy,
                                       const double inverse_volume,
-                                      double &density, double velocity[3],
-                                      double &pressure) const {
+                                      float &density, float velocity[3],
+                                      float &pressure) const {
 
     const double inverse_mass = 1. / mass;
 
@@ -114,12 +113,11 @@ public:
    * @param momentum Output momentum (in kg m s^-1).
    * @param total_energy Output total energy (in kg m^2 s^-2).
    */
-  inline void get_conserved_variables(const double density,
-                                      const double velocity[3],
-                                      const double pressure,
-                                      const double volume, double &mass,
-                                      double momentum[3],
-                                      double &total_energy) const {
+  inline void get_conserved_variables(const float density,
+                                      const float velocity[3],
+                                      const float pressure, const double volume,
+                                      float &mass, float momentum[3],
+                                      float &total_energy) const {
 
     mass = density * volume;
     momentum[0] = velocity[0] * mass;
@@ -150,11 +148,11 @@ public:
    * @param dQR Right state conserved variable changes (updated; mass - kg s^-1,
    * momentum - kg m s^-2, total energy - kg m^2 s^-3).
    */
-  inline void do_flux_calculation(const int i, const double WL[5],
-                                  const double dWL[15], const double WR[5],
-                                  const double dWR[15], const double dx,
-                                  const double A, double dQL[5],
-                                  double dQR[5]) const {
+  inline void do_flux_calculation(const int i, const float WL[5],
+                                  const float dWL[15], const float WR[5],
+                                  const float dWR[15], const double dx,
+                                  const double A, float dQL[5],
+                                  float dQR[5]) const {
 
 #ifdef SECOND_ORDER
     const double WLext[5] = {
@@ -166,8 +164,8 @@ public:
         WR[2] - 0.5 * dWR[6 + i] * dx, WR[3] - 0.5 * dWR[9 + i] * dx,
         WR[4] - 0.5 * dWR[12 + i] * dx};
 #else
-    const double *WLext = WL;
-    const double *WRext = WR;
+    const double WLext[5] = {WL[0], WL[1], WL[2], WL[3], WL[4]};
+    const double WRext[5] = {WR[0], WR[1], WR[2], WR[3], WR[4]};
 #endif
 
     double mflux = 0.;
@@ -213,13 +211,12 @@ public:
    * momentum - kg m s^-2, total energy - kg m^2 s^-3).
    */
   template < typename _boundary_ >
-  inline void do_ghost_flux_calculation(const int i, const double WL[5],
-                                        const double dWL[15],
-                                        const _boundary_ &boundary,
-                                        const double dx, const double A,
-                                        double dQL[5]) const {
+  inline void
+  do_ghost_flux_calculation(const int i, const float WL[5], const float dWL[15],
+                            const _boundary_ &boundary, const double dx,
+                            const double A, float dQL[5]) const {
 
-    double WR[5], dWR[15];
+    float WR[5], dWR[15];
     boundary.get_right_state_flux_variables(i, WL, dWL, WR, dWR);
 
 #ifdef SECOND_ORDER
@@ -232,8 +229,8 @@ public:
         WR[2] - 0.5 * dWR[6 + i] * dx, WR[3] - 0.5 * dWR[9 + i] * dx,
         WR[4] - 0.5 * dWR[12 + i] * dx};
 #else
-    const double *WLext = WL;
-    const double *WRext = WR;
+    const double WLext[5] = {WL[0], WL[1], WL[2], WL[3], WL[4]};
+    const double WRext[5] = {WR[0], WR[1], WR[2], WR[3], WR[4]};
 #endif
 
     double mflux = 0.;
@@ -276,10 +273,10 @@ public:
    * @param WRlim Right state primitive variable limiters (updated; density -
    * kg m^-3, velocity - m s^-1, pressure - kg m^-1 s^-2).
    */
-  inline void do_gradient_calculation(const int i, const double WL[5],
-                                      const double WR[5], const double dxinv,
-                                      double dWL[15], double WLlim[10],
-                                      double dWR[15], double WRlim[10]) const {
+  inline void do_gradient_calculation(const int i, const float WL[5],
+                                      const float WR[5], const double dxinv,
+                                      float dWL[15], float WLlim[10],
+                                      float dWR[15], float WRlim[10]) const {
 
     for (int j = 0; j < 5; ++j) {
       const double dwdx = 0.5 * (WL[j] + WR[j]) * dxinv;
@@ -306,12 +303,12 @@ public:
    * kg m^-3, velocity - m s^-1, pressure - kg m^-1 s^-2).
    */
   template < typename _boundary_ >
-  inline void do_ghost_gradient_calculation(const int i, const double WL[5],
+  inline void do_ghost_gradient_calculation(const int i, const float WL[5],
                                             const _boundary_ &boundary,
-                                            const double dxinv, double dWL[15],
-                                            double WLlim[10]) const {
+                                            const double dxinv, float dWL[15],
+                                            float WLlim[10]) const {
 
-    double WR[5];
+    float WR[5];
     boundary.get_right_state_gradient_variables(i, WL, WR);
     for (int j = 0; j < 5; ++j) {
       const double dwdx = 0.5 * (WL[j] + WR[j]) * dxinv;
@@ -333,8 +330,8 @@ public:
    * @param dx Distance between the cell and the neighbouring cells in all
    * directions (in m).
    */
-  inline void apply_slope_limiter(const double W[5], double dW[15],
-                                  const double Wlim[10],
+  inline void apply_slope_limiter(const float W[5], float dW[15],
+                                  const float Wlim[10],
                                   const double dx[3]) const {
 
     for (int i = 0; i < 5; ++i) {
@@ -378,7 +375,7 @@ public:
    * velocity - s^-1, pressure - kg m^-2 s^-2).
    * @param dt Time step (in s).
    */
-  inline void predict_primitive_variables(double W[5], const double dW[15],
+  inline void predict_primitive_variables(float W[5], const float dW[15],
                                           const double dt) const {
 
     const double rho = W[0];

@@ -47,8 +47,8 @@
 #define TASK_PLOT
 
 /*! @brief Output. Select at least one. */
-//#define MM_FILE
-#define HDF5_FILE
+#define MM_FILE
+//#define HDF5_FILE
 
 #include "Assert.hpp"
 #include "Atomic.hpp"
@@ -169,7 +169,7 @@ inline void output_result(const std::vector< DensitySubGrid * > &gridvec,
 
   H5Sset_extent_simple(space, rank, shape, shape);
 
-  const hid_t data = H5Dcreate(group, "PrimiviteVariables", H5T_NATIVE_DOUBLE,
+  const hid_t data = H5Dcreate(group, "PrimiviteVariables", H5T_NATIVE_FLOAT,
                                space, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
 
   const hsize_t slab_shape[2] = {blocksize, 5};
@@ -181,9 +181,9 @@ inline void output_result(const std::vector< DensitySubGrid * > &gridvec,
     const hsize_t offset[2] = {igrid * blocksize, 0};
     H5Sselect_hyperslab(space, H5S_SELECT_SET, offset, nullptr, slab_shape,
                         nullptr);
-    H5Dwrite(data, H5T_NATIVE_DOUBLE, memspace, space, H5P_DEFAULT,
+    H5Dwrite(data, H5T_NATIVE_FLOAT, memspace, space, H5P_DEFAULT,
              gridvec[igrid]->get_primitives());
-    output_size += blocksize * 5 * sizeof(double);
+    output_size += blocksize * 5 * sizeof(float);
   }
 
   H5Sclose(memspace);

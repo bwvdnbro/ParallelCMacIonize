@@ -42,8 +42,8 @@ public:
    * velocity - m s^-1, pressure - kg m^-1 s^-2).
    */
   inline static void get_right_state_gradient_variables(const int i,
-                                                        const double WL[5],
-                                                        double WR[5]) {
+                                                        const float WL[5],
+                                                        float WR[5]) {
 
     WR[0] = WL[0];
     WR[1] = WL[1];
@@ -67,10 +67,10 @@ public:
    * kg m^-4, velocity - s^-1, pressure - kg m^-2 s^-2).
    */
   inline static void get_right_state_flux_variables(const int i,
-                                                    const double WL[5],
-                                                    const double dWL[15],
-                                                    double WR[5],
-                                                    double dWR[15]) {
+                                                    const float WL[5],
+                                                    const float dWL[15],
+                                                    float WR[5],
+                                                    float dWR[15]) {
 
     WR[0] = WL[0];
     WR[1] = WL[1];
@@ -78,6 +78,7 @@ public:
     WR[3] = WL[3];
     WR[4] = WL[4];
 
+#ifdef SECOND_ORDER
     dWR[0] = dWL[0];
     dWR[1] = dWL[1];
     dWR[2] = dWL[2];
@@ -93,6 +94,7 @@ public:
     dWR[12] = dWL[12];
     dWR[13] = dWL[13];
     dWR[14] = dWL[14];
+#endif
   }
 };
 
@@ -112,8 +114,8 @@ public:
    * velocity - m s^-1, pressure - kg m^-1 s^-2).
    */
   inline static void get_right_state_gradient_variables(const int i,
-                                                        const double WL[5],
-                                                        double WR[5]) {
+                                                        const float WL[5],
+                                                        float WR[5]) {
 
     // indices in a frame where the x-axis is aligned with the interface normal
     const int idx = i;
@@ -144,19 +146,21 @@ public:
    * kg m^-4, velocity - s^-1, pressure - kg m^-2 s^-2).
    */
   inline static void get_right_state_flux_variables(const int i,
-                                                    const double WL[5],
-                                                    const double dWL[15],
-                                                    double WR[5],
-                                                    double dWR[15]) {
+                                                    const float WL[5],
+                                                    const float dWL[15],
+                                                    float WR[5],
+                                                    float dWR[15]) {
 
     // indices in a frame where the x-axis is aligned with the interface normal
     const int idx = i;
     const int idy = (i + 1) % 3;
     const int idz = (i + 2) % 3;
+#ifdef SECOND_ORDER
     // offsets of the velocity variables in the same reference frame
     const int vdx = 3 * idx + 3;
     const int vdy = 3 * idy + 3;
     const int vdz = 3 * idz + 3;
+#endif
 
     // we need to reverse the sign for the velocity component aligned with the
     // interface normal: idx
@@ -166,6 +170,7 @@ public:
     WR[idz + 1] = WL[idz + 1];
     WR[4] = WL[4];
 
+#ifdef SECOND_ORDER
     // we need to invert all gradients that are aligned with the interface
     // normal: idx
     // however, we do not invert the gradient of the velocity aligned with the
@@ -185,6 +190,7 @@ public:
     dWR[idx + 12] = -dWL[idx + 12];
     dWR[idy + 12] = dWL[idy + 12];
     dWR[idz + 12] = dWL[idz + 12];
+#endif
   }
 };
 

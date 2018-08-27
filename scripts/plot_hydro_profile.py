@@ -47,14 +47,14 @@ args = argparser.parse_args()
 ncell = args.ncell_x * args.ncell_y * args.ncell_z
 
 # memory-map the binary output file to a numpy array
-data = np.memmap("hydro_result.dat", dtype = np.float64,
-                 shape = (ncell, 10), mode = 'r')
-pos = data[:, 0:3]
-rho = data[:, 5]
+data = np.memmap("hydro_result.dat", dtype = np.dtype("3f8, 2f8, 5f4"),
+                 shape = (ncell,), mode = 'r')
+pos = np.array([d[0][0] for d in data])
+rho = np.array([d[2][0] for d in data])
 
 # plot the means and scatter regions
 pl.gca().axvline(x = 0., linestyle = "--", linewidth = 0.8, color = "k")
-pl.plot(pos[:,0], rho, ".")
+pl.plot(pos, rho, ".")
 # set axis labels
 pl.xlabel("position (m))")
 pl.ylabel("density (kg m^-3)")

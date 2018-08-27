@@ -39,7 +39,7 @@ public:
    * pressure - kg m^-1 s^-2).
    */
   inline static void set_primitive_variables(const double midpoint[3],
-                                             double W[5]) {
+                                             float W[5]) {
 
     if (midpoint[0] < 0.) {
       W[0] = 1.;
