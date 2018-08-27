@@ -47,8 +47,8 @@
 #define TASK_PLOT
 
 /*! @brief Output. Select at least one. */
-#define MM_FILE
-//#define HDF5_FILE
+//#define MM_FILE
+#define HDF5_FILE
 
 #include "Assert.hpp"
 #include "Atomic.hpp"
