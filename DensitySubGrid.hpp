@@ -554,8 +554,10 @@ public:
     _conserved_variables = new double[tot_ncell * 5];
     _delta_conserved_variables = new double[tot_ncell * 5];
     _primitive_variables = new double[tot_ncell * 5];
+#ifdef SECOND_ORDER
     _primitive_variable_gradients = new double[tot_ncell * 15];
     _primitive_variable_limiters = new double[tot_ncell * 10];
+#endif
 
     for (int i = 0; i < tot_ncell; ++i) {
       _conserved_variables[5 * i] = 0.;
@@ -576,6 +578,7 @@ public:
       _primitive_variables[5 * i + 3] = 0.;
       _primitive_variables[5 * i + 4] = 0.;
 
+#ifdef SECOND_ORDER
       _primitive_variable_gradients[15 * i] = 0.;
       _primitive_variable_gradients[15 * i + 1] = 0.;
       _primitive_variable_gradients[15 * i + 2] = 0.;
@@ -602,6 +605,7 @@ public:
       _primitive_variable_limiters[10 * i + 7] = -DBL_MAX;
       _primitive_variable_limiters[10 * i + 8] = DBL_MAX;
       _primitive_variable_limiters[10 * i + 9] = -DBL_MAX;
+#endif // SECOND_ORDER
     }
 #endif // NO_HYDRO
   }
@@ -653,8 +657,10 @@ public:
     _conserved_variables = new double[tot_ncell * 5];
     _delta_conserved_variables = new double[tot_ncell * 5];
     _primitive_variables = new double[tot_ncell * 5];
+#ifdef SECOND_ORDER
     _primitive_variable_gradients = new double[tot_ncell * 15];
     _primitive_variable_limiters = new double[10 * tot_ncell];
+#endif
 
     for (int i = 0; i < tot_ncell; ++i) {
       _conserved_variables[5 * i] = original._conserved_variables[5 * i];
@@ -688,6 +694,7 @@ public:
       _primitive_variables[5 * i + 4] =
           original._primitive_variables[5 * i + 4];
 
+#ifdef SECOND_ORDER
       _primitive_variable_gradients[15 * i] =
           original._primitive_variable_gradients[15 * i];
       _primitive_variable_gradients[15 * i + 1] =
@@ -739,6 +746,7 @@ public:
           original._primitive_variable_limiters[10 * i + 8];
       _primitive_variable_limiters[10 * i + 9] =
           original._primitive_variable_limiters[10 * i + 9];
+#endif // SECOND_ORDER
     }
 #endif // NO_HYDRO
   }
@@ -756,8 +764,10 @@ public:
     delete[] _conserved_variables;
     delete[] _delta_conserved_variables;
     delete[] _primitive_variables;
+#ifdef SECOND_ORDER
     delete[] _primitive_variable_gradients;
     delete[] _primitive_variable_limiters;
+#endif
 #endif // NO_HYDRO
   }
 
@@ -1945,6 +1955,7 @@ public:
       _delta_conserved_variables[5 * i + 3] = 0.;
       _delta_conserved_variables[5 * i + 4] = 0.;
 
+#ifdef SECOND_ORDER
       _primitive_variable_gradients[15 * i] = 0.;
       _primitive_variable_gradients[15 * i + 1] = 0.;
       _primitive_variable_gradients[15 * i + 2] = 0.;
@@ -1971,6 +1982,7 @@ public:
       _primitive_variable_limiters[10 * i + 7] = -DBL_MAX;
       _primitive_variable_limiters[10 * i + 8] = DBL_MAX;
       _primitive_variable_limiters[10 * i + 9] = -DBL_MAX;
+#endif // SECOND_ORDER
     }
   }
 
@@ -1998,12 +2010,14 @@ public:
    */
   inline void predict_primitive_variables(const Hydro &hydro,
                                           const double timestep) {
+#ifdef SECOND_ORDER
     const int tot_num_cells = _number_of_cells[0] * _number_of_cells[3];
     for (int i = 0; i < tot_num_cells; ++i) {
       hydro.predict_primitive_variables(&_primitive_variables[5 * i],
                                         &_primitive_variable_gradients[15 * i],
                                         timestep);
     }
+#endif // SECOND_ORDER
   }
 
   /**
@@ -2012,12 +2026,14 @@ public:
    * @param hydro Hydro instance to use.
    */
   inline void apply_slope_limiter(const Hydro &hydro) {
+#ifdef SECOND_ORDER
     const int tot_num_cells = _number_of_cells[0] * _number_of_cells[3];
     for (int i = 0; i < tot_num_cells; ++i) {
       hydro.apply_slope_limiter(
           &_primitive_variables[5 * i], &_primitive_variable_gradients[15 * i],
           &_primitive_variable_limiters[10 * i], _cell_size);
     }
+#endif // SECOND_ORDER
   }
 
   /**
@@ -2087,14 +2103,19 @@ public:
               ix * _number_of_cells[3] + iy * _number_of_cells[2] + iz;
           const unsigned int index100 =
               (ix + 1) * _number_of_cells[3] + iy * _number_of_cells[2] + iz;
+#ifdef SECOND_ORDER
+          const double *gradL = &_primitive_variable_gradients[15 * index000];
+          const double *gradR = &_primitive_variable_gradients[15 * index100];
+#else
+          const double *gradL = nullptr;
+          const double *gradR = nullptr;
+#endif
           // x direction
-          hydro.do_flux_calculation(
-              0, &_primitive_variables[5 * index000],
-              &_primitive_variable_gradients[15 * index000],
-              &_primitive_variables[5 * index100],
-              &_primitive_variable_gradients[15 * index100], _cell_size[0],
-              _cell_areas[0], &_delta_conserved_variables[5 * index000],
-              &_delta_conserved_variables[5 * index100]);
+          hydro.do_flux_calculation(0, &_primitive_variables[5 * index000],
+                                    gradL, &_primitive_variables[5 * index100],
+                                    gradR, _cell_size[0], _cell_areas[0],
+                                    &_delta_conserved_variables[5 * index000],
+                                    &_delta_conserved_variables[5 * index100]);
         }
       }
     }
@@ -2105,14 +2126,19 @@ public:
               ix * _number_of_cells[3] + iy * _number_of_cells[2] + iz;
           const unsigned int index010 =
               ix * _number_of_cells[3] + (iy + 1) * _number_of_cells[2] + iz;
+#ifdef SECOND_ORDER
+          const double *gradL = &_primitive_variable_gradients[15 * index000];
+          const double *gradR = &_primitive_variable_gradients[15 * index010];
+#else
+          const double *gradL = nullptr;
+          const double *gradR = nullptr;
+#endif
           // y direction
-          hydro.do_flux_calculation(
-              1, &_primitive_variables[5 * index000],
-              &_primitive_variable_gradients[15 * index000],
-              &_primitive_variables[5 * index010],
-              &_primitive_variable_gradients[15 * index010], _cell_size[1],
-              _cell_areas[1], &_delta_conserved_variables[5 * index000],
-              &_delta_conserved_variables[5 * index010]);
+          hydro.do_flux_calculation(1, &_primitive_variables[5 * index000],
+                                    gradL, &_primitive_variables[5 * index010],
+                                    gradR, _cell_size[1], _cell_areas[1],
+                                    &_delta_conserved_variables[5 * index000],
+                                    &_delta_conserved_variables[5 * index010]);
         }
       }
     }
@@ -2123,14 +2149,19 @@ public:
               ix * _number_of_cells[3] + iy * _number_of_cells[2] + iz;
           const unsigned int index001 =
               ix * _number_of_cells[3] + iy * _number_of_cells[2] + iz + 1;
+#ifdef SECOND_ORDER
+          const double *gradL = &_primitive_variable_gradients[15 * index000];
+          const double *gradR = &_primitive_variable_gradients[15 * index001];
+#else
+          const double *gradL = nullptr;
+          const double *gradR = nullptr;
+#endif
           // z direction
-          hydro.do_flux_calculation(
-              2, &_primitive_variables[5 * index000],
-              &_primitive_variable_gradients[15 * index000],
-              &_primitive_variables[5 * index001],
-              &_primitive_variable_gradients[15 * index001], _cell_size[2],
-              _cell_areas[2], &_delta_conserved_variables[5 * index000],
-              &_delta_conserved_variables[5 * index001]);
+          hydro.do_flux_calculation(2, &_primitive_variables[5 * index000],
+                                    gradL, &_primitive_variables[5 * index001],
+                                    gradR, _cell_size[2], _cell_areas[2],
+                                    &_delta_conserved_variables[5 * index000],
+                                    &_delta_conserved_variables[5 * index001]);
         }
       }
     }
@@ -2243,11 +2274,18 @@ public:
             start_index_left + ic * column_increment + ir * row_increment;
         const unsigned int index_right =
             start_index_right + ic * column_increment + ir * row_increment;
+#ifdef SECOND_ORDER
+        const double *gradL =
+            &left_grid->_primitive_variable_gradients[15 * index_left];
+        const double *gradR =
+            &right_grid_primitive_variable_gradients[15 * index_right];
+#else
+        const double *gradL = nullptr;
+        const double *gradR = nullptr;
+#endif
         hydro.do_flux_calculation(
-            i, &left_grid->_primitive_variables[5 * index_left],
-            &left_grid->_primitive_variable_gradients[15 * index_left],
-            &right_grid->_primitive_variables[5 * index_right],
-            &right_grid->_primitive_variable_gradients[15 * index_right], dx, A,
+            i, &left_grid->_primitive_variables[5 * index_left], gradL,
+            &right_grid->_primitive_variables[5 * index_right], gradR, dx, A,
             &left_grid->_delta_conserved_variables[5 * index_left],
             &right_grid->_delta_conserved_variables[5 * index_right]);
       }
@@ -2342,9 +2380,13 @@ public:
       for (unsigned int ir = 0; ir < row_length; ++ir) {
         const unsigned int index_left =
             start_index_left + ic * column_increment + ir * row_increment;
+#ifdef SECOND_ORDER
+        const double *gradL = &_primitive_variable_gradients[15 * index_left];
+#else
+        const double *gradL = nullptr;
+#endif
         hydro.do_ghost_flux_calculation(
-            i, &_primitive_variables[5 * index_left],
-            &_primitive_variable_gradients[15 * index_left], boundary, dx, A,
+            i, &_primitive_variables[5 * index_left], gradL, boundary, dx, A,
             &_delta_conserved_variables[5 * index_left]);
       }
     }
@@ -2358,6 +2400,7 @@ public:
    */
   inline void inner_gradient_sweep(const Hydro &hydro) {
 
+#ifdef SECOND_ORDER
     // we do three separate sweeps: one for every coordinate direction
     for (int ix = 0; ix < _number_of_cells[0] - 1; ++ix) {
       for (int iy = 0; iy < _number_of_cells[1]; ++iy) {
@@ -2413,6 +2456,7 @@ public:
         }
       }
     }
+#endif // SECOND_ORDER
   }
 
   /**
@@ -2425,6 +2469,8 @@ public:
    */
   inline void outer_gradient_sweep(const int direction, const Hydro &hydro,
                                    DensitySubGrid &neighbour) {
+
+#ifdef SECOND_ORDER
     int i;
     unsigned int start_index_left, start_index_right, row_increment, row_length,
         column_increment, column_length;
@@ -2525,6 +2571,7 @@ public:
             &right_grid->_primitive_variable_limiters[10 * index_right]);
       }
     }
+#endif // SECOND_ORDER
   }
 
   /**
@@ -2541,6 +2588,8 @@ public:
   inline void outer_ghost_gradient_sweep(const int direction,
                                          const Hydro &hydro,
                                          const _boundary_ &boundary) {
+
+#ifdef SECOND_ORDER
     int i;
     unsigned int start_index_left, row_increment, row_length, column_increment,
         column_length;
@@ -2624,6 +2673,7 @@ public:
             &left_grid->_primitive_variable_limiters[10 * index_left]);
       }
     }
+#endif // SECOND_ORDER
   }
 
   /**

@@ -156,6 +156,7 @@ public:
                                   const double A, double dQL[5],
                                   double dQR[5]) const {
 
+#ifdef SECOND_ORDER
     const double WLext[5] = {
         WL[0] + 0.5 * dWL[i] * dx, WL[1] + 0.5 * dWL[3 + i] * dx,
         WL[2] + 0.5 * dWL[6 + i] * dx, WL[3] + 0.5 * dWL[9 + i] * dx,
@@ -164,6 +165,10 @@ public:
         WR[0] - 0.5 * dWR[i] * dx, WR[1] - 0.5 * dWR[3 + i] * dx,
         WR[2] - 0.5 * dWR[6 + i] * dx, WR[3] - 0.5 * dWR[9 + i] * dx,
         WR[4] - 0.5 * dWR[12 + i] * dx};
+#else
+    const double *WLext = WL;
+    const double *WRext = WR;
+#endif
 
     double mflux = 0.;
     double pflux[3] = {0., 0., 0.};
@@ -217,6 +222,7 @@ public:
     double WR[5], dWR[15];
     boundary.get_right_state_flux_variables(i, WL, dWL, WR, dWR);
 
+#ifdef SECOND_ORDER
     const double WLext[5] = {
         WL[0] + 0.5 * dWL[i] * dx, WL[1] + 0.5 * dWL[3 + i] * dx,
         WL[2] + 0.5 * dWL[6 + i] * dx, WL[3] + 0.5 * dWL[9 + i] * dx,
@@ -225,6 +231,10 @@ public:
         WR[0] - 0.5 * dWR[i] * dx, WR[1] - 0.5 * dWR[3 + i] * dx,
         WR[2] - 0.5 * dWR[6 + i] * dx, WR[3] - 0.5 * dWR[9 + i] * dx,
         WR[4] - 0.5 * dWR[12 + i] * dx};
+#else
+    const double *WLext = WL;
+    const double *WRext = WR;
+#endif
 
     double mflux = 0.;
     double pflux[3] = {0., 0., 0.};

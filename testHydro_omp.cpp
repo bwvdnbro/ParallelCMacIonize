@@ -38,7 +38,7 @@
 #define ASCII_OUTPUT
 
 /*! @brief Second order hydro scheme. */
-#define SECOND_ORDER
+//#define SECOND_ORDER
 
 /*! @brief Uncomment this to enable run time assertions. */
 //#define DO_ASSERTS
