@@ -34,9 +34,11 @@
 
 #include <cmath>
 #include <fstream>
+#include <mpi.h>
 #include <omp.h>
 #include <sstream>
 #include <sys/resource.h>
+#include <vector>
 
 /*! @brief Output log level. The higher the value, the more stuff is printed to
  *  the stderr. Comment to disable logging altogether. */
@@ -311,17 +313,23 @@ int main(int argc, char **argv) {
           scatter_weight * source_photon_weight;
 #endif
 
+      // this is the fixed cross section we use for the moment
+      photon.set_photoionization_cross_section(1.);
+      photon.set_target_optical_depth(0.);
+
       // initial direction: isotropic distribution
       get_random_direction(random_generator[thread_id], photon.get_direction());
 
+      grid.compute_optical_depth(photon, TRAVELDIRECTION_INSIDE);
+      const double tau0 = photon.get_target_optical_depth();
+      photon.set_position(0., 0., 0.);
+
+      double weight = (1. - std::exp(-tau0));
+
       // target optical depth (exponential distribution)
-      photon.set_target_optical_depth(
-          -std::log(random_generator[thread_id].get_uniform_random_double()));
-
-      // this is the fixed cross section we use for the moment
-      photon.set_photoionization_cross_section(1.);
-
-      double weight = 1.;
+      photon.set_target_optical_depth(-std::log(
+          1. -
+          random_generator[thread_id].get_uniform_random_double() * weight));
       while (grid.propagate(photon, TRAVELDIRECTION_INSIDE) ==
              TRAVELDIRECTION_INSIDE) {
 
@@ -329,6 +337,7 @@ int main(int argc, char **argv) {
         // if the photon packet is still inside, we add its contribution to the
         // image using peel off
         photon.set_direction(0., 0., 1.);
+        photon.set_target_optical_depth(0.);
         grid.compute_optical_depth(photon, TRAVELDIRECTION_INSIDE);
         const double *position = photon.get_position();
         const unsigned int ix = 0.5 * (position[0] + 1.) * NPIXELX;
