@@ -58,6 +58,9 @@
 /*! @brief Number of vertical pixels in the result image. */
 #define NPIXELY 101
 
+/*! @brief Forced first scattering. */
+//#define FORCED_SCATTERING
+
 /**
  * @brief Write a message to the log with the given log level.
  *
@@ -235,7 +238,7 @@ int main(int argc, char **argv) {
   set_number_of_threads(num_threads_request, num_threads);
 
   const double box[6] = {-1., -1., -1., 2., 2., 2.};
-  const int ncell[3] = {64, 64, 64};
+  const int ncell[3] = {128, 128, 128};
   DensitySubGrid grid(box, ncell);
   const unsigned int num_photon = 1e8;
 
@@ -248,10 +251,10 @@ int main(int argc, char **argv) {
 
     if (cell_radius < 1.) {
       grid.set_number_density(icell, 1.);
-      grid.set_neutral_fraction(icell, 0.1);
+      grid.set_neutral_fraction(icell, 0.01);
     } else {
       grid.set_number_density(icell, 0.);
-      grid.set_neutral_fraction(icell, 0.1);
+      grid.set_neutral_fraction(icell, 0.01);
     }
   }
 
@@ -315,21 +318,27 @@ int main(int argc, char **argv) {
 
       // this is the fixed cross section we use for the moment
       photon.set_photoionization_cross_section(1.);
-      photon.set_target_optical_depth(0.);
 
       // initial direction: isotropic distribution
       get_random_direction(random_generator[thread_id], photon.get_direction());
 
+#ifdef FORCED_SCATTERING
+      photon.set_target_optical_depth(0.);
       grid.compute_optical_depth(photon, TRAVELDIRECTION_INSIDE);
       const double tau0 = photon.get_target_optical_depth();
       photon.set_position(0., 0., 0.);
-
       double weight = (1. - std::exp(-tau0));
 
       // target optical depth (exponential distribution)
       photon.set_target_optical_depth(-std::log(
           1. -
           random_generator[thread_id].get_uniform_random_double() * weight));
+#else
+      double weight = 1.;
+      photon.set_target_optical_depth(
+          -std::log(random_generator[thread_id].get_uniform_random_double()));
+#endif
+
       while (grid.propagate(photon, TRAVELDIRECTION_INSIDE) ==
              TRAVELDIRECTION_INSIDE) {
 

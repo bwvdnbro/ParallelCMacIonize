@@ -616,8 +616,9 @@ public:
    * @param original DensitySubGrid to copy.
    */
   inline DensitySubGrid(const DensitySubGrid &original)
-      : _computational_cost(0),
-        _anchor{original._anchor[0], original._anchor[1], original._anchor[2]},
+      : _computational_cost(0), _anchor{original._anchor[0],
+                                        original._anchor[1],
+                                        original._anchor[2]},
         _cell_size{original._cell_size[0], original._cell_size[1],
                    original._cell_size[2]},
         _inv_cell_size{original._inv_cell_size[0], original._inv_cell_size[1],
@@ -926,9 +927,9 @@ public:
    * @return Size of a DensitySubGrid that is communicated over MPI.
    */
   inline int get_MPI_size() const {
-    return DENSITYSUBGRID_FIXED_MPI_SIZE +
-           DENSITYSUBGRID_ELEMENT_SIZE * _number_of_cells[0] *
-               _number_of_cells[3];
+    return DENSITYSUBGRID_FIXED_MPI_SIZE + DENSITYSUBGRID_ELEMENT_SIZE *
+                                               _number_of_cells[0] *
+                                               _number_of_cells[3];
   }
 
   /**
@@ -937,9 +938,9 @@ public:
    * @return Size of a DensitySubGrid that is stored in memory (in bytes).
    */
   inline size_t get_memory_size() const {
-    return DENSITYSUBGRID_FIXED_SIZE +
-           DENSITYSUBGRID_ELEMENT_SIZE * _number_of_cells[0] *
-               _number_of_cells[3];
+    return DENSITYSUBGRID_FIXED_SIZE + DENSITYSUBGRID_ELEMENT_SIZE *
+                                           _number_of_cells[0] *
+                                           _number_of_cells[3];
   }
 
 #ifdef WITH_MPI
@@ -1199,8 +1200,8 @@ public:
     double tau_done = 0.;
     const double tau_target = photon.get_target_optical_depth();
 
-    myassert(tau_done < tau_target, "tau_done: " << tau_done
-                                                 << ", target: " << tau_target);
+    myassert(tau_done < tau_target,
+             "tau_done: " << tau_done << ", target: " << tau_target);
 
     const double cross_section = photon.get_photoionization_cross_section();
     const double photon_weight = photon.get_weight();
@@ -1352,8 +1353,8 @@ public:
     double tau_done = 0.;
     const double tau_target = photon.get_target_optical_depth();
 
-    myassert(tau_done < tau_target, "tau_done: " << tau_done
-                                                 << ", target: " << tau_target);
+    myassert(tau_done < tau_target,
+             "tau_done: " << tau_done << ", target: " << tau_target);
 
     const double cross_section = photon.get_photoionization_cross_section();
     // get the indices of the first cell on the photon's path

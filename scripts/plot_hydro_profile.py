@@ -27,6 +27,7 @@
 # import modules
 import numpy as np
 import matplotlib
+
 matplotlib.use("Agg")
 import pylab as pl
 import scipy.stats as stats
@@ -34,9 +35,9 @@ import argparse
 
 argparser = argparse.ArgumentParser("Plot a hydro snapshot.")
 
-argparser.add_argument("-x", "--ncell_x", action = "store", type = int)
-argparser.add_argument("-y", "--ncell_y", action = "store", type = int)
-argparser.add_argument("-z", "--ncell_z", action = "store", type = int)
+argparser.add_argument("-x", "--ncell_x", action="store", type=int)
+argparser.add_argument("-y", "--ncell_y", action="store", type=int)
+argparser.add_argument("-z", "--ncell_z", action="store", type=int)
 
 args = argparser.parse_args()
 
@@ -47,13 +48,17 @@ args = argparser.parse_args()
 ncell = args.ncell_x * args.ncell_y * args.ncell_z
 
 # memory-map the binary output file to a numpy array
-data = np.memmap("hydro_result.dat", dtype = np.dtype("3f8, 2f8, 5f4"),
-                 shape = (ncell,), mode = 'r')
+data = np.memmap(
+    "hydro_result.dat",
+    dtype=np.dtype("3f8, 2f8, 5f4"),
+    shape=(ncell,),
+    mode="r",
+)
 pos = np.array([d[0][0] for d in data])
 rho = np.array([d[2][0] for d in data])
 
 # plot the means and scatter regions
-pl.gca().axvline(x = 0., linestyle = "--", linewidth = 0.8, color = "k")
+pl.gca().axvline(x=0.0, linestyle="--", linewidth=0.8, color="k")
 pl.plot(pos, rho, ".")
 # set axis labels
 pl.xlabel("position (m))")

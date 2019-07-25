@@ -47,6 +47,11 @@
 
 // Defines: we do these first, as some includes depend on them
 
+/*! @brief Number of horizontal pixels in the result image. */
+#define NPIXELX 101
+/*! @brief Number of vertical pixels in the result image. */
+#define NPIXELY 101
+
 /*! @brief Output log level. The higher the value, the more stuff is printed to
  *  the stderr. Comment to disable logging altogether. */
 #define LOG_OUTPUT 1
@@ -586,7 +591,9 @@ inline static void fill_buffer(PhotonBuffer &buffer,
         -std::log(random_generator.get_uniform_random_double()));
 
     // this is the fixed cross section we use for the moment
-    photon.set_photoionization_cross_section(6.3e-22);
+    photon.set_photoionization_cross_section(1.);
+
+    photon.set_type(PHOTONPACKETTYPE_DIRECT);
 
     // make sure the photon is moving in *a* direction
     myassert(photon.get_direction()[0] != 0. ||
@@ -607,7 +614,8 @@ inline static void fill_buffer(PhotonBuffer &buffer,
 inline static void do_photon_traversal(PhotonBuffer &input_buffer,
                                        DensitySubGrid &subgrid,
                                        PhotonBuffer *output_buffers,
-                                       bool *output_buffer_flags) {
+                                       bool *output_buffer_flags,
+                                       double *image) {
 
   // make sure all output buffers are empty initially
   for (int i = 0; i < TRAVELDIRECTION_NUMBER; ++i) {
@@ -628,7 +636,13 @@ inline static void do_photon_traversal(PhotonBuffer &input_buffer,
              "size: " << input_buffer.size());
 
     // traverse the photon through the active subgrid
-    const int result = subgrid.interact(photon, input_buffer.get_direction());
+    int result;
+    if (photon.get_type() == PHOTONPACKETTYPE_DIRECT) {
+      result = subgrid.propagate(photon, input_buffer.get_direction());
+    } else {
+      result =
+          subgrid.compute_optical_depth(photon, input_buffer.get_direction());
+    }
 
     // check that the photon ended up in a valid output buffer
     myassert(result >= 0 && result < TRAVELDIRECTION_NUMBER, "fail");
@@ -661,6 +675,15 @@ inline static void do_photon_traversal(PhotonBuffer &input_buffer,
       // check that the output buffer did not overflow
       myassert(output_buffer.size() <= PHOTONBUFFER_SIZE,
                "output buffer size: " << output_buffer.size());
+    } else {
+      if (photon.get_type() == PHOTONPACKETTYPE_PEELOFF) {
+        // record photon packet
+        const double *position = photon.get_position();
+        const unsigned int ix = 0.5 * (position[0] + 1.) * NPIXELX;
+        const unsigned int iy = 0.5 * (position[1] + 1.) * NPIXELY;
+        image[ix * NPIXELY + iy] +=
+            photon.get_weight() * std::exp(-photon.get_target_optical_depth());
+      }
     }
   }
 }
@@ -690,6 +713,7 @@ inline static void do_reemission(PhotonBuffer &buffer,
       // reset the target optical depth
       photon.set_target_optical_depth(
           -std::log(random_generator.get_uniform_random_double()));
+      photon.set_weight(photon.get_weight() * 0.25 * M_1_PI);
       // NOTE: we can never overwrite a photon that should be preserved (we
       // either overwrite the photon itself, or a photon that was not reemitted)
       buffer[index] = photon;
@@ -1154,7 +1178,7 @@ inline void execute_photon_traversal_task(
     const double reemission_probability,
     Atomic< unsigned int > &num_photon_done, Atomic< unsigned int > &num_empty,
     Atomic< unsigned int > &num_active_buffers, unsigned int &num_tasks_to_add,
-    unsigned int *tasks_to_add, int *queues_to_add) {
+    unsigned int *tasks_to_add, int *queues_to_add, double *image) {
 
   // log the start of the task
   task.start(thread_id);
@@ -1194,7 +1218,8 @@ inline void execute_photon_traversal_task(
   unsigned int num_photon_done_now = buffer.size();
 
   // now do the actual photon traversal
-  do_photon_traversal(buffer, this_grid, local_buffers, local_buffer_flags);
+  do_photon_traversal(buffer, this_grid, local_buffers, local_buffer_flags,
+                      image);
 
   // add none empty buffers to the appropriate queues
   unsigned char largest_index = TRAVELDIRECTION_NUMBER;
@@ -1351,7 +1376,9 @@ inline void execute_photon_reemit_task(
     RandomGenerator &random_generator, const double reemission_probability,
     Atomic< unsigned int > &num_photon_done,
     std::vector< DensitySubGrid * > &gridvec, unsigned int &num_tasks_to_add,
-    unsigned int *tasks_to_add, int *queues_to_add) {
+    unsigned int *tasks_to_add, int *queues_to_add,
+    Atomic< unsigned int > &num_active_buffers,
+    Atomic< unsigned int > &num_photon_to_do) {
 
   // log the start of the task
   task.start(thread_id);
@@ -1372,23 +1399,60 @@ inline void execute_photon_reemit_task(
   // ...and add it to the global count
   num_photon_done.pre_add(num_photon_done_now);
 
-  // the reemitted photon packets are ready to be propagated: create
-  // a new propagation task
   DensitySubGrid &subgrid = *gridvec[task.get_subgrid()];
-  const size_t task_index = tasks.get_free_element();
-  Task &new_task = tasks[task_index];
-  new_task.set_type(TASKTYPE_PHOTON_TRAVERSAL);
-  new_task.set_subgrid(task.get_subgrid());
-  new_task.set_buffer(current_buffer_index);
+  {
+    // the reemitted photon packets are ready to be propagated: create
+    // a new propagation task
+    const size_t task_index = tasks.get_free_element();
+    Task &new_task = tasks[task_index];
+    new_task.set_type(TASKTYPE_PHOTON_TRAVERSAL);
+    new_task.set_subgrid(task.get_subgrid());
+    new_task.set_buffer(current_buffer_index);
 
-  // add dependency
-  new_task.set_dependency(subgrid.get_dependency());
+    // add dependency
+    new_task.set_dependency(subgrid.get_dependency());
 
-  // add it to the queue of the corresponding thread
-  queues_to_add[num_tasks_to_add] =
-      gridvec[buffer.get_subgrid_index()]->get_owning_thread();
-  tasks_to_add[num_tasks_to_add] = task_index;
-  ++num_tasks_to_add;
+    // add it to the queue of the corresponding thread
+    queues_to_add[num_tasks_to_add] =
+        gridvec[buffer.get_subgrid_index()]->get_owning_thread();
+    tasks_to_add[num_tasks_to_add] = task_index;
+    ++num_tasks_to_add;
+  }
+
+  // create peel off photons and a corresponding task
+  {
+    const uint_fast32_t new_buffer_index = new_buffers.get_free_buffer();
+    PhotonBuffer &new_buffer = new_buffers[new_buffer_index];
+    new_buffer.set_subgrid_index(task.get_subgrid());
+    new_buffer.set_direction(TRAVELDIRECTION_INSIDE);
+
+    num_photon_to_do.pre_add(buffer.size());
+    new_buffer.grow(buffer.size());
+    for (uint_fast32_t i = 0; i < buffer.size(); ++i) {
+      new_buffer[i] = buffer[i];
+      new_buffer[i].set_direction(0., 0., 1.);
+      new_buffer[i].set_type(PHOTONPACKETTYPE_PEELOFF);
+      new_buffer[i].set_target_optical_depth(0.);
+    }
+
+    // a new active buffer was created
+    num_active_buffers.pre_increment();
+
+    const size_t task_index = tasks.get_free_element();
+    Task &new_task = tasks[task_index];
+    new_task.set_type(TASKTYPE_PHOTON_TRAVERSAL);
+    new_task.set_subgrid(task.get_subgrid());
+    new_task.set_buffer(new_buffer_index);
+
+    // add dependency
+    new_task.set_dependency(subgrid.get_dependency());
+
+    // add it to the queue of the corresponding thread
+    queues_to_add[num_tasks_to_add] =
+        gridvec[buffer.get_subgrid_index()]->get_owning_thread();
+    tasks_to_add[num_tasks_to_add] = task_index;
+    ++num_tasks_to_add;
+  }
 
   // log the end time of the task
   task.stop();
@@ -1435,7 +1499,8 @@ inline void execute_task(
     Atomic< unsigned int > &num_photon_done, Atomic< unsigned int > &num_empty,
     Atomic< unsigned int > &num_active_buffers, unsigned int &num_tasks_to_add,
     unsigned int *tasks_to_add, int *queues_to_add,
-    const std::vector< Source * > &sources) {
+    const std::vector< Source * > &sources, double *image,
+    Atomic< unsigned int > &num_photon_to_do) {
 
   Task &task = tasks[task_index];
 
@@ -1461,17 +1526,17 @@ inline void execute_task(
         task, thread_id, tasks, new_queues, general_queue, new_buffers, gridvec,
         local_buffers, local_buffer_flags, reemission_probability,
         num_photon_done, num_empty, num_active_buffers, num_tasks_to_add,
-        tasks_to_add, queues_to_add);
+        tasks_to_add, queues_to_add, image);
     break;
 
   case TASKTYPE_PHOTON_REEMIT:
 
     /// reemit absorbed photon packets
 
-    execute_photon_reemit_task(task, thread_id, tasks, new_queues, new_buffers,
-                               random_generator, reemission_probability,
-                               num_photon_done, gridvec, num_tasks_to_add,
-                               tasks_to_add, queues_to_add);
+    execute_photon_reemit_task(
+        task, thread_id, tasks, new_queues, new_buffers, random_generator,
+        reemission_probability, num_photon_done, gridvec, num_tasks_to_add,
+        tasks_to_add, queues_to_add, num_active_buffers, num_photon_to_do);
     break;
 
   default:
@@ -1878,59 +1943,24 @@ int main(int argc, char **argv) {
 
   memory_tracking_log_size(grid_memory.value());
 
-  if (random_density) {
-    // generate random k-modes for the random density distribution
-    const unsigned int nk = 10;
-    std::vector< double > k(3 * nk);
-    std::vector< double > phase(3 * nk);
-    for (unsigned int i = 0; i < nk; ++i) {
-      const double u[4] = {random_generator[0].get_uniform_random_double(),
-                           random_generator[0].get_uniform_random_double(),
-                           random_generator[0].get_uniform_random_double(),
-                           random_generator[0].get_uniform_random_double()};
-
-      const double kx =
-          std::sqrt(-2. * std::log(u[0])) * std::cos(2. * M_PI * u[1]);
-      const double ky =
-          std::sqrt(-2. * std::log(u[0])) * std::sin(2. * M_PI * u[1]);
-      const double kz =
-          std::sqrt(-2. * std::log(u[2])) * std::cos(2. * M_PI * u[3]);
-
-      k[3 * i] = 4. * M_PI * kx / box[3];
-      k[3 * i + 1] = 4. * M_PI * ky / box[4];
-      k[3 * i + 2] = 4. * M_PI * kz / box[5];
-
-      phase[3 * i] =
-          2. * M_PI * random_generator[0].get_uniform_random_double();
-      phase[3 * i + 1] =
-          2. * M_PI * random_generator[0].get_uniform_random_double();
-      phase[3 * i + 2] =
-          2. * M_PI * random_generator[0].get_uniform_random_double();
-    }
-
 // initialize the density field
 #pragma omp parallel for default(shared)
-    for (unsigned int igrid = 0; igrid < tot_num_subgrid; ++igrid) {
-      const unsigned int ncell = gridvec[igrid]->get_number_of_cells();
-      for (unsigned int icell = 0; icell < ncell; ++icell) {
-        double midpoint[3];
-        gridvec[igrid]->get_cell_midpoint(icell, midpoint);
+  for (unsigned int igrid = 0; igrid < tot_num_subgrid; ++igrid) {
+    const unsigned int ncell = gridvec[igrid]->get_number_of_cells();
+    for (unsigned int icell = 0; icell < ncell; ++icell) {
+      double midpoint[3];
+      gridvec[igrid]->get_cell_midpoint(icell, midpoint);
 
-        // get the density
-        double ndens = 0.;
-        for (unsigned int ik = 0; ik < nk; ++ik) {
-          const double kx = k[3 * ik];
-          const double ky = k[3 * ik + 1];
-          const double kz = k[3 * ik + 2];
+      const double cell_radius =
+          std::sqrt(midpoint[0] * midpoint[0] + midpoint[1] * midpoint[1] +
+                    midpoint[2] * midpoint[2]);
 
-          ndens += 1.e8 * (std::cos(kx * midpoint[0] + phase[3 * ik]) *
-                               std::cos(ky * midpoint[1] + phase[3 * ik + 1]) *
-                               std::cos(kz * midpoint[2] + phase[3 * ik + 2]) +
-                           1.);
-        }
-        ndens /= nk;
-
-        gridvec[igrid]->set_number_density(icell, ndens);
+      if (cell_radius < 1.) {
+        gridvec[igrid]->set_number_density(icell, 1.);
+        gridvec[igrid]->set_neutral_fraction(icell, 0.01);
+      } else {
+        gridvec[igrid]->set_number_density(icell, 0.);
+        gridvec[igrid]->set_neutral_fraction(icell, 0.01);
       }
     }
   }
@@ -2021,79 +2051,11 @@ int main(int argc, char **argv) {
   // Initialize the cost vector
   /////////////////////////////
 
-  // we need 2 cost vectors:
-  //  - an actual computational cost vector used for shared memory balancing
-  std::vector< unsigned long > initial_cost_vector(tot_num_subgrid, 0);
+  // we need 1 cost vector:
   //  - a photon cost vector that is a more stable reference for the distributed
   //    memory decomposition
   std::vector< unsigned int > initial_photon_cost(tot_num_subgrid, 0);
-
-  logmessage(
-      "Running low resolution simulation to get initial subgrid costs...", 0);
-  // we need a good cost estimate for each subgrid to load balance across
-  // nodes
-  // to obtain this, we run a low resolution Monte Carlo simulation on the
-  // grid of subgrids (with each subgrid acting as a single cell)
-  CoarseDensityGrid coarse_grid(box, num_subgrid);
-  // run 10 photon buffers
-  RandomGenerator coarse_rg(42);
-  for (unsigned int iloop = 0; iloop < number_of_iterations; ++iloop) {
-    for (unsigned int i = 0; i < 10; ++i) {
-      for (unsigned int isrc = 0; isrc < sources.size(); ++isrc) {
-        PhotonBuffer buffer;
-        fill_buffer(buffer, PHOTONBUFFER_SIZE, coarse_rg, 0, *sources[isrc]);
-        // now loop over the buffer photons and traverse them one by one
-        for (unsigned int j = 0; j < buffer.size(); ++j) {
-
-          // active photon
-          Photon &photon = buffer[j];
-
-          // traverse the photon through the active subgrid
-          coarse_grid.interact(photon);
-        }
-      }
-    }
-
-    // get the maximal intensity
-    double maxintensity = 0.;
-    for (int ix = 0; ix < num_subgrid[0]; ++ix) {
-      for (int iy = 0; iy < num_subgrid[1]; ++iy) {
-        for (int iz = 0; iz < num_subgrid[2]; ++iz) {
-          maxintensity = std::max(
-              maxintensity, coarse_grid.get_intensity_integral(ix, iy, iz));
-        }
-      }
-    }
-
-    // now set the subgrid cost based on the intensity counters
-    for (int ix = 0; ix < num_subgrid[0]; ++ix) {
-      for (int iy = 0; iy < num_subgrid[1]; ++iy) {
-        for (int iz = 0; iz < num_subgrid[2]; ++iz) {
-          const unsigned int igrid =
-              ix * num_subgrid[1] * num_subgrid[2] + iy * num_subgrid[2] + iz;
-          const double intensity =
-              coarse_grid.get_intensity_integral(ix, iy, iz);
-          // pro tip: although it is nowhere explicitly stated, it turns out
-          // that metis vertex weight values are only enforced properly if they
-          // are small enough. I suspect that under the hood Metis sums the
-          // weights for each partition, and if these sums cause overflows,
-          // weird partitions are produced. A maximum weight value of 0xffff
-          // seems to produce nice result.
-          // Similar problems were observed when CPU cycles were used as weight,
-          // because again the weights are too large.
-          const unsigned long cost = 0xffff * (intensity / maxintensity);
-          initial_photon_cost[igrid] += cost;
-        }
-      }
-    }
-
-    coarse_grid.compute_neutral_fraction(
-        total_luminosity, 10 * sources.size() * PHOTONBUFFER_SIZE);
-  }
-
-  std::fill(initial_cost_vector.begin(), initial_cost_vector.end(), 1);
-
-  logmessage("Done.", 0);
+  initial_photon_cost[sources[0]->get_original_subgrid_index()] = 5;
 
   /////////////////////////////
 
@@ -2217,6 +2179,13 @@ int main(int argc, char **argv) {
     cpucycle_tick(iteration_start);
     MCtimer.start();
 
+    double *image = new double[NPIXELX * NPIXELY];
+    for (uint_fast32_t ix = 0; ix < NPIXELX; ++ix) {
+      for (uint_fast32_t iy = 0; iy < NPIXELY; ++iy) {
+        image[ix * NPIXELY + iy] = 0.;
+      }
+    }
+
     // STEP 0: log output
     logmessage("Loop " << iloop + 1, 0);
 
@@ -2228,6 +2197,7 @@ int main(int argc, char **argv) {
     //  - number of photon packets that has left the system, either through
     //    absorption or by crossing a simulation box wall
     unsigned int num_photon_done = 0;
+    Atomic< unsigned int > num_photon_to_do(num_photon);
     bool global_run_flag = true;
     // local control variables
     const unsigned int num_empty_target =
@@ -2283,6 +2253,12 @@ int main(int argc, char **argv) {
         local_buffers[i].reset();
         local_buffer_flags[i] = true;
       }
+      double *local_image = new double[NPIXELX * NPIXELY];
+      for (uint_fast32_t ix = 0; ix < NPIXELX; ++ix) {
+        for (uint_fast32_t iy = 0; iy < NPIXELY; ++iy) {
+          local_image[ix * NPIXELY + iy] = 0.;
+        }
+      }
 
       // this loop is repeated until all local photons have been propagated
       // note that this condition automatically covers the condition
@@ -2335,7 +2311,8 @@ int main(int argc, char **argv) {
                        gridvec, local_buffers, local_buffer_flags,
                        reemission_probability, num_photon_done_since_last,
                        num_empty, num_active_buffers, num_tasks_to_add,
-                       tasks_to_add, queues_to_add, sources);
+                       tasks_to_add, queues_to_add, sources, local_image,
+                       num_photon_to_do);
 
           // add new tasks to their respective queues
           for (unsigned int itask = 0; itask < num_tasks_to_add; ++itask) {
@@ -2387,7 +2364,7 @@ int main(int argc, char **argv) {
                                                        << " (" << num_photon
                                                        << ")",
                                   1);
-              if (num_photon_done == num_photon) {
+              if (num_photon_done == num_photon_to_do.value()) {
                 // make sure the master process also stops
                 global_run_flag = false;
               }
@@ -2397,6 +2374,17 @@ int main(int argc, char **argv) {
         }
 
       } // while (global_run_flag)
+
+#pragma omp critical
+      {
+        for (uint_fast32_t ix = 0; ix < NPIXELX; ++ix) {
+          for (uint_fast32_t iy = 0; iy < NPIXELY; ++iy) {
+            image[ix * NPIXELY + iy] += local_image[ix * NPIXELY + iy];
+          }
+        }
+      }
+
+      delete[] local_image;
 
     } // parallel region
 
@@ -2440,6 +2428,19 @@ int main(int argc, char **argv) {
     output_tasks(iloop, tasks, iteration_start, iteration_end);
     output_queues(iloop, new_queues, general_queue);
     output_memoryspace(iloop, new_buffers);
+
+    std::ofstream ifile("image.dat");
+    for (int ix = 0; ix < NPIXELX; ++ix) {
+      for (int iy = 0; iy < NPIXELY; ++iy) {
+        // normalize
+        image[ix * NPIXELY + iy] /= num_photon;
+        ifile.write(reinterpret_cast< char * >(&image[ix * NPIXELY + iy]),
+                    sizeof(double));
+      }
+    }
+    ifile.close();
+
+    delete[] image;
 
     // clear task buffer
     tasks.clear();

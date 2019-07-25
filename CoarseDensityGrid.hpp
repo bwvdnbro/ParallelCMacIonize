@@ -144,8 +144,9 @@ public:
    * @param ncell Number of cells in each dimension.
    */
   inline CoarseDensityGrid(const double *box, const int *ncell)
-      : _anchor{box[0], box[1], box[2]},
-        _cell_size{box[3] / ncell[0], box[4] / ncell[1], box[5] / ncell[2]},
+      : _anchor{box[0], box[1], box[2]}, _cell_size{box[3] / ncell[0],
+                                                    box[4] / ncell[1],
+                                                    box[5] / ncell[2]},
         _inv_cell_size{ncell[0] / box[3], ncell[1] / box[4], ncell[2] / box[5]},
         _number_of_cells{ncell[0], ncell[1], ncell[2], ncell[1] * ncell[2]} {
 
@@ -247,8 +248,8 @@ public:
     double tau_done = 0.;
     const double tau_target = photon.get_target_optical_depth();
 
-    myassert(tau_done < tau_target, "tau_done: " << tau_done
-                                                 << ", target: " << tau_target);
+    myassert(tau_done < tau_target,
+             "tau_done: " << tau_done << ", target: " << tau_target);
 
     const double cross_section = photon.get_photoionization_cross_section();
     const double photon_weight = photon.get_weight();

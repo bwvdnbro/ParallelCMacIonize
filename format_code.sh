@@ -2,5 +2,5 @@
 
 for f in *.[ch]pp
 do
-  clang-format-3.8 -i $f
+  clang-format-6.0 -i $f
 done

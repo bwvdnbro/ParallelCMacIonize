@@ -401,6 +401,6 @@ inline int get_output_direction(const int mask) {
     return -1;
   }
 }
-}
+} // namespace TravelDirections
 
 #endif // TRAVELDIRECTIONS_HPP

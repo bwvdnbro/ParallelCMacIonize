@@ -33,6 +33,14 @@
 #include <mpi.h>
 #endif
 
+/*! @brief Types of photon packets. */
+enum PhotonPacketType {
+  /*! @brief Direct photon packet. */
+  PHOTONPACKETTYPE_DIRECT,
+  /*! @brief Peel off photon packet. */
+  PHOTONPACKETTYPE_PEELOFF
+};
+
 /**
  * @brief Photon packet.
  */
@@ -53,6 +61,9 @@ private:
 
   /*! @brief Weight of the photon packet. */
   double _weight;
+
+  /*! @brief Type of photon packet. */
+  int_fast32_t _type;
 
 public:
 #ifdef WITH_MPI
@@ -218,6 +229,20 @@ public:
    * @param weight New weight for the photon packet.
    */
   inline void set_weight(const double weight) { _weight = weight; }
+
+  /**
+   * @brief Get the photon packet type.
+   *
+   * @return Photon packet type.
+   */
+  inline int_fast32_t get_type() const { return _type; }
+
+  /**
+   * @brief Set the photon packet type.
+   *
+   * @param type Photon packet type.
+   */
+  inline void set_type(const int_fast32_t type) { _type = type; }
 };
 
 #endif // PHOTON_HPP

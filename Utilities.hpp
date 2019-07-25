@@ -1006,6 +1006,6 @@ std::vector< uint_fast32_t > argsort(const std::vector< _datatype_ > &values) {
   });
   return idx;
 }
-}
+} // namespace Utilities
 
 #endif // UTILITIES_HPP

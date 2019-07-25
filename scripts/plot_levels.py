@@ -27,31 +27,32 @@
 # import modules
 import numpy as np
 import matplotlib
+
 matplotlib.use("Agg")
 import pylab as pl
 from matplotlib.ticker import MaxNLocator
 
 # load the data
-data = np.loadtxt("copy_levels.txt", dtype = np.int32)
+data = np.loadtxt("copy_levels.txt", dtype=np.int32)
 
 # find the minimum and maximum
-minlevel = data[:,1].min()
-maxlevel = data[:,1].max()
+minlevel = data[:, 1].min()
+maxlevel = data[:, 1].max()
 
 # compute the levels and histogram
 levels = np.linspace(minlevel, maxlevel, maxlevel - minlevel + 1)
-hist = np.bincount(data[:,1])
+hist = np.bincount(data[:, 1])
 
 # make the plot
 pl.bar(levels, hist)
 # add text labels
 for i in range(len(levels)):
-  pl.text(levels[i], hist[i], "{0}".format(hist[i]), ha = "center")
+    pl.text(levels[i], hist[i], "{0}".format(hist[i]), ha="center")
 
 # set a logarithmic y axis
 pl.gca().set_yscale("log")
 # force integer x ticks
-pl.gca().xaxis.set_major_locator(MaxNLocator(integer = True))
+pl.gca().xaxis.set_major_locator(MaxNLocator(integer=True))
 
 # set labels
 pl.xlabel("Copy level")

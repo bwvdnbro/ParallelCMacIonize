@@ -34,32 +34,33 @@ import glob
 # @param x Array.
 ##
 def stats(x):
-  meanx = x.mean()
-  stdx = x.std()
-  minx = x.min()
-  maxx = x.max()
+    meanx = x.mean()
+    stdx = x.std()
+    minx = x.min()
+    maxx = x.max()
 
-  print "std:", stdx / meanx
-  print "min:", minx / meanx
-  print "max:", maxx / meanx
+    print("std:", stdx / meanx)
+    print("min:", minx / meanx)
+    print("max:", maxx / meanx)
+
 
 # loop over all task files
 for f in sorted(glob.glob("tasks_??.txt")):
-  print "MPI statistics for", f
+    print("MPI statistics for", f)
 
-  # load the data
-  data = np.loadtxt(f)
+    # load the data
+    data = np.loadtxt(f)
 
-  # filter out send and receive tasks
-  send = data[data[:,4] == 3]
-  recv = data[data[:,4] == 4]
+    # filter out send and receive tasks
+    send = data[data[:, 4] == 3]
+    recv = data[data[:, 4] == 4]
 
-  # convert task data to task durations in CPU cycles
-  send = send[:,3] - send[:,2]
-  recv = recv[:,3] - recv[:,2]
+    # convert task data to task durations in CPU cycles
+    send = send[:, 3] - send[:, 2]
+    recv = recv[:, 3] - recv[:, 2]
 
-  # print statistics
-  print "send:"
-  stats(send)
-  print "recv:"
-  stats(recv)
+    # print statistics
+    print("send:")
+    stats(send)
+    print("recv:")
+    stats(recv)

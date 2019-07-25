@@ -28,6 +28,7 @@
 # import modules
 import numpy as np
 import matplotlib
+
 matplotlib.use("Agg")
 import pylab as pl
 import glob
@@ -37,23 +38,23 @@ files = sorted(glob.glob("mpibuffer_??.txt"))
 # collect the data
 alldata = []
 for file in files:
-  data = np.loadtxt(file)
-  if len(data.shape) > 1:
-    data = np.array(sorted(data, key = lambda line: line[0]))
-  else:
-    data = [data]
-  alldata.append(data)
+    data = np.loadtxt(file)
+    if len(data.shape) > 1:
+        data = np.array(sorted(data, key=lambda line: line[0]))
+    else:
+        data = [data]
+    alldata.append(data)
 
 alldata = np.array(alldata)
 
 # prepare data for plotting
-nproc = int(alldata[:,:,0].max()) + 2
-alldata[:,:,0] = alldata[:,:,0] / nproc
+nproc = int(alldata[:, :, 0].max()) + 2
+alldata[:, :, 0] = alldata[:, :, 0] / nproc
 steps = np.arange(len(files))
 
 # plot the contributions for the different processes
 for i in range(nproc - 1):
-  pl.bar(alldata[:,i,0] + steps, alldata[:,i,1], 1. / nproc)
+    pl.bar(alldata[:, i, 0] + steps, alldata[:, i, 1], 1.0 / nproc)
 
 # plot layout
 pl.xticks([])
