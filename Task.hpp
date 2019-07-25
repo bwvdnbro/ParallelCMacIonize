@@ -67,6 +67,8 @@ enum TaskType {
   TASKTYPE_UPDATE_CONSERVED,
   /*! @brief Do a primitive variable update sweep. */
   TASKTYPE_UPDATE_PRIMITIVES,
+  /*! @brief Relaunch a dust photon packet with forced first scattering. */
+  TASKTYPE_DUST_RELAUNCH,
   /*! @brief Task type counter. */
   TASKTYPE_NUMBER
 };

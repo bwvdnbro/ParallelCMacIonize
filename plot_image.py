@@ -6,6 +6,7 @@ import argparse
 # parse command line arguments
 argparser = argparse.ArgumentParser("Plot the scattering image.")
 argparser.add_argument("-f", "--file", action="store", required=True)
+argparser.add_argument("-r", "--reference", action="store", required=False)
 argparser.add_argument("-d", "--direct_light", action="store_true")
 argparser.add_argument("-x", "--nx", action="store", type=int, default=101)
 argparser.add_argument("-y", "--ny", action="store", type=int, default=101)
@@ -98,6 +99,23 @@ simax.contourf(
 simax.contourf
 
 profax.semilogy(profile_radius, profile_data, ".", label="MC")
+
+if args.reference:
+    data = np.memmap(
+        args.reference, dtype=np.float64, shape=(args.nx, args.ny), mode="r"
+    )
+
+    profile_data = data.reshape(-1)
+    xy = np.array(
+        np.meshgrid(
+            np.linspace(-1.0, 1.0, args.nx), np.linspace(-1.0, 1.0, args.ny)
+        )
+    ).transpose()
+    xy = xy.reshape((-1, 2))
+    profile_radius = np.sqrt(xy[:, 0] ** 2 + xy[:, 1] ** 2)
+
+    profax.semilogy(profile_radius, profile_data, ".", label="MC ref")
+
 profax.semilogy(ra, profile_analytic, "-", label="analytic")
 
 dataax.set_title("MC")

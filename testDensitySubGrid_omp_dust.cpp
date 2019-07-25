@@ -52,6 +52,9 @@
 /*! @brief Number of vertical pixels in the result image. */
 #define NPIXELY 101
 
+/*! @brief Enable forced first scattering. */
+#define FORCED_SCATTERING
+
 /*! @brief Output log level. The higher the value, the more stuff is printed to
  *  the stderr. Comment to disable logging altogether. */
 #define LOG_OUTPUT 1
@@ -586,14 +589,18 @@ inline static void fill_buffer(PhotonBuffer &buffer,
     // we currently assume equal weight for all photons
     photon.set_weight(1.);
 
+#ifdef FORCED_SCATTERING
     // target optical depth (exponential distribution)
+    photon.set_target_optical_depth(0.);
+    photon.set_type(PHOTONPACKETTYPE_TAU);
+#else
     photon.set_target_optical_depth(
         -std::log(random_generator.get_uniform_random_double()));
+    photon.set_type(PHOTONPACKETTYPE_DIRECT);
+#endif
 
     // this is the fixed cross section we use for the moment
     photon.set_photoionization_cross_section(1.);
-
-    photon.set_type(PHOTONPACKETTYPE_DIRECT);
 
     // make sure the photon is moving in *a* direction
     myassert(photon.get_direction()[0] != 0. ||
@@ -683,6 +690,31 @@ inline static void do_photon_traversal(PhotonBuffer &input_buffer,
         const unsigned int iy = 0.5 * (position[1] + 1.) * NPIXELY;
         image[ix * NPIXELY + iy] +=
             photon.get_weight() * std::exp(-photon.get_target_optical_depth());
+      }
+      if (photon.get_type() == PHOTONPACKETTYPE_TAU) {
+        // add the photon packet to the reemission buffer
+        PhotonBuffer &output_buffer = output_buffers[result];
+
+        // add the photon
+        const unsigned int index = output_buffer.get_next_free_photon();
+        output_buffer[index] = photon;
+
+        // make sure we actually added this photon
+        myassert(output_buffer[index].get_position()[0] ==
+                         photon.get_position()[0] &&
+                     output_buffer[index].get_position()[1] ==
+                         photon.get_position()[1] &&
+                     output_buffer[index].get_position()[2] ==
+                         photon.get_position()[2],
+                 "fail");
+        myassert(output_buffer[index].get_direction()[0] != 0. ||
+                     output_buffer[index].get_direction()[1] != 0. ||
+                     output_buffer[index].get_direction()[2] != 0.,
+                 "size: " << output_buffer.size());
+
+        // check that the output buffer did not overflow
+        myassert(output_buffer.size() <= PHOTONBUFFER_SIZE,
+                 "output buffer size: " << output_buffer.size());
       }
     }
   }
@@ -1148,6 +1180,82 @@ inline void execute_source_photon_task(
 }
 
 /**
+ * @brief Execute a relaunch photon task.
+ *
+ * @param task Task to execute.
+ * @param thread_id Thread that will execute the task.
+ * @param num_photon_local Total number of photon packets that needs to be
+ * generated at the source on this process.
+ * @param tasks Task space to create new tasks in.
+ * @param new_queues Task queues for individual threads.
+ * @param new_buffers PhotonBuffer memory space.
+ * @param random_generator Random_generator for the active thread.
+ * @param gridvec List of all subgrids.
+ * @param num_active_buffers Number of active photon buffers on this process.
+ * @param num_tasks_to_add Counter for the number of newly created tasks.
+ * @param tasks_to_add List of tasks to add after this tasks finishes.
+ * @param queues_to_add Queues to add new tasks to.
+ * @param sources Photon sources.
+ */
+inline void execute_relaunch_photon_task(
+    Task &task, const int thread_id, const unsigned int num_photon_local,
+    ThreadSafeVector< Task > &tasks, std::vector< Queue * > &new_queues,
+    MemorySpace &new_buffers, RandomGenerator &random_generator,
+    std::vector< DensitySubGrid * > &gridvec,
+    Atomic< unsigned int > &num_active_buffers, unsigned int &num_tasks_to_add,
+    unsigned int *tasks_to_add, int *queues_to_add,
+    const std::vector< Source * > &sources) {
+
+  // log the start time of the task (if task output is enabled)
+  task.start(thread_id);
+
+  const unsigned int buffer_index = task.get_buffer();
+  unsigned int source_index = 0;
+  const Source &source = *sources[source_index];
+
+  // get a free photon buffer in the central queue
+  PhotonBuffer &input_buffer = new_buffers[buffer_index];
+  const unsigned int this_central_index =
+      source.get_subgrid_index(random_generator);
+
+  double position[3];
+  source.get_position(position);
+
+  // reset the position, weight and target optical depth for all photon packets
+  for (uint_fast32_t i = 0; i < input_buffer.size(); ++i) {
+    const double tau0 = input_buffer[i].get_target_optical_depth();
+    const double weight = (1. - std::exp(-tau0));
+    input_buffer[i].set_position(position[0], position[1], position[2]);
+    input_buffer[i].set_weight(weight);
+    input_buffer[i].set_target_optical_depth(
+        -std::log(1. - random_generator.get_uniform_random_double() * weight));
+    input_buffer[i].set_type(PHOTONPACKETTYPE_DIRECT);
+  }
+  input_buffer.set_subgrid_index(this_central_index);
+  input_buffer.set_direction(TRAVELDIRECTION_INSIDE);
+
+  // add to the queue of the corresponding thread
+  DensitySubGrid &subgrid = *gridvec[this_central_index];
+  const size_t task_index = tasks.get_free_element();
+  Task &new_task = tasks[task_index];
+  new_task.set_type(TASKTYPE_PHOTON_TRAVERSAL);
+  new_task.set_subgrid(this_central_index);
+  new_task.set_buffer(buffer_index);
+
+  // add dependency for task:
+  //  - subgrid
+  // (the output buffers belong to the subgrid and do not count as a dependency)
+  new_task.set_dependency(subgrid.get_dependency());
+
+  queues_to_add[num_tasks_to_add] = subgrid.get_owning_thread();
+  tasks_to_add[num_tasks_to_add] = task_index;
+  ++num_tasks_to_add;
+
+  // log the end time of the task
+  task.stop();
+}
+
+/**
  * @brief Execute a photon packet traversal task.
  *
  * @param task Task to execute.
@@ -1206,6 +1314,7 @@ inline void execute_photon_traversal_task(
       local_buffers[i].reset();
     } else {
       local_buffer_flags[i] = false;
+      local_buffers[i].reset();
     }
   }
 
@@ -1221,13 +1330,13 @@ inline void execute_photon_traversal_task(
   do_photon_traversal(buffer, this_grid, local_buffers, local_buffer_flags,
                       image);
 
-  // add none empty buffers to the appropriate queues
+  // add non-empty buffers to the appropriate queues
   unsigned char largest_index = TRAVELDIRECTION_NUMBER;
   unsigned int largest_size = 0;
   for (int i = 0; i < TRAVELDIRECTION_NUMBER; ++i) {
 
     // only process enabled, non-empty output buffers
-    if (local_buffer_flags[i] && local_buffers[i].size() > 0) {
+    if (local_buffers[i].size() > 0) {
 
 #ifdef EDGECOST_STATS
       // photons leave the subgrid through an edge: log the communication cost
@@ -1282,7 +1391,7 @@ inline void execute_photon_traversal_task(
         // internal buffer were absorbed and could be reemitted,
         // photon packets in the other buffers left the subgrid and
         // need to be traversed in the neighbouring subgrid
-        if (i > 0) {
+        if (i > 0 && local_buffer_flags[i]) {
           DensitySubGrid &subgrid =
               *gridvec[new_buffers[new_index].get_subgrid_index()];
           const size_t task_index = tasks.get_free_element();
@@ -1305,7 +1414,11 @@ inline void execute_photon_traversal_task(
           Task &new_task = tasks[task_index];
           new_task.set_subgrid(new_buffers[new_index].get_subgrid_index());
           new_task.set_buffer(new_index);
-          new_task.set_type(TASKTYPE_PHOTON_REEMIT);
+          if (i > 0) {
+            new_task.set_type(TASKTYPE_DUST_RELAUNCH);
+          } else {
+            new_task.set_type(TASKTYPE_PHOTON_REEMIT);
+          }
           // a reemit task has no direct dependencies
           // add the task to the general queue
           queues_to_add[num_tasks_to_add] = -1;
@@ -1322,17 +1435,15 @@ inline void execute_photon_traversal_task(
       } // if (add_index != new_index)
 
     } // if (local_buffer_flags[i] &&
-    //     local_buffers[i]._actual_size > 0)
+      //     local_buffers[i]._actual_size > 0)
 
     // we have to do this outside the other condition, as buffers to which
     // nothing was added can still be non-empty...
-    if (local_buffer_flags[i]) {
-      unsigned int new_index = this_grid.get_active_buffer(i);
-      if (new_index != NEIGHBOUR_OUTSIDE &&
-          new_buffers[new_index].size() > largest_size) {
-        largest_index = i;
-        largest_size = new_buffers[new_index].size();
-      }
+    const unsigned int new_index = this_grid.get_active_buffer(i);
+    if (new_index != NEIGHBOUR_OUTSIDE &&
+        new_buffers[new_index].size() > largest_size) {
+      largest_index = i;
+      largest_size = new_buffers[new_index].size();
     }
 
   } // for (int i = TRAVELDIRECTION_NUMBER - 1; i >= 0; --i)
@@ -1539,6 +1650,15 @@ inline void execute_task(
         tasks_to_add, queues_to_add, num_active_buffers, num_photon_to_do);
     break;
 
+  case TASKTYPE_DUST_RELAUNCH:
+
+    execute_relaunch_photon_task(task, thread_id, num_photon_local, tasks,
+                                 new_queues, new_buffers, random_generator,
+                                 gridvec, num_active_buffers, num_tasks_to_add,
+                                 tasks_to_add, queues_to_add, sources);
+
+    break;
+
   default:
 
     // should never happen
@@ -1610,7 +1730,8 @@ inline void activate_buffer(unsigned int &current_index, const int thread_id,
           Task &new_task = tasks[task_index];
           new_task.set_subgrid(new_buffers[non_full_index].get_subgrid_index());
           new_task.set_buffer(non_full_index);
-          if (largest_index > 0) {
+          if (largest_index > 0 && gridvec[igrid]->get_neighbour(
+                                       largest_index) != NEIGHBOUR_OUTSIDE) {
             DensitySubGrid &subgrid =
                 *gridvec[new_buffers[non_full_index].get_subgrid_index()];
             new_task.set_type(TASKTYPE_PHOTON_TRAVERSAL);
@@ -1623,7 +1744,11 @@ inline void activate_buffer(unsigned int &current_index, const int thread_id,
                     ->get_owning_thread();
             new_queues[queue_index]->add_task(task_index);
           } else {
-            new_task.set_type(TASKTYPE_PHOTON_REEMIT);
+            if (largest_index > 0) {
+              new_task.set_type(TASKTYPE_DUST_RELAUNCH);
+            } else {
+              new_task.set_type(TASKTYPE_PHOTON_REEMIT);
+            }
             // a reemit task has no dependencies
             general_queue.add_task(task_index);
           }

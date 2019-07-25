@@ -53,7 +53,7 @@
 
 /*! @brief Enable this to disable all run time assertions and output that could
  *  slow down the algorithm. */
-#define MEANING_OF_HASTE
+//#define MEANING_OF_HASTE
 
 /*! @brief Output. Select at least one of the below. */
 //#define MM_FILE

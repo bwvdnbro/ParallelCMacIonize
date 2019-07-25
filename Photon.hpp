@@ -36,7 +36,9 @@
 /*! @brief Types of photon packets. */
 enum PhotonPacketType {
   /*! @brief Direct photon packet. */
-  PHOTONPACKETTYPE_DIRECT,
+  PHOTONPACKETTYPE_DIRECT = 0,
+  /*! @brief Optical depth calculation photon packet. */
+  PHOTONPACKETTYPE_TAU,
   /*! @brief Peel off photon packet. */
   PHOTONPACKETTYPE_PEELOFF
 };
