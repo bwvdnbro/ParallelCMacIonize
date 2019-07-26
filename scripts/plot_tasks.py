@@ -70,8 +70,9 @@ task_names = [
     "fluxsweep boundary",
     "update conserved",
     "update primitives",
+    "relaunch dust photon",
 ]
-task_colors = pl.cm.ScalarMappable(cmap="gist_ncar").to_rgba(
+task_colors = pl.cm.ScalarMappable(cmap="tab20").to_rgba(
     np.linspace(0.0, 1.0, len(task_names))
 )
 

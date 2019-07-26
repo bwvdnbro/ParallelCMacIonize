@@ -59,7 +59,7 @@
 #define NPIXELY 101
 
 /*! @brief Forced first scattering. */
-//#define FORCED_SCATTERING
+#define FORCED_SCATTERING
 
 /**
  * @brief Write a message to the log with the given log level.
@@ -240,7 +240,7 @@ int main(int argc, char **argv) {
   const double box[6] = {-1., -1., -1., 2., 2., 2.};
   const int ncell[3] = {128, 128, 128};
   DensitySubGrid grid(box, ncell);
-  const unsigned int num_photon = 1e8;
+  const unsigned int num_photon = 1e7;
 
   for (int icell = 0; icell < ncell[0] * ncell[1] * ncell[2]; ++icell) {
     double cell_midpoint[3];
