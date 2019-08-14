@@ -83,7 +83,7 @@ inline void output_tasks(const unsigned int iloop,
                          ThreadSafeVector< Task > &tasks,
                          const unsigned long iteration_start,
                          const unsigned long iteration_end) {
-  return;
+//  return;
 #ifdef TASK_PLOT
   {
     // compose the file name
@@ -208,7 +208,8 @@ inline void output_result(const std::vector< DensitySubGrid * > &gridvec,
  */
 inline void make_hydro_tasks(ThreadSafeVector< Task > &tasks,
                              const unsigned int igrid,
-                             std::vector< DensitySubGrid * > &gridvec) {
+                             std::vector< DensitySubGrid * > &gridvec,
+                             unsigned int counters[TASKTYPE_NUMBER]) {
 
   DensitySubGrid &this_grid = *gridvec[igrid];
   const unsigned int ngbx = this_grid.get_neighbour(TRAVELDIRECTION_FACE_X_P);
@@ -222,6 +223,7 @@ inline void make_hydro_tasks(ThreadSafeVector< Task > &tasks,
     const size_t next_task = tasks.get_free_element();
     Task &task = tasks[next_task];
     task.set_type(TASKTYPE_GRADIENTSWEEP_INTERNAL);
+    ++counters[TASKTYPE_GRADIENTSWEEP_INTERNAL];
     task.set_dependency(this_grid.get_dependency());
     task.set_subgrid(igrid);
     this_grid.set_hydro_task(0, next_task);
@@ -233,6 +235,7 @@ inline void make_hydro_tasks(ThreadSafeVector< Task > &tasks,
     const size_t next_task = tasks.get_free_element();
     Task &task = tasks[next_task];
     task.set_type(TASKTYPE_GRADIENTSWEEP_EXTERNAL_BOUNDARY);
+    ++counters[TASKTYPE_GRADIENTSWEEP_EXTERNAL_BOUNDARY];
     task.set_dependency(this_grid.get_dependency());
     task.set_subgrid(igrid);
     task.set_interaction_direction(TRAVELDIRECTION_FACE_X_P);
@@ -241,6 +244,7 @@ inline void make_hydro_tasks(ThreadSafeVector< Task > &tasks,
     const size_t next_task = tasks.get_free_element();
     Task &task = tasks[next_task];
     task.set_type(TASKTYPE_GRADIENTSWEEP_EXTERNAL_NEIGHBOUR);
+    ++counters[TASKTYPE_GRADIENTSWEEP_EXTERNAL_NEIGHBOUR];
     // avoid dining philosophers by sorting the dependencies on subgrid index
     if (igrid < ngbx) {
       task.set_dependency(this_grid.get_dependency());
@@ -259,6 +263,7 @@ inline void make_hydro_tasks(ThreadSafeVector< Task > &tasks,
     const size_t next_task = tasks.get_free_element();
     Task &task = tasks[next_task];
     task.set_type(TASKTYPE_GRADIENTSWEEP_EXTERNAL_BOUNDARY);
+    ++counters[TASKTYPE_GRADIENTSWEEP_EXTERNAL_BOUNDARY];
     task.set_dependency(this_grid.get_dependency());
     task.set_subgrid(igrid);
     task.set_interaction_direction(TRAVELDIRECTION_FACE_X_N);
@@ -271,6 +276,7 @@ inline void make_hydro_tasks(ThreadSafeVector< Task > &tasks,
     const size_t next_task = tasks.get_free_element();
     Task &task = tasks[next_task];
     task.set_type(TASKTYPE_GRADIENTSWEEP_EXTERNAL_BOUNDARY);
+    ++counters[TASKTYPE_GRADIENTSWEEP_EXTERNAL_BOUNDARY];
     task.set_dependency(this_grid.get_dependency());
     task.set_subgrid(igrid);
     task.set_interaction_direction(TRAVELDIRECTION_FACE_Y_P);
@@ -279,6 +285,7 @@ inline void make_hydro_tasks(ThreadSafeVector< Task > &tasks,
     const size_t next_task = tasks.get_free_element();
     Task &task = tasks[next_task];
     task.set_type(TASKTYPE_GRADIENTSWEEP_EXTERNAL_NEIGHBOUR);
+    ++counters[TASKTYPE_GRADIENTSWEEP_EXTERNAL_NEIGHBOUR];
     if (igrid < ngby) {
       task.set_dependency(this_grid.get_dependency());
       task.set_extra_dependency(gridvec[ngby]->get_dependency());
@@ -295,6 +302,7 @@ inline void make_hydro_tasks(ThreadSafeVector< Task > &tasks,
     const size_t next_task = tasks.get_free_element();
     Task &task = tasks[next_task];
     task.set_type(TASKTYPE_GRADIENTSWEEP_EXTERNAL_BOUNDARY);
+    ++counters[TASKTYPE_GRADIENTSWEEP_EXTERNAL_BOUNDARY];
     task.set_dependency(this_grid.get_dependency());
     task.set_subgrid(igrid);
     task.set_interaction_direction(TRAVELDIRECTION_FACE_Y_N);
@@ -307,6 +315,7 @@ inline void make_hydro_tasks(ThreadSafeVector< Task > &tasks,
     const size_t next_task = tasks.get_free_element();
     Task &task = tasks[next_task];
     task.set_type(TASKTYPE_GRADIENTSWEEP_EXTERNAL_BOUNDARY);
+    ++counters[TASKTYPE_GRADIENTSWEEP_EXTERNAL_BOUNDARY];
     task.set_dependency(this_grid.get_dependency());
     task.set_subgrid(igrid);
     task.set_interaction_direction(TRAVELDIRECTION_FACE_Z_P);
@@ -315,6 +324,7 @@ inline void make_hydro_tasks(ThreadSafeVector< Task > &tasks,
     const size_t next_task = tasks.get_free_element();
     Task &task = tasks[next_task];
     task.set_type(TASKTYPE_GRADIENTSWEEP_EXTERNAL_NEIGHBOUR);
+    ++counters[TASKTYPE_GRADIENTSWEEP_EXTERNAL_NEIGHBOUR];
     if (igrid < ngbz) {
       task.set_dependency(this_grid.get_dependency());
       task.set_extra_dependency(gridvec[ngbz]->get_dependency());
@@ -331,6 +341,7 @@ inline void make_hydro_tasks(ThreadSafeVector< Task > &tasks,
     const size_t next_task = tasks.get_free_element();
     Task &task = tasks[next_task];
     task.set_type(TASKTYPE_GRADIENTSWEEP_EXTERNAL_BOUNDARY);
+    ++counters[TASKTYPE_GRADIENTSWEEP_EXTERNAL_BOUNDARY];
     task.set_dependency(this_grid.get_dependency());
     task.set_subgrid(igrid);
     task.set_interaction_direction(TRAVELDIRECTION_FACE_Z_N);
@@ -343,6 +354,7 @@ inline void make_hydro_tasks(ThreadSafeVector< Task > &tasks,
     const size_t next_task = tasks.get_free_element();
     Task &task = tasks[next_task];
     task.set_type(TASKTYPE_SLOPE_LIMITER);
+    ++counters[TASKTYPE_SLOPE_LIMITER];
     task.set_dependency(this_grid.get_dependency());
     task.set_subgrid(igrid);
     this_grid.set_hydro_task(7, next_task);
@@ -352,6 +364,7 @@ inline void make_hydro_tasks(ThreadSafeVector< Task > &tasks,
     const size_t next_task = tasks.get_free_element();
     Task &task = tasks[next_task];
     task.set_type(TASKTYPE_PREDICT_PRIMITIVES);
+    ++counters[TASKTYPE_PREDICT_PRIMITIVES];
     task.set_dependency(this_grid.get_dependency());
     task.set_subgrid(igrid);
     this_grid.set_hydro_task(8, next_task);
@@ -364,6 +377,7 @@ inline void make_hydro_tasks(ThreadSafeVector< Task > &tasks,
     const size_t next_task = tasks.get_free_element();
     Task &task = tasks[next_task];
     task.set_type(TASKTYPE_FLUXSWEEP_INTERNAL);
+    ++counters[TASKTYPE_FLUXSWEEP_INTERNAL];
     task.set_dependency(this_grid.get_dependency());
     task.set_subgrid(igrid);
     this_grid.set_hydro_task(9, next_task);
@@ -375,6 +389,7 @@ inline void make_hydro_tasks(ThreadSafeVector< Task > &tasks,
     const size_t next_task = tasks.get_free_element();
     Task &task = tasks[next_task];
     task.set_type(TASKTYPE_FLUXSWEEP_EXTERNAL_BOUNDARY);
+    ++counters[TASKTYPE_FLUXSWEEP_EXTERNAL_BOUNDARY];
     task.set_dependency(this_grid.get_dependency());
     task.set_subgrid(igrid);
     task.set_interaction_direction(TRAVELDIRECTION_FACE_X_P);
@@ -383,6 +398,7 @@ inline void make_hydro_tasks(ThreadSafeVector< Task > &tasks,
     const size_t next_task = tasks.get_free_element();
     Task &task = tasks[next_task];
     task.set_type(TASKTYPE_FLUXSWEEP_EXTERNAL_NEIGHBOUR);
+    ++counters[TASKTYPE_FLUXSWEEP_EXTERNAL_NEIGHBOUR];
     if (igrid < ngbx) {
       task.set_dependency(this_grid.get_dependency());
       task.set_extra_dependency(gridvec[ngbx]->get_dependency());
@@ -401,6 +417,7 @@ inline void make_hydro_tasks(ThreadSafeVector< Task > &tasks,
     const size_t next_task = tasks.get_free_element();
     Task &task = tasks[next_task];
     task.set_type(TASKTYPE_FLUXSWEEP_EXTERNAL_BOUNDARY);
+    ++counters[TASKTYPE_FLUXSWEEP_EXTERNAL_BOUNDARY];
     task.set_dependency(this_grid.get_dependency());
     task.set_subgrid(igrid);
     task.set_interaction_direction(TRAVELDIRECTION_FACE_X_N);
@@ -413,6 +430,7 @@ inline void make_hydro_tasks(ThreadSafeVector< Task > &tasks,
     const size_t next_task = tasks.get_free_element();
     Task &task = tasks[next_task];
     task.set_type(TASKTYPE_FLUXSWEEP_EXTERNAL_BOUNDARY);
+    ++counters[TASKTYPE_FLUXSWEEP_EXTERNAL_BOUNDARY];
     task.set_dependency(this_grid.get_dependency());
     task.set_subgrid(igrid);
     task.set_interaction_direction(TRAVELDIRECTION_FACE_Y_P);
@@ -421,6 +439,7 @@ inline void make_hydro_tasks(ThreadSafeVector< Task > &tasks,
     const size_t next_task = tasks.get_free_element();
     Task &task = tasks[next_task];
     task.set_type(TASKTYPE_FLUXSWEEP_EXTERNAL_NEIGHBOUR);
+    ++counters[TASKTYPE_FLUXSWEEP_EXTERNAL_NEIGHBOUR];
     if (igrid < ngby) {
       task.set_dependency(this_grid.get_dependency());
       task.set_extra_dependency(gridvec[ngby]->get_dependency());
@@ -437,6 +456,7 @@ inline void make_hydro_tasks(ThreadSafeVector< Task > &tasks,
     const size_t next_task = tasks.get_free_element();
     Task &task = tasks[next_task];
     task.set_type(TASKTYPE_FLUXSWEEP_EXTERNAL_BOUNDARY);
+    ++counters[TASKTYPE_FLUXSWEEP_EXTERNAL_BOUNDARY];
     task.set_dependency(this_grid.get_dependency());
     task.set_subgrid(igrid);
     task.set_interaction_direction(TRAVELDIRECTION_FACE_Y_N);
@@ -449,6 +469,7 @@ inline void make_hydro_tasks(ThreadSafeVector< Task > &tasks,
     const size_t next_task = tasks.get_free_element();
     Task &task = tasks[next_task];
     task.set_type(TASKTYPE_FLUXSWEEP_EXTERNAL_BOUNDARY);
+    ++counters[TASKTYPE_FLUXSWEEP_EXTERNAL_BOUNDARY];
     task.set_dependency(this_grid.get_dependency());
     task.set_subgrid(igrid);
     task.set_interaction_direction(TRAVELDIRECTION_FACE_Z_P);
@@ -457,6 +478,7 @@ inline void make_hydro_tasks(ThreadSafeVector< Task > &tasks,
     const size_t next_task = tasks.get_free_element();
     Task &task = tasks[next_task];
     task.set_type(TASKTYPE_FLUXSWEEP_EXTERNAL_NEIGHBOUR);
+    ++counters[TASKTYPE_FLUXSWEEP_EXTERNAL_NEIGHBOUR];
     if (igrid < ngbz) {
       task.set_dependency(this_grid.get_dependency());
       task.set_extra_dependency(gridvec[ngbz]->get_dependency());
@@ -473,6 +495,7 @@ inline void make_hydro_tasks(ThreadSafeVector< Task > &tasks,
     const size_t next_task = tasks.get_free_element();
     Task &task = tasks[next_task];
     task.set_type(TASKTYPE_FLUXSWEEP_EXTERNAL_BOUNDARY);
+    ++counters[TASKTYPE_FLUXSWEEP_EXTERNAL_BOUNDARY];
     task.set_dependency(this_grid.get_dependency());
     task.set_subgrid(igrid);
     task.set_interaction_direction(TRAVELDIRECTION_FACE_Z_N);
@@ -485,6 +508,7 @@ inline void make_hydro_tasks(ThreadSafeVector< Task > &tasks,
     const size_t next_task = tasks.get_free_element();
     Task &task = tasks[next_task];
     task.set_type(TASKTYPE_UPDATE_CONSERVED);
+    ++counters[TASKTYPE_UPDATE_CONSERVED];
     task.set_dependency(this_grid.get_dependency());
     task.set_subgrid(igrid);
     this_grid.set_hydro_task(16, next_task);
@@ -494,6 +518,7 @@ inline void make_hydro_tasks(ThreadSafeVector< Task > &tasks,
     const size_t next_task = tasks.get_free_element();
     Task &task = tasks[next_task];
     task.set_type(TASKTYPE_UPDATE_PRIMITIVES);
+    ++counters[TASKTYPE_UPDATE_PRIMITIVES];
     task.set_dependency(this_grid.get_dependency());
     task.set_subgrid(igrid);
     this_grid.set_hydro_task(17, next_task);
@@ -795,12 +820,14 @@ inline void set_number_of_threads(int num_threads_request, int &num_threads) {
  * @param new_queues Thread queues.
  * @param tasks Task space.
  * @param gridvec Grid.
+ * @param type Accepted task type.
  * @return Index of an available task, or NO_TASK if no tasks are available.
  */
 inline unsigned int steal_task(const int thread_id, const int num_threads,
                                std::vector< Queue * > &new_queues,
                                ThreadSafeVector< Task > &tasks,
-                               std::vector< DensitySubGrid * > &gridvec) {
+                               std::vector< DensitySubGrid * > &gridvec,
+                               int type) {
 
   // sort the queues by size
   std::vector< unsigned int > queue_sizes(new_queues.size(), 0);
@@ -815,7 +842,8 @@ inline unsigned int steal_task(const int thread_id, const int num_threads,
   while (current_index == NO_TASK && i < queue_sizes.size() &&
          queue_sizes[sorti[queue_sizes.size() - i - 1]] > 0) {
     current_index =
-        new_queues[sorti[queue_sizes.size() - i - 1]]->try_get_task(tasks);
+        new_queues[sorti[queue_sizes.size() - i - 1]]->try_get_task_filter(
+            tasks, type);
     ++i;
   }
   if (current_index != NO_TASK) {
@@ -1218,9 +1246,13 @@ int main(int argc, char **argv) {
 
   ThreadSafeVector< Task > tasks(18 * tot_num_subgrid);
 
+  unsigned int counters[TASKTYPE_NUMBER];
+  for (int i = 0; i < TASKTYPE_NUMBER; ++i) {
+    counters[i] = 0;
+  }
   for (unsigned int igrid = 0; igrid < tot_num_subgrid; ++igrid) {
     gridvec[igrid]->initialize_conserved_variables(hydro);
-    make_hydro_tasks(tasks, igrid, gridvec);
+    make_hydro_tasks(tasks, igrid, gridvec, counters);
   }
   // all hydro tasks have been made, link the dependencies
   for (unsigned int igrid = 0; igrid < tot_num_subgrid; ++igrid) {
@@ -1255,14 +1287,17 @@ int main(int argc, char **argv) {
 
     unsigned long iteration_start, iteration_end;
     cpucycle_tick(iteration_start);
+    int task_type = TASKTYPE_GRADIENTSWEEP_INTERNAL;
+    Atomic< unsigned int > task_type_counter(0);
 #pragma omp parallel default(shared)
     {
       const int thread_id = omp_get_thread_num();
       while (number_of_tasks.value() > 0) {
-        size_t current_task = hydro_queue[thread_id]->get_task(tasks);
+        size_t current_task =
+            hydro_queue[thread_id]->get_task_filter(tasks, task_type);
         if (current_task == NO_TASK) {
-          current_task =
-              steal_task(thread_id, num_threads, hydro_queue, tasks, gridvec);
+          current_task = steal_task(thread_id, num_threads, hydro_queue, tasks,
+                                    gridvec, task_type);
         }
         if (current_task != NO_TASK) {
           tasks[current_task].start(thread_id);
@@ -1283,6 +1318,12 @@ int main(int argc, char **argv) {
             }
           }
           number_of_tasks.pre_decrement();
+          unsigned int new_task_type_count = task_type_counter.pre_increment();
+          if (new_task_type_count == counters[task_type]) {
+            task_type_counter.set(0);
+            ++task_type;
+            cmac_warning("task type: %i", task_type);
+          }
         }
       }
 

@@ -159,6 +159,56 @@ public:
   }
 
   /**
+   * @brief Get a task from the queue satisfying an additional filter criterion.
+   *
+   * This version locks the queue.
+   *
+   * @param tasks Task space.
+   * @param type Allowed task type.
+   * @return Task, or NO_TASK if no task is available.
+   */
+  inline size_t get_task_filter(ThreadSafeVector< Task > &tasks, int type) {
+
+    // initialize an empty task
+    size_t task = NO_TASK;
+
+    _queue_lock.lock();
+
+    // now try to find a task whose dependency can be locked
+    size_t index = _current_queue_size;
+    bool flag = true;
+    while (index > 0 && flag) {
+      while (index > 0 && tasks[_queue[index - 1]].get_type() != type) {
+        --index;
+      }
+      if (index > 0) {
+        if (tasks[_queue[index - 1]].lock_dependency()) {
+          flag = false;
+        } else {
+          --index;
+        }
+      }
+    }
+    if (index > 0) {
+      // we found a task and locked it
+      --index;
+      --_current_queue_size;
+      task = _queue[index];
+
+      // shuffle all tasks to close the gap created by removing the task
+      for (; index < _current_queue_size; ++index) {
+        _queue[index] = _queue[index + 1];
+      }
+    }
+
+    // we're done: unlock the queue
+    _queue_lock.unlock();
+
+    // return the task
+    return task;
+  }
+
+  /**
    * @brief Try to get a task from the queue.
    *
    * This version tries to lock the queue and bails out if another thread is
@@ -179,6 +229,59 @@ public:
       size_t index = _current_queue_size;
       while (index > 0 && !tasks[_queue[index - 1]].lock_dependency()) {
         --index;
+      }
+      if (index > 0) {
+        // we found a task and locked it
+        --index;
+        --_current_queue_size;
+        task = _queue[index];
+
+        // shuffle all tasks to close the gap created by removing the task
+        for (; index < _current_queue_size; ++index) {
+          _queue[index] = _queue[index + 1];
+        }
+      }
+
+      // we're done: unlock the queue
+      _queue_lock.unlock();
+    }
+
+    // return the task
+    return task;
+  }
+
+  /**
+   * @brief Try to get a task from the queue of the given type.
+   *
+   * This version tries to lock the queue and bails out if another thread is
+   * accessing it.
+   *
+   * @param tasks Task space.
+   * @param type Accepted type.
+   * @return Task, or NO_TASK if no task is available.
+   */
+  inline size_t try_get_task_filter(ThreadSafeVector< Task > &tasks, int type) {
+
+    // initialize an empty task
+    size_t task = NO_TASK;
+
+    // lock the queue while we are getting a task
+    if (_queue_lock.try_lock()) {
+
+      // now try to find a task whose dependency can be locked
+      size_t index = _current_queue_size;
+      bool flag = true;
+      while (index > 0 && flag) {
+        while (index > 0 && tasks[_queue[index - 1]].get_type() != type) {
+          --index;
+        }
+        if (index > 0) {
+          if (tasks[_queue[index - 1]].lock_dependency()) {
+            flag = false;
+          } else {
+            --index;
+          }
+        }
       }
       if (index > 0) {
         // we found a task and locked it
